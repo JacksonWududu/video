@@ -1,0 +1,177 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.paper-collage.dev/state-sheet.schema.json",
+  "title": "Registered State Sheet Processing Contract",
+  "type": "object",
+  "required": ["schemaVersion", "projectSlug", "sceneId", "nodeId", "poseFamilyId", "sourceAssetId", "input", "outputDirectory", "registration", "identityReference", "anchorPolicy", "layout", "states", "keying"],
+  "properties": {
+    "$schema": {"type": "string"},
+    "schemaVersion": {"const": 1},
+    "projectSlug": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+    "sceneId": {"type": "string", "minLength": 1},
+    "nodeId": {"type": "string", "minLength": 1},
+    "poseFamilyId": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+    "sourceAssetId": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+    "input": {"type": "string", "minLength": 1},
+    "outputDirectory": {"type": "string", "minLength": 1},
+    "registration": {
+      "type": "object",
+      "required": ["id", "sourceMasterAssetId"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "sourceMasterAssetId": {"type": "string", "minLength": 1}
+      },
+      "additionalProperties": false
+    },
+    "identityReference": {
+      "type": "object",
+      "required": ["assetId"],
+      "properties": {
+        "assetId": {"type": "string", "minLength": 1}
+      },
+      "additionalProperties": false
+    },
+    "anchorPolicy": {"$ref": "#/$defs/anchorPolicy"},
+    "layout": {
+      "type": "object",
+      "required": ["columns", "rows"],
+      "properties": {
+        "columns": {"type": "integer", "minimum": 1},
+        "rows": {"type": "integer", "minimum": 1}
+      },
+      "additionalProperties": false
+    },
+    "states": {
+      "type": "array",
+      "minItems": 2,
+      "items": {
+        "type": "object",
+        "required": ["id", "row", "column", "facing", "anchors"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+          "row": {"type": "integer", "minimum": 0},
+          "column": {"type": "integer", "minimum": 0}
+          ,
+          "facing": {"enum": ["left", "right", "front", "back", "neutral"]},
+          "orientationTransform": {
+            "type": "object",
+            "required": ["kind", "outputFacing"],
+            "properties": {
+              "kind": {"const": "horizontal-mirror"},
+              "outputFacing": {"enum": ["left", "right"]}
+            },
+            "additionalProperties": false
+          },
+          "anchors": {
+            "type": "array",
+            "minItems": 1,
+            "items": {"$ref": "#/$defs/stateAnchor"}
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "keying": {
+      "type": "object",
+      "required": [
+        "keyColor",
+        "transparentThreshold",
+        "opaqueThreshold",
+        "edgeFeather",
+        "matteErode",
+        "edgePadding"
+      ],
+      "properties": {
+        "keyColor": {"type": "string", "minLength": 1},
+        "transparentThreshold": {"type": "number", "minimum": 0, "maximum": 441.7},
+        "opaqueThreshold": {"type": "number", "exclusiveMinimum": 0, "maximum": 441.7},
+        "edgeFeather": {"type": "number", "minimum": 0, "maximum": 8},
+        "matteErode": {"type": "integer", "minimum": 0, "maximum": 8},
+        "edgePadding": {"type": "integer", "minimum": 0, "maximum": 32}
+      },
+      "additionalProperties": false
+    },
+    "extraction": {
+      "type": "object",
+      "required": ["mode", "canvas", "cells"],
+      "properties": {
+        "mode": {"const": "explicit-source-rects"},
+        "canvas": {"$ref": "#/$defs/canvas"},
+        "cells": {
+          "type": "array",
+          "minItems": 2,
+          "items": {
+            "type": "object",
+            "required": ["stateId", "sourceRect", "placement"],
+            "properties": {
+              "stateId": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+              "sourceRect": {"$ref": "#/$defs/rect"},
+              "placement": {
+                "type": "object",
+                "required": ["left", "top"],
+                "properties": {
+                  "left": {"type": "integer", "minimum": 0},
+                  "top": {"type": "integer", "minimum": 0}
+                },
+                "additionalProperties": false
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "stateAnchor": {
+      "type": "object",
+      "required": ["id", "x", "y"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "x": {"type": "number", "minimum": 0, "maximum": 1},
+        "y": {"type": "number", "minimum": 0, "maximum": 1}
+      },
+      "additionalProperties": false
+    },
+    "anchorPolicy": {
+      "type": "object",
+      "required": ["requiredAnchorIds", "maximumDrift"],
+      "properties": {
+        "requiredAnchorIds": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "maximumDrift": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 0.1
+        }
+      },
+      "additionalProperties": false
+    },
+    "canvas": {
+      "type": "object",
+      "required": ["width", "height"],
+      "properties": {
+        "width": {"type": "integer", "minimum": 2},
+        "height": {"type": "integer", "minimum": 2}
+      },
+      "additionalProperties": false
+    },
+    "rect": {
+      "type": "object",
+      "required": ["left", "top", "width", "height"],
+      "properties": {
+        "left": {"type": "integer", "minimum": 0},
+        "top": {"type": "integer", "minimum": 0},
+        "width": {"type": "integer", "minimum": 2},
+        "height": {"type": "integer", "minimum": 2}
+      },
+      "additionalProperties": false
+    }
+  }
+}

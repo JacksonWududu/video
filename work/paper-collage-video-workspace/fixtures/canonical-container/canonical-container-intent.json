@@ -1,0 +1,76 @@
+{
+  "groupId": "vessel-rig",
+  "familyId": "vessel-family",
+  "sourcePackageId": "vessel-source-package",
+  "sourceStrategy": "canonical-frame-with-content-sheet",
+  "registrationId": "vessel-registration",
+  "sourceMasterAssetId": "vessel-master",
+  "canvas": {
+    "width": 200,
+    "height": 120
+  },
+  "cleanPlateAssetId": "vessel-clean-plate",
+  "canonicalFrameAssetId": "vessel-canonical-frame",
+  "contentSheetAssetId": "vessel-content-sheet",
+  "interiorMaskAssetId": "vessel-interior-mask",
+  "authoritativeSurfaceId": "vessel-water",
+  "sheetLayout": {
+    "columns": 3,
+    "rows": 1
+  },
+  "interiorShape": {
+    "kind": "polygon",
+    "points": [
+      [0.2, 0.1],
+      [0.8, 0.1],
+      [0.8, 0.9],
+      [0.2, 0.9]
+    ]
+  },
+  "alignmentPolicy": {
+    "mode": "center-bottom",
+    "maximumTranslationX": 0.1,
+    "maximumTranslationY": 0.1,
+    "maximumCenterDrift": 0.02,
+    "maximumBottomGap": 0.02,
+    "maximumFillLevelDeviation": 0.04,
+    "minimumInteriorRetention": 0.95
+  },
+  "states": [
+    {
+      "id": "low",
+      "row": 0,
+      "column": 0,
+      "at": 0,
+      "fillLevel": 0.3
+    },
+    {
+      "id": "middle",
+      "row": 0,
+      "column": 1,
+      "at": 0.5,
+      "fillLevel": 0.6
+    },
+    {
+      "id": "high",
+      "row": 0,
+      "column": 2,
+      "at": 1,
+      "fillLevel": 0.9
+    }
+  ],
+  "terminalStateId": "high",
+  "terminalPolicy": {
+    "minimumFillLevel": 0.88,
+    "maximumRimGap": 0.12,
+    "minimumBottomBandCoverage": 0.75,
+    "bottomBandHeight": 0.1
+  },
+  "recoveryPolicy": {
+    "strategy": "preserve-content-sheet-context",
+    "localDeterministicFixFirst": true,
+    "isolatedStateGeneration": "forbidden",
+    "providerRepair": "masked-complete-sheet-edit",
+    "fallback": "full-content-sheet-regeneration"
+  }
+}

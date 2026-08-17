@@ -1,0 +1,210 @@
+{
+  "$schema": "../../schemas/project.schema.json",
+  "schemaVersion": 12,
+  "slug": "starter-demo",
+  "title": "Paper Collage Workspace",
+  "intake": {
+    "schemaVersion": 2,
+    "status": "pending",
+    "aspectRatio": null,
+    "visualStylePreset": null,
+    "parallaxPreference": null,
+    "styleCatalogVersion": null,
+    "styleCatalogFingerprint": null,
+    "styleProfileFingerprint": null,
+    "confirmedAt": null,
+    "note": "Bundled deterministic fixture.",
+    "updatedAt": "2026-01-01T00:00:00.000Z"
+  },
+  "styleProfile": null,
+  "motionContract": null,
+  "plan": {
+    "schemaVersion": 4,
+    "slug": "starter-demo",
+    "status": "pending",
+    "inputMode": "none",
+    "productionProfile": "balanced",
+    "assetBudget": null,
+    "motionBudget": null,
+    "approvedImageBudget": null,
+    "requested": {
+      "durationSeconds": null,
+      "sceneCount": null
+    },
+    "resolved": null,
+    "updatedAt": "2026-01-01T00:00:00.000Z"
+  },
+  "quality": {
+    "minimumAssetScale": 1
+  },
+  "video": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 30
+  },
+  "theme": {
+    "canvas": "#6e1e19",
+    "sceneBackground": "#8a271f",
+    "accent": "#a33a2d",
+    "ink": "#4a291f",
+    "subtitle": "#fff8ea",
+    "subtitleBackground": "rgba(58, 25, 18, .72)",
+    "foreground": "#8d251e",
+    "surface": {
+      "texture": {
+        "src": "textures/paper-grain.png",
+        "opacity": 0.14,
+        "blendMode": "multiply"
+      },
+      "subjectEdge": {
+        "mode": "paper-outline",
+        "color": "#f5eedc",
+        "widthPx": 3
+      },
+      "subjectShadow": {
+        "mode": "drop-shadow",
+        "offsetXPx": 0,
+        "offsetYPx": 10,
+        "blurPx": 7,
+        "color": "rgba(20,15,12,.28)"
+      }
+    }
+  },
+  "voice": {
+    "mode": "fictional",
+    "provider": "auto",
+    "displayName": "Configured fictional narrator"
+  },
+  "audio": {
+    "narration": {
+      "volume": 1
+    },
+    "music": null,
+    "mastering": {
+      "targetLufs": -16,
+      "toleranceLufs": 3,
+      "truePeakDbtp": -1
+    }
+  },
+  "editorial": {
+    "timebase": {
+      "fps": 30,
+      "rounding": "nearest"
+    },
+    "wordTimingPolicy": "phrase-fallback",
+    "media": [
+      {
+        "id": "fixture-audio",
+        "kind": "narration",
+        "src": "fixtures/vox-primitives/tone.wav",
+        "sha256": "1c14b9f9cc430154dd3a74fc5267a83233f2e04e492444376c27dd956134177f",
+        "durationSeconds": 1,
+        "timelineMode": "scene-local",
+        "timingDataSrc": "fixtures/vox-primitives/timing.json"
+      }
+    ],
+    "cues": [],
+    "editPoints": [],
+    "bindings": [],
+    "responsiveProfiles": [
+      {
+        "id": "16:9",
+        "width": 1920,
+        "height": 1080,
+        "safeArea": {
+          "x": 0.06,
+          "y": 0.06,
+          "width": 0.88,
+          "height": 0.88
+        },
+        "densityBudget": 12,
+        "typographyScale": 1,
+        "parallaxScale": 1,
+        "exclusionZones": []
+      },
+      {
+        "id": "9:16",
+        "width": 1080,
+        "height": 1920,
+        "safeArea": {
+          "x": 0.08,
+          "y": 0.05,
+          "width": 0.84,
+          "height": 0.9
+        },
+        "densityBudget": 10,
+        "typographyScale": 0.9,
+        "parallaxScale": 0.75,
+        "exclusionZones": []
+      },
+      {
+        "id": "1:1",
+        "width": 1080,
+        "height": 1080,
+        "safeArea": {
+          "x": 0.07,
+          "y": 0.07,
+          "width": 0.86,
+          "height": 0.86
+        },
+        "densityBudget": 11,
+        "typographyScale": 0.95,
+        "parallaxScale": 0.85,
+        "exclusionZones": []
+      }
+    ],
+    "sceneDirecting": [],
+    "transitions": [],
+    "activeProfile": "16:9",
+    "resolvedEditPoints": [],
+    "conflicts": [],
+    "responsivePlans": [
+      {
+        "profileId": "16:9",
+        "width": 1920,
+        "height": 1080,
+        "safeArea": {
+          "x": 0.06,
+          "y": 0.06,
+          "width": 0.88,
+          "height": 0.88
+        },
+        "exclusionZones": [],
+        "densityBudget": 12,
+        "scenes": []
+      },
+      {
+        "profileId": "9:16",
+        "width": 1080,
+        "height": 1920,
+        "safeArea": {
+          "x": 0.08,
+          "y": 0.05,
+          "width": 0.84,
+          "height": 0.9
+        },
+        "exclusionZones": [],
+        "densityBudget": 10,
+        "scenes": []
+      },
+      {
+        "profileId": "1:1",
+        "width": 1080,
+        "height": 1080,
+        "safeArea": {
+          "x": 0.07,
+          "y": 0.07,
+          "width": 0.86,
+          "height": 0.86
+        },
+        "exclusionZones": [],
+        "densityBudget": 11,
+        "scenes": []
+      }
+    ],
+    "transitionPlans": [],
+    "fingerprint": "5b196c3d452e4ea5613a21d152122bf3726812de3eadf0e17e4111e654b3fb52"
+  },
+  "scenes": [],
+  "sceneTransitions": []
+}

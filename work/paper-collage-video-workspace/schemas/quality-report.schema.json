@@ -1,0 +1,189 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.paper-collage.dev/quality-report.schema.json",
+  "title": "Paper Collage Asset and Composite Quality Report",
+  "type": "object",
+  "required": ["schemaVersion", "projectSlug", "updatedAt", "styleProfile", "motionContract", "reviewSurfaceFingerprint", "eventTimeline", "assetHistory", "assets", "composites"],
+  "properties": {
+    "$schema": {"type": "string"},
+    "schemaVersion": {"const": 7},
+    "projectSlug": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+    "updatedAt": {"type": "string", "format": "date-time"},
+    "styleProfile": {
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "profileFingerprint",
+            "referenceFile",
+            "referenceSha256",
+            "reviewFocus"
+          ],
+          "properties": {
+            "id": {"type": "string", "minLength": 1},
+            "profileFingerprint": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "referenceFile": {"type": "string", "minLength": 1},
+            "referenceSha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "reviewFocus": {
+              "type": "array",
+              "minItems": 1,
+              "items": {"type": "string", "minLength": 1}
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "motionContract": {
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "required": [
+            "approvalFingerprint",
+            "executionFingerprint",
+            "summary",
+            "requiredCompositeChecks"
+          ],
+          "properties": {
+            "approvalFingerprint": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "executionFingerprint": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "summary": {"type": "string", "minLength": 1},
+            "requiredCompositeChecks": {
+              "type": "array",
+              "minItems": 6,
+              "uniqueItems": true,
+              "items": {"type": "string", "minLength": 1}
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "reviewSurfaceFingerprint": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "eventTimeline": {"type": "array", "items": {"type": "object"}},
+    "assetHistory": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["recordId", "assetId", "file", "sha256", "lifecycle"],
+        "properties": {
+          "recordId": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+          "assetId": {"type": "string"},
+          "file": {"type": "string"},
+          "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+          "lifecycle": {"type": "object"}
+        },
+        "additionalProperties": false
+      }
+    },
+    "assets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["assetId", "file", "kind", "sources", "reviewScope", "sha256", "requiredChecks", "technical", "semanticChecks", "status", "reviewer", "reviewedAt", "note"],
+        "properties": {
+          "assetId": {"type": "string", "minLength": 1},
+          "file": {"type": "string", "minLength": 1},
+          "kind": {"enum": ["background", "environment", "character", "prop", "decorative", "character-sheet", "style-sample", "mechanism", "diagram", "image"]},
+          "sources": {"type": "array", "items": {"type": "string"}},
+          "reviewScope": {"enum": ["runtime-visible", "derivation-only", "source-asset"]},
+          "sha256": {"type": ["string", "null"]},
+          "fingerprint": {"type": ["string", "null"]},
+          "semanticBinding": {"type": ["object", "null"]},
+          "styleProfileBinding": {"type": ["object", "null"]},
+          "stateSheetBinding": {"type": ["object", "null"]},
+          "stateSheetRecoveryBinding": {"type": ["object", "null"]},
+          "registeredFamilyBinding": {
+            "oneOf": [
+              {"type": "null"},
+              {"$ref": "https://local.paper-collage.dev/registered-family-binding.schema.json"}
+            ]
+          },
+          "canonicalContainerBinding": {
+            "oneOf": [
+              {"type": "null"},
+              {"$ref": "https://local.paper-collage.dev/canonical-container-binding.schema.json"}
+            ]
+          },
+          "recoverySourceFile": {"type": ["string", "null"]},
+          "recoverySourceSha256": {"type": ["string", "null"]},
+          "recoveryEvidenceFiles": {"type": "array", "items": {"type": "string"}},
+          "manifestRecordId": {"type": ["string", "null"]},
+          "manifestSha256": {"type": ["string", "null"]},
+          "semanticContractFingerprints": {"type": "object", "additionalProperties": {"type": ["string", "null"]}},
+          "requiredChecks": {"type": "array", "items": {"type": "string"}},
+          "technical": {"type": "object"},
+          "semanticChecks": {"type": "object"},
+          "status": {"enum": ["pending", "passed", "needs-revision"]},
+          "reviewer": {"type": ["string", "null"]},
+          "reviewedAt": {"type": ["string", "null"]},
+          "note": {"type": "string"},
+          "evidenceFiles": {"$ref": "#/$defs/evidenceFiles"}
+        },
+        "additionalProperties": false
+      }
+    },
+    "composites": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["compositeId", "sceneId", "pattern", "nodeId", "memberNodeIds", "memberHashes", "compositionHash", "fingerprint", "proofTimeIds", "proofFrames", "reviewScope", "requiredChecks", "technical", "semanticChecks", "status", "reviewer", "reviewedAt", "note"],
+        "properties": {
+          "compositeId": {"type": "string", "minLength": 1},
+          "sceneId": {"type": "string", "minLength": 1},
+          "pattern": {"enum": ["supported-subject", "registered-environment", "registered-depth-stack", "looping-environment", "canonical-container", "state-sequence", "event", "semantic-contract", "spatial-contract", "parallax-rig", "motif-field", "typography", "annotation", "data-graphic", "editorial-transition", "responsive-directing", "style-target", "motion-contract"]},
+          "nodeId": {"type": "string", "minLength": 1},
+          "memberNodeIds": {"type": "array", "items": {"type": "string"}},
+          "memberHashes": {"type": "object", "additionalProperties": {"type": ["string", "null"]}},
+          "compositionHash": {"type": "string", "minLength": 1},
+          "fingerprint": {"type": "string", "minLength": 1},
+          "proofTimeIds": {"type": "array", "items": {"type": "string"}},
+          "proofShots": {"type": "array", "items": {"type": "object"}},
+          "contractId": {"type": "string"},
+          "contractKind": {"enum": ["identity", "topology", "mechanism", "diagram"]},
+          "proofFrames": {"type": "array", "items": {"type": "object"}},
+          "reviewScope": {"enum": ["runtime-visible", "derivation-only"]},
+          "requiredChecks": {"type": "array", "items": {"type": "string"}},
+          "technical": {"type": "object"},
+          "semanticChecks": {"type": "object"},
+          "status": {"enum": ["pending", "passed", "needs-revision"]},
+          "reviewer": {"type": ["string", "null"]},
+          "reviewedAt": {"type": ["string", "null"]},
+          "note": {"type": "string"},
+          "evidenceFiles": {"$ref": "#/$defs/evidenceFiles"}
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "$defs": {
+    "evidenceFiles": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["file", "sha256"],
+        "properties": {
+          "file": {"type": "string", "minLength": 1},
+          "sha256": {"type": "string", "minLength": 64, "maxLength": 64}
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

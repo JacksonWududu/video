@@ -1,0 +1,4 @@
+interface:
+  display_name: "Discover Video Topics"
+  short_description: "Read daily topics or validate a custom topic"
+  default_prompt: "Use $discover-video-topics to show today's local topic options or validate my own topic."

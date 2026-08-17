@@ -1,0 +1,107 @@
+{
+  "schema_version": "visual-generation-route-catalog-v2",
+  "rule_id": "visual-generation-route-catalog-v2",
+  "visual_language_catalog_version": "visual-language-catalog-v1",
+  "routes": [
+    {
+      "route_id": "imagegen",
+      "label": "叙事插画（Codex 原生 imagegen）",
+      "compatible_scene_classes": ["narrative_illustration"],
+      "white_cat_policy": "native-imagegen-family-allowed",
+      "visible_text_policy": "approved-raster-v1",
+      "white_cat_visible_text_policy": "text-free-v1",
+      "assembly_text_policy": "asset-owned-no-timeline-overlay-v1",
+      "recommended_by_default": true
+    },
+    {
+      "route_id": "xuan-paper-diorama",
+      "label": "宣纸微缩叠景（generate-visual-styles）",
+      "compatible_scene_classes": ["narrative_illustration"],
+      "white_cat_policy": "allowed-with-canonical-reference",
+      "visible_text_policy": "text-free-v1",
+      "white_cat_visible_text_policy": "text-free-v1",
+      "assembly_text_policy": "asset-owned-no-timeline-overlay-v1",
+      "selection_policy": "explicit-optional-only",
+      "recommended_by_default": false,
+      "production_contract": "xuan-paper-diorama-route-v1",
+      "style_skill_path": "/Users/jackson/.codex/skills/generate-visual-styles/SKILL.md",
+      "style_skill_checksum_sha256": "a7423ee693a637e75ef2a3ff623f8a5a4e951af8136c7acadc694b72be0d2502",
+      "style_profile_id": "xuan-paper-diorama",
+      "style_profile_path": "/Users/jackson/.codex/skills/generate-visual-styles/references/xuan-paper-diorama.md",
+      "style_profile_checksum_sha256": "f4fca8d3e00dfeaa69c9c6eef5d4b04375872e51ae1785e4a2ac9ac83f3e7f89"
+    },
+    {
+      "route_id": "comic-imagegen",
+      "label": "漫画叙事页（Codex 原生 imagegen）",
+      "compatible_scene_classes": ["narrative_illustration"],
+      "white_cat_policy": "native-imagegen-family-allowed-with-canonical-reference",
+      "visible_text_policy": "text-free-v1",
+      "assembly_text_policy": "asset-owned-no-timeline-overlay-v1",
+      "selection_policy": "explicit-eligible-only",
+      "recommended_by_default": false,
+      "plan_contract": "comic-shot-plan-v1"
+    },
+    {
+      "route_id": "ian-handdrawn-ppt",
+      "label": "Ian 手绘结构图",
+      "compatible_scene_classes": ["structured_graphic"],
+      "white_cat_policy": "forbidden",
+      "visible_text_policy": "approved-exact-text-raster-v1",
+      "assembly_text_policy": "asset-owned-no-timeline-overlay-v1"
+    },
+    {
+      "route_id": "doodle-slides",
+      "label": "Doodle 单镜结构图（历史只读）",
+      "compatible_scene_classes": ["structured_graphic"],
+      "white_cat_policy": "forbidden",
+      "visible_text_policy": "approved-exact-text-raster-v1",
+      "assembly_text_policy": "asset-owned-no-timeline-overlay-v1",
+      "selection_policy": "legacy-read-only",
+      "recommended_by_default": false
+    },
+    {
+      "route_id": "ink-doodle-knowledge-card",
+      "label": "墨线知识卡（generate-visual-styles）",
+      "compatible_scene_classes": ["structured_graphic"],
+      "white_cat_policy": "forbidden",
+      "visible_text_policy": "approved-exact-text-raster-v1",
+      "assembly_text_policy": "asset-owned-no-timeline-overlay-v1",
+      "selection_policy": "explicit-optional-only",
+      "recommended_by_default": false,
+      "production_contract": "ink-doodle-knowledge-card-route-v1",
+      "style_skill_path": "/Users/jackson/.codex/skills/generate-visual-styles/SKILL.md",
+      "style_skill_checksum_sha256": "a7423ee693a637e75ef2a3ff623f8a5a4e951af8136c7acadc694b72be0d2502",
+      "style_profile_id": "ink-doodle-knowledge-card",
+      "style_profile_path": "/Users/jackson/.codex/skills/generate-visual-styles/references/ink-doodle-knowledge-card.md",
+      "style_profile_checksum_sha256": "f993cf7c84bd1a738d84c90385502864ba83c54c10d5accb564ec23be06d2588"
+    },
+    {
+      "route_id": "srt-whiteboard-animation",
+      "label": "SRT 白板逐元素动画",
+      "compatible_scene_classes": ["narrative_illustration", "structured_graphic"],
+      "white_cat_policy": "forbidden",
+      "visible_text_policy": "whiteboard-annotation-v1",
+      "assembly_text_policy": "asset-owned-no-timeline-overlay-v1",
+      "selection_policy": "explicit-optional-only",
+      "recommended_by_default": false
+    }
+  ],
+  "structured_visual_kinds": [
+    "data_visualization",
+    "cause_effect",
+    "comparison",
+    "process",
+    "classification",
+    "hierarchy",
+    "decision",
+    "evidence_chain"
+  ],
+  "fixed_exemptions": [
+    {"shot_id": "OPEN-00", "route_id": "cover-only-v1", "selectable": false}
+  ],
+  "action_variant_policy": "inherit-parent-native-imagegen-family-route",
+  "route_exemptions": {
+    "srt-whiteboard-animation": "whiteboard-element-sequence-replaces-action-family-v1"
+  },
+  "deferred_routes": ["baoyu-diagram"]
+}

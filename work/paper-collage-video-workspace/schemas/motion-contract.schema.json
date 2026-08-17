@@ -1,0 +1,282 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.paper-collage.dev/motion-contract.schema.json",
+  "title": "Executable Whole-Film Motion Contract v1",
+  "$defs": {
+    "performanceRole": {
+      "enum": [
+        "establish",
+        "anticipate",
+        "action",
+        "follow-through",
+        "settle",
+        "hold",
+        "transition"
+      ]
+    },
+    "authoring": {
+      "type": "object",
+      "required": [
+        "schemaVersion",
+        "summary",
+        "pacing",
+        "performance",
+        "camera",
+        "transitions",
+        "ambient",
+        "styleDeviationRationale"
+      ],
+      "properties": {
+        "schemaVersion": {"const": 1},
+        "summary": {"type": "string", "minLength": 1},
+        "pacing": {"enum": ["gentle", "playful", "measured", "dynamic"]},
+        "performance": {
+          "type": "object",
+          "required": [
+            "grammar",
+            "anticipation",
+            "followThrough",
+            "poseStrategy",
+            "minimumFinalHoldRatio"
+          ],
+          "properties": {
+            "grammar": {
+              "type": "array",
+              "minItems": 3,
+              "uniqueItems": true,
+              "allOf": [
+                {"contains": {"const": "establish"}},
+                {"contains": {"const": "action"}},
+                {"contains": {"const": "settle"}}
+              ],
+              "items": {"$ref": "#/$defs/performanceRole"}
+            },
+            "anticipation": {
+              "enum": ["none", "selective", "required-for-hero"]
+            },
+            "followThrough": {
+              "enum": ["none", "selective", "required-for-hero"]
+            },
+            "poseStrategy": {
+              "enum": ["continuous-led", "pose-to-pose", "mixed"]
+            },
+            "minimumFinalHoldRatio": {
+              "type": "number",
+              "minimum": 0.05,
+              "maximum": 0.3
+            }
+          },
+          "additionalProperties": false
+        },
+        "camera": {
+          "type": "object",
+          "required": ["strategy"],
+          "properties": {
+            "strategy": {"enum": ["locked", "motivated", "expressive"]}
+          },
+          "additionalProperties": false
+        },
+        "transitions": {
+          "type": "object",
+          "required": ["strategy"],
+          "properties": {
+            "strategy": {
+              "enum": ["story-led", "rhythmic-accented", "chapter-led"]
+            }
+          },
+          "additionalProperties": false
+        },
+        "ambient": {
+          "type": "object",
+          "required": ["strategy"],
+          "properties": {
+            "strategy": {"enum": ["minimal", "selective", "persistent"]}
+          },
+          "additionalProperties": false
+        },
+        "styleDeviationRationale": {
+          "oneOf": [
+            {"type": "null"},
+            {"type": "string", "minLength": 1}
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "styleProfileBinding": {
+      "type": "object",
+      "required": ["id", "profileFingerprint", "pacing"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+        "profileFingerprint": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "pacing": {"enum": ["gentle", "playful", "measured", "dynamic"]}
+      },
+      "additionalProperties": false
+    },
+    "phrase": {
+      "type": "object",
+      "required": ["role", "beatId", "at", "proofTimeId"],
+      "properties": {
+        "role": {"$ref": "#/$defs/performanceRole"},
+        "beatId": {"type": "string", "minLength": 1},
+        "at": {"type": "number", "minimum": 0, "maximum": 1},
+        "proofTimeId": {"type": "string", "minLength": 1}
+      },
+      "additionalProperties": false
+    },
+    "sceneCoverage": {
+      "type": "object",
+      "required": [
+        "sceneId",
+        "motionPolicy",
+        "phrases",
+        "heroActionBeatIds",
+        "stateSequenceTreatmentIds",
+        "continuousTreatmentIds",
+        "cameraTreatmentIds",
+        "ambientTreatmentIds",
+        "finalHoldRatio",
+        "exception"
+      ],
+      "properties": {
+        "sceneId": {"type": "string", "minLength": 1},
+        "motionPolicy": {"enum": ["standard", "locked-static"]},
+        "phrases": {
+          "type": "array",
+          "minItems": 3,
+          "items": {"$ref": "#/$defs/phrase"}
+        },
+        "heroActionBeatIds": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "stateSequenceTreatmentIds": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "continuousTreatmentIds": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "cameraTreatmentIds": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "ambientTreatmentIds": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "finalHoldRatio": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "exception": {
+          "oneOf": [
+            {"type": "null"},
+            {
+              "type": "object",
+              "required": ["kind", "rationale"],
+              "properties": {
+                "kind": {"const": "locked-static"},
+                "rationale": {"type": "string", "minLength": 1}
+              },
+              "additionalProperties": false
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "transitionCoverage": {
+      "type": "object",
+      "required": ["id", "intent", "type", "motivation"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "intent": {
+          "enum": [
+            "continuity",
+            "location-change",
+            "time-passage",
+            "focus-reveal",
+            "chapter-reset",
+            "impact"
+          ]
+        },
+        "type": {
+          "enum": ["cut", "wipe", "dip", "slide", "iris", "page-turn", "shutters"]
+        },
+        "motivation": {
+          "enum": ["semantic-default", "authored", "rhythmic", "impact"]
+        }
+      },
+      "additionalProperties": false
+    },
+    "compiled": {
+      "type": "object",
+      "required": [
+        "schemaVersion",
+        "direction",
+        "styleProfileBinding",
+        "scenes",
+        "transitions",
+        "editorialFingerprint",
+        "requiredCompositeChecks",
+        "approvalFingerprint",
+        "fingerprint"
+      ],
+      "properties": {
+        "schemaVersion": {"const": 1},
+        "direction": {"$ref": "#/$defs/authoring"},
+        "styleProfileBinding": {
+          "$ref": "#/$defs/styleProfileBinding"
+        },
+        "scenes": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/$defs/sceneCoverage"}
+        },
+        "transitions": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/transitionCoverage"}
+        },
+        "editorialFingerprint": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "requiredCompositeChecks": {
+          "type": "array",
+          "minItems": 6,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "motion-grammar-consistent",
+              "pacing-cadence-consistent",
+              "camera-strategy-consistent",
+              "transition-strategy-consistent",
+              "ambient-strategy-consistent",
+              "sync-anchors-current"
+            ]
+          }
+        },
+        "approvalFingerprint": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "fingerprint": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

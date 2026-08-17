@@ -1,0 +1,22 @@
+{
+  "schema_version": "gen-think-visual-overlay-v1",
+  "scope": "shared_reusable_visual_library",
+  "library_path": "leverage-video/src/shared/gen-think",
+  "request_classification": "project_maintenance",
+  "family_id": "GEN-THINK",
+  "status": "shared_loop_ready_no_consumers_selected",
+  "production_manifest_path": "leverage-video/src/shared/gen-think/schema/gen-think-production-v01.json",
+  "production_manifest_checksum_sha256": "052932a48ffb4cca34c82dfaadfd18ce61950bb8a4add89859c972026ad481bf",
+  "component_entry_path": "leverage-video/src/shared/gen-think/script/index.ts",
+  "composition_id": "GenThinkLoop",
+  "mapping_policy": "for every consuming episode, the user decides every target shot and exact frame window; the shared library makes no candidate or exclusion decision",
+  "decision_owner": "user",
+  "consumers": [],
+  "decision_inputs_required_from_each_consumer": [
+    "complete shot list",
+    "verbatim locked source_text",
+    "real audio duration",
+    "composition frame interval"
+  ],
+  "consumer_mapping_locked_at": null
+}

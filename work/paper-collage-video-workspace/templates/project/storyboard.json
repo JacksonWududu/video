@@ -1,0 +1,31 @@
+{
+  "$schema": "../../schemas/storyboard-authoring.schema.json",
+  "schemaVersion": 12,
+  "slug": "{{slug}}",
+  "status": "pending",
+  "arc": "",
+  "style": {
+    "visualThesis": "",
+    "compositionRules": [],
+    "layerStrategy": ""
+  },
+  "motionDirection": {
+    "schemaVersion": 1,
+    "summary": "",
+    "pacing": "gentle",
+    "performance": {
+      "grammar": ["establish", "action", "settle"],
+      "anticipation": "selective",
+      "followThrough": "selective",
+      "poseStrategy": "mixed",
+      "minimumFinalHoldRatio": 0.1
+    },
+    "camera": {"strategy": "motivated"},
+    "transitions": {"strategy": "story-led"},
+    "ambient": {"strategy": "selective"},
+    "styleDeviationRationale": null
+  },
+  "scenes": [],
+  "sceneTransitions": [],
+  "updatedAt": "{{createdAt}}"
+}

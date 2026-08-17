@@ -1,0 +1,40 @@
+{
+  "$schema": "../../schemas/production-metrics.schema.json",
+  "schemaVersion": 1,
+  "projectSlug": "{{slug}}",
+  "createdAt": "{{createdAt}}",
+  "collectionStartedAt": "{{createdAt}}",
+  "updatedAt": "{{createdAt}}",
+  "measurementNotes": {
+    "commandWallClock": "Measures the wrapped local command from process start to exit.",
+    "reviewSessionWindow": "Measures from quality scaffold completion to successful batch recording; it includes model/tool orchestration and pauses, not provider-only inference time.",
+    "providerAttemptWindow": "Measures from generation-attempt reservation to closure; it includes provider work and surrounding orchestration.",
+    "tokenTelemetry": "Unavailable unless the host or provider reports it; this file does not estimate token usage.",
+    "categoryOverlap": "Category durations are independently unioned and may overlap; measuredUnionMs de-duplicates all overlaps."
+  },
+  "segments": [],
+  "summary": {
+    "observation": {
+      "startedAt": "{{createdAt}}",
+      "endedAt": "{{createdAt}}",
+      "durationMs": 0
+    },
+    "coverage": {
+      "status": "full",
+      "collectionStartedAt": "{{createdAt}}"
+    },
+    "measuredUnionMs": 0,
+    "measuredPercentOfObservation": 0,
+    "unattributedMs": 0,
+    "unattributedPercentOfObservation": 0,
+    "byCategory": {
+      "ai-generation": {"durationMs": 0, "percentOfObservation": 0, "segmentCount": 0, "activeSegmentCount": 0},
+      "ai-review": {"durationMs": 0, "percentOfObservation": 0, "segmentCount": 0, "activeSegmentCount": 0},
+      "human-review": {"durationMs": 0, "percentOfObservation": 0, "segmentCount": 0, "activeSegmentCount": 0},
+      "deterministic-check": {"durationMs": 0, "percentOfObservation": 0, "segmentCount": 0, "activeSegmentCount": 0},
+      "evidence-render": {"durationMs": 0, "percentOfObservation": 0, "segmentCount": 0, "activeSegmentCount": 0},
+      "video-render": {"durationMs": 0, "percentOfObservation": 0, "segmentCount": 0, "activeSegmentCount": 0}
+    },
+    "aiReview": {"durationMs": 0, "percentOfObservation": 0, "segmentCount": 0, "activeSegmentCount": 0}
+  }
+}

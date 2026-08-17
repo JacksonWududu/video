@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "mediaSha256": "1c14b9f9cc430154dd3a74fc5267a83233f2e04e492444376c27dd956134177f",
+  "durationSeconds": 1,
+  "cues": [
+    {
+      "id": "fixture-phrase",
+      "kind": "narration-phrase",
+      "atSeconds": 0.08,
+      "endSeconds": 0.4
+    }
+  ]
+}

@@ -1,0 +1,151 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.paper-collage.dev/production-metrics.schema.json",
+  "title": "Paper Collage Production Metrics",
+  "type": "object",
+  "required": [
+    "$schema",
+    "schemaVersion",
+    "projectSlug",
+    "createdAt",
+    "collectionStartedAt",
+    "updatedAt",
+    "measurementNotes",
+    "segments",
+    "summary"
+  ],
+  "properties": {
+    "$schema": {"type": "string"},
+    "schemaVersion": {"const": 1},
+    "projectSlug": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+    "createdAt": {"type": "string", "format": "date-time"},
+    "collectionStartedAt": {"type": "string", "format": "date-time"},
+    "updatedAt": {"type": "string", "format": "date-time"},
+    "measurementNotes": {
+      "type": "object",
+      "required": ["commandWallClock", "reviewSessionWindow", "providerAttemptWindow", "tokenTelemetry", "categoryOverlap"],
+      "additionalProperties": {"type": "string"}
+    },
+    "segments": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/segment"}
+    },
+    "summary": {"$ref": "#/$defs/summary"}
+  },
+  "$defs": {
+    "category": {
+      "enum": [
+        "ai-generation",
+        "ai-review",
+        "human-review",
+        "deterministic-check",
+        "evidence-render",
+        "video-render"
+      ]
+    },
+    "segment": {
+      "type": "object",
+      "required": [
+        "id",
+        "category",
+        "operation",
+        "source",
+        "status",
+        "measurement",
+        "startedAt",
+        "endedAt",
+        "durationMs",
+        "metadata"
+      ],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "category": {"$ref": "#/$defs/category"},
+        "operation": {"type": "string", "minLength": 1},
+        "source": {"type": "string", "minLength": 1},
+        "status": {"enum": ["in-progress", "completed", "failed", "abandoned"]},
+        "measurement": {
+          "enum": ["command-wall-clock", "review-session-window", "provider-attempt-window"]
+        },
+        "startedAt": {"type": "string", "format": "date-time"},
+        "endedAt": {
+          "oneOf": [
+            {"type": "string", "format": "date-time"},
+            {"type": "null"}
+          ]
+        },
+        "durationMs": {
+          "oneOf": [
+            {"type": "integer", "minimum": 0},
+            {"type": "null"}
+          ]
+        },
+        "metadata": {"type": "object"}
+      },
+      "additionalProperties": false
+    },
+    "categorySummary": {
+      "type": "object",
+      "required": ["durationMs", "percentOfObservation", "segmentCount", "activeSegmentCount"],
+      "properties": {
+        "durationMs": {"type": "integer", "minimum": 0},
+        "percentOfObservation": {"type": "number", "minimum": 0},
+        "segmentCount": {"type": "integer", "minimum": 0},
+        "activeSegmentCount": {"type": "integer", "minimum": 0}
+      },
+      "additionalProperties": false
+    },
+    "summary": {
+      "type": "object",
+      "required": [
+        "observation",
+        "coverage",
+        "measuredUnionMs",
+        "measuredPercentOfObservation",
+        "unattributedMs",
+        "unattributedPercentOfObservation",
+        "byCategory",
+        "aiReview"
+      ],
+      "properties": {
+        "observation": {
+          "type": "object",
+          "required": ["startedAt", "endedAt", "durationMs"],
+          "properties": {
+            "startedAt": {"type": "string", "format": "date-time"},
+            "endedAt": {"type": "string", "format": "date-time"},
+            "durationMs": {"type": "integer", "minimum": 0}
+          },
+          "additionalProperties": false
+        },
+        "coverage": {
+          "type": "object",
+          "required": ["status", "collectionStartedAt"],
+          "properties": {
+            "status": {"enum": ["full", "partial"]},
+            "collectionStartedAt": {"type": "string", "format": "date-time"}
+          },
+          "additionalProperties": false
+        },
+        "measuredUnionMs": {"type": "integer", "minimum": 0},
+        "measuredPercentOfObservation": {"type": "number", "minimum": 0},
+        "unattributedMs": {"type": "integer", "minimum": 0},
+        "unattributedPercentOfObservation": {"type": "number", "minimum": 0},
+        "byCategory": {
+          "type": "object",
+          "required": [
+            "ai-generation",
+            "ai-review",
+            "human-review",
+            "deterministic-check",
+            "evidence-render",
+            "video-render"
+          ],
+          "additionalProperties": {"$ref": "#/$defs/categorySummary"}
+        },
+        "aiReview": {"$ref": "#/$defs/categorySummary"}
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,64 @@
+{
+  "schemaVersion": 1,
+  "mediaId": "music",
+  "mediaSha256": "627f78697ff22444349c1794a0596d72a2f99425ac3d75f42d1fea5553bbf8b3",
+  "durationSeconds": 6,
+  "source": "deterministic-local-waveform-analysis-fixture",
+  "sampleRate": 48000,
+  "cues": [
+    {
+      "id": "cue-music-beat-conflict",
+      "kind": "music-beat",
+      "source": "detected",
+      "atSeconds": 0.6
+    },
+    {
+      "id": "cue-music-bar",
+      "kind": "music-bar",
+      "source": "detected",
+      "atSeconds": 1.2
+    },
+    {
+      "id": "cue-boundary-accent",
+      "kind": "music-accent",
+      "source": "detected",
+      "atSeconds": 3
+    },
+    {
+      "id": "cue-s2-data-1",
+      "kind": "music-beat",
+      "source": "detected",
+      "atSeconds": 3.45
+    },
+    {
+      "id": "cue-s2-data-2",
+      "kind": "music-accent",
+      "source": "detected",
+      "atSeconds": 3.8
+    },
+    {
+      "id": "cue-s2-data-3",
+      "kind": "music-beat",
+      "source": "detected",
+      "atSeconds": 4.15
+    },
+    {
+      "id": "cue-s2-data-4",
+      "kind": "music-accent",
+      "source": "detected",
+      "atSeconds": 4.5
+    },
+    {
+      "id": "cue-s2-data-5",
+      "kind": "music-beat",
+      "source": "detected",
+      "atSeconds": 4.9
+    },
+    {
+      "id": "cue-s2-data-6",
+      "kind": "music-accent",
+      "source": "detected",
+      "atSeconds": 5.3
+    }
+  ]
+}

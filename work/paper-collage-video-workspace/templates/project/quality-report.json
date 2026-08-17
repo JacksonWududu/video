@@ -1,0 +1,13 @@
+{
+  "$schema": "../../schemas/quality-report.schema.json",
+  "schemaVersion": 7,
+  "projectSlug": "{{slug}}",
+  "updatedAt": "{{createdAt}}",
+  "styleProfile": null,
+  "motionContract": null,
+  "reviewSurfaceFingerprint": "0000000000000000000000000000000000000000000000000000000000000000",
+  "eventTimeline": [],
+  "assetHistory": [],
+  "assets": [],
+  "composites": []
+}

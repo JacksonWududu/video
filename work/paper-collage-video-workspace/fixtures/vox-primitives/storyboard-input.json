@@ -1,0 +1,221 @@
+{
+  "$schema": "../../schemas/storyboard-authoring.schema.json",
+  "schemaVersion": 12,
+  "slug": "vox-primitives",
+  "status": "ready",
+  "arc": "A layered world resolves into a decisive editorial beat.",
+  "style": {
+    "visualThesis": "Large editorial typography sits inside tactile paper depth while bounded motifs supply motion energy.",
+    "compositionRules": ["Keep the title dominant.", "Separate background, focal copy, motif field, and foreground frame by depth."],
+    "layerStrategy": "Background atlas, focal title, decorative field, and foreground torn frame."
+  },
+  "motionDirection": {
+    "schemaVersion": 1,
+    "summary": "Establish paper depth, energize each title with bounded motion, then settle into a readable rhythmic edit.",
+    "pacing": "gentle",
+    "performance": {
+      "grammar": ["establish", "action", "settle"],
+      "anticipation": "selective",
+      "followThrough": "selective",
+      "poseStrategy": "mixed",
+      "minimumFinalHoldRatio": 0.1
+    },
+    "camera": {"strategy": "motivated"},
+    "transitions": {"strategy": "rhythmic-accented"},
+    "ambient": {"strategy": "selective"},
+    "styleDeviationRationale": null
+  },
+  "scenes": [
+    {
+      "id": "layered-world",
+      "title": "A layered world",
+      "narrativeRole": "setup",
+      "message": "Static paper art can still reveal spatial depth.",
+      "blueprint": "layered-reveal",
+      "estimatedDurationSeconds": 3,
+      "beats": [
+        {
+          "id": "world-open",
+          "at": 0.05,
+          "performanceRole": "establish",
+          "purpose": "establish",
+          "visual": "The atlas opens as four paper planes.",
+          "soundCue": null,
+          "proofTimeId": "world-establish",
+          "treatments": [{
+            "id": "world-parallax",
+            "targetId": "scene-camera",
+            "importance": "hero",
+            "necessity": "required",
+            "changeClass": "depth-parallax",
+            "motion": {"kind": "continuous-transform", "preset": "parallax-camera"},
+            "composition": {"pattern": "free"},
+            "graphic": null,
+            "semanticRisk": "decorative",
+            "proofTimeId": "world-establish",
+            "rationale": "The camera must reveal real differential depth between authored paper planes."
+          }]
+        },
+        {
+          "id": "world-field",
+          "at": 0.48,
+          "performanceRole": "action",
+          "purpose": "energize",
+          "visual": "A bounded petal field drifts across the title.",
+          "soundCue": null,
+          "proofTimeId": "world-action",
+          "treatments": [{
+            "id": "world-petals",
+            "targetId": "petal-field",
+            "importance": "ambient",
+            "necessity": "enhancement",
+            "changeClass": "decorative-field",
+            "motion": {
+              "kind": "motif-field",
+              "preset": "fall-drift",
+              "distribution": "scattered",
+              "count": 18,
+              "cycles": 1.5,
+              "bounds": {"x": 0.03, "y": 0.05, "width": 0.94, "height": 0.88},
+              "exclusionZones": [
+                {"id": "world-title-zone", "shape": "rectangle", "x": 0.14, "y": 0.34, "width": 0.64, "height": 0.4, "padding": 0.025}
+              ]
+            },
+            "composition": {"pattern": "free"},
+            "graphic": null,
+            "semanticRisk": "decorative",
+            "proofTimeId": "world-action",
+            "rationale": "One deterministic field supplies repeated motion without individual authored nodes."
+          }]
+        },
+        {
+          "id": "world-cut",
+          "at": 0.9,
+          "performanceRole": "settle",
+          "purpose": "accent",
+          "visual": "The title locks before the edit.",
+          "soundCue": null,
+          "proofTimeId": "world-final",
+          "treatments": [{
+            "id": "world-title-hold",
+            "targetId": "world-title",
+            "importance": "hero",
+            "necessity": "required",
+            "changeClass": "static-hold",
+            "motion": {"kind": "static"},
+            "composition": {"pattern": "free"},
+            "graphic": null,
+            "semanticRisk": "decorative",
+            "proofTimeId": "world-final",
+            "rationale": "The final title state creates a readable outgoing edit point."
+          }]
+        }
+      ],
+      "proofTimes": [
+        {"id": "world-establish", "at": 0.08, "label": "Depth planes established", "kind": "establish", "assertions": ["Background, title, motifs, and foreground are separately readable."], "stateAssertions": []},
+        {"id": "world-action", "at": 0.5, "label": "Motif drift visible", "kind": "action", "assertions": ["The field remains outside the title safe area."], "stateAssertions": []},
+        {"id": "world-final", "at": 0.9, "label": "Outgoing beat locks", "kind": "final", "assertions": ["The title remains readable at the cut."], "stateAssertions": []}
+      ]
+    },
+    {
+      "id": "beat-cut",
+      "title": "Cut on the beat",
+      "narrativeRole": "resolution",
+      "message": "Editorial rhythm is independent from the narrative reason for changing scenes.",
+      "blueprint": "chapter-tableau",
+      "estimatedDurationSeconds": 3,
+      "beats": [
+        {
+          "id": "cut-open",
+          "at": 0.05,
+          "performanceRole": "establish",
+          "purpose": "reveal",
+          "visual": "The second card lands immediately on the beat.",
+          "soundCue": null,
+          "proofTimeId": "cut-establish",
+          "treatments": [{
+            "id": "cut-parallax",
+            "targetId": "scene-camera",
+            "importance": "supporting",
+            "necessity": "required",
+            "changeClass": "depth-parallax",
+            "motion": {"kind": "continuous-transform", "preset": "parallax-camera"},
+            "composition": {"pattern": "free"},
+            "graphic": null,
+            "semanticRisk": "decorative",
+            "proofTimeId": "cut-establish",
+            "rationale": "The incoming card keeps spatial energy after the hard edit."
+          }]
+        },
+        {
+          "id": "cut-burst",
+          "at": 0.48,
+          "performanceRole": "action",
+          "purpose": "punctuate",
+          "visual": "A star field bursts around the message.",
+          "soundCue": null,
+          "proofTimeId": "cut-action",
+          "treatments": [{
+            "id": "cut-stars",
+            "targetId": "star-field",
+            "importance": "ambient",
+            "necessity": "enhancement",
+            "changeClass": "decorative-field",
+            "motion": {
+              "kind": "motif-field",
+              "preset": "burst",
+              "distribution": "edge",
+              "count": 14,
+              "cycles": 1,
+              "bounds": {"x": 0.06, "y": 0.08, "width": 0.88, "height": 0.82},
+              "exclusionZones": [
+                {"id": "cut-title-zone", "shape": "rectangle", "x": 0.14, "y": 0.35, "width": 0.72, "height": 0.42, "padding": 0.02}
+              ]
+            },
+            "composition": {"pattern": "free"},
+            "graphic": null,
+            "semanticRisk": "decorative",
+            "proofTimeId": "cut-action",
+            "rationale": "A deterministic edge burst punctuates the editorial message."
+          }]
+        },
+        {
+          "id": "cut-final",
+          "at": 0.9,
+          "performanceRole": "settle",
+          "purpose": "resolve",
+          "visual": "The card settles into a final lockup.",
+          "soundCue": null,
+          "proofTimeId": "cut-final-proof",
+          "treatments": [{
+            "id": "cut-title-hold",
+            "targetId": "cut-title",
+            "importance": "hero",
+            "necessity": "required",
+            "changeClass": "static-hold",
+            "motion": {"kind": "static"},
+            "composition": {"pattern": "free"},
+            "graphic": null,
+            "semanticRisk": "decorative",
+            "proofTimeId": "cut-final-proof",
+            "rationale": "The result remains legible through the end of the sample."
+          }]
+        }
+      ],
+      "proofTimes": [
+        {"id": "cut-establish", "at": 0.08, "label": "Incoming card established", "kind": "establish", "assertions": ["The second scene is fully opaque immediately after the cut."], "stateAssertions": []},
+        {"id": "cut-action", "at": 0.5, "label": "Edge burst visible", "kind": "peak", "assertions": ["The motif field frames rather than obscures the title."], "stateAssertions": []},
+        {"id": "cut-final-proof", "at": 0.9, "label": "Final card holds", "kind": "final", "assertions": ["The title and paper depth remain readable."], "stateAssertions": []}
+      ]
+    }
+  ],
+  "sceneTransitions": [{
+    "id": "world-to-cut",
+    "fromSceneId": "layered-world",
+    "toSceneId": "beat-cut",
+    "intent": "chapter-reset",
+    "rationale": "The explanation resolves into a new editorial card on the outgoing accent.",
+    "treatment": {"type": "cut", "motivation": "rhythmic", "durationSeconds": 0, "beatId": "world-cut"}
+  }],
+  "updatedAt": "2026-07-23T00:00:00.000Z"
+}

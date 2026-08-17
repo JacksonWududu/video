@@ -1,0 +1,4 @@
+interface:
+  display_name: "Validate Video Narration"
+  short_description: "Audit scripts and validate original or replacement voice audio"
+  default_prompt: "Use $validate-video-narration to audit and lock narration or validate an explicitly authorized replacement voice file against the existing locked script."

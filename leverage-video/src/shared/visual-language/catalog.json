@@ -1,0 +1,78 @@
+{
+  "schema_version": "visual-language-catalog-v1",
+  "rule_id": "visual-language-catalog-v1",
+  "source_revision": {
+    "repository": "https://github.com/JimLiu/baoyu-skills",
+    "commit": "6b7a2e417500561a5ecdd0b168332f4142584617",
+    "license": "MIT",
+    "adaptation": "rules-only-no-upstream-runtime"
+  },
+  "visual_structures": [
+    {"visual_structure_id": "single-scene", "scene_class": "narrative_illustration", "family": "narrative", "composition_layout_id": "sparse"},
+    {"visual_structure_id": "conceptual-metaphor", "scene_class": "narrative_illustration", "family": "narrative", "composition_layout_id": "sparse"},
+    {"visual_structure_id": "before-after-story", "scene_class": "narrative_illustration", "family": "narrative", "composition_layout_id": "comparison"},
+    {"visual_structure_id": "sequential-panels", "scene_class": "narrative_illustration", "family": "narrative", "composition_layout_id": "flow"},
+    {"visual_structure_id": "journey-path", "scene_class": "narrative_illustration", "family": "narrative", "composition_layout_id": "flow"},
+    {"visual_structure_id": "binary-comparison", "scene_class": "structured_graphic", "family": "structured", "composition_layout_id": "comparison"},
+    {"visual_structure_id": "comparison-matrix", "scene_class": "structured_graphic", "family": "structured", "composition_layout_id": "comparison"},
+    {"visual_structure_id": "hierarchical-layers", "scene_class": "structured_graphic", "family": "structured", "composition_layout_id": "mindmap"},
+    {"visual_structure_id": "linear-progression", "scene_class": "structured_graphic", "family": "structured", "composition_layout_id": "flow"},
+    {"visual_structure_id": "tree-branching", "scene_class": "structured_graphic", "family": "structured", "composition_layout_id": "mindmap"},
+    {"visual_structure_id": "fishbone", "scene_class": "structured_graphic", "family": "structured", "composition_layout_id": "mindmap"},
+    {"visual_structure_id": "timeline", "scene_class": "structured_graphic", "family": "structured", "composition_layout_id": "flow"},
+    {"visual_structure_id": "architecture", "scene_class": "structured_graphic", "family": "technical", "composition_layout_id": "balanced"},
+    {"visual_structure_id": "state-machine", "scene_class": "structured_graphic", "family": "technical", "composition_layout_id": "flow"}
+  ],
+  "treatment_profiles": [
+    {"treatment_profile_id": "imagegen-watercolor-narrative", "family": "illustration", "compatible_routes": ["imagegen"]},
+    {"treatment_profile_id": "xuan-paper-diorama", "family": "paper-diorama", "compatible_routes": ["xuan-paper-diorama"]},
+    {"treatment_profile_id": "ian-handdrawn-technical", "family": "handdrawn", "compatible_routes": ["ian-handdrawn-ppt"]},
+    {"treatment_profile_id": "doodle-playful-explainer", "family": "doodle", "compatible_routes": ["doodle-slides"]},
+    {"treatment_profile_id": "ink-doodle-knowledge-card", "family": "ink-doodle", "compatible_routes": ["ink-doodle-knowledge-card"]},
+    {"treatment_profile_id": "whiteboard-clean-progressive", "family": "whiteboard", "compatible_routes": ["srt-whiteboard-animation"]},
+    {"treatment_profile_id": "comic-ligne-claire-neutral", "family": "comic", "compatible_routes": ["imagegen", "comic-imagegen"]},
+    {"treatment_profile_id": "comic-manga-warm", "family": "comic", "compatible_routes": ["imagegen", "comic-imagegen"]},
+    {"treatment_profile_id": "comic-ink-brush-dramatic", "family": "comic", "compatible_routes": ["imagegen", "comic-imagegen"]},
+    {"treatment_profile_id": "comic-chalk-explainer", "family": "comic", "compatible_routes": ["imagegen", "comic-imagegen"]},
+    {"treatment_profile_id": "comic-minimalist-spot-color", "family": "comic", "compatible_routes": ["imagegen", "comic-imagegen"]}
+  ],
+  "composition_layouts": [
+    {"composition_layout_id": "sparse", "density": "low"},
+    {"composition_layout_id": "balanced", "density": "medium"},
+    {"composition_layout_id": "dense", "density": "high"},
+    {"composition_layout_id": "list", "density": "medium-high"},
+    {"composition_layout_id": "comparison", "density": "medium"},
+    {"composition_layout_id": "flow", "density": "medium"},
+    {"composition_layout_id": "mindmap", "density": "high"},
+    {"composition_layout_id": "quadrant", "density": "medium-high"}
+  ],
+  "treatment_layout_compatibility": [
+    {"treatment_profile_id": "imagegen-watercolor-narrative", "source_style_anchor": "fresh", "recommended": ["sparse", "balanced", "flow"], "supported": ["dense", "list", "comparison", "mindmap", "quadrant"], "avoid": []},
+    {"treatment_profile_id": "xuan-paper-diorama", "source_style_anchor": "xuan-paper-diorama-v1.0", "recommended": ["sparse", "flow"], "supported": ["balanced", "comparison"], "avoid": ["dense", "list", "mindmap", "quadrant"]},
+    {"treatment_profile_id": "ian-handdrawn-technical", "source_style_anchor": "notion", "recommended": ["sparse", "balanced", "dense", "list", "comparison", "flow", "mindmap", "quadrant"], "supported": [], "avoid": []},
+    {"treatment_profile_id": "doodle-playful-explainer", "source_style_anchor": "sketch-notes", "recommended": ["balanced", "dense", "list", "flow", "mindmap"], "supported": ["sparse", "comparison", "quadrant"], "avoid": []},
+    {"treatment_profile_id": "ink-doodle-knowledge-card", "source_style_anchor": "ink-doodle-knowledge-card-v1", "recommended": ["balanced", "comparison", "flow", "mindmap"], "supported": ["sparse", "dense", "list", "quadrant"], "avoid": []},
+    {"treatment_profile_id": "whiteboard-clean-progressive", "source_style_anchor": "chalkboard", "recommended": ["sparse", "balanced", "dense", "list", "flow", "mindmap"], "supported": ["comparison", "quadrant"], "avoid": []},
+    {"treatment_profile_id": "comic-ligne-claire-neutral", "source_style_anchor": "minimal", "recommended": ["sparse", "balanced", "dense"], "supported": ["list", "comparison", "flow", "mindmap", "quadrant"], "avoid": []},
+    {"treatment_profile_id": "comic-manga-warm", "source_style_anchor": "warm", "recommended": ["sparse", "balanced", "comparison"], "supported": ["dense", "list", "flow", "mindmap", "quadrant"], "avoid": []},
+    {"treatment_profile_id": "comic-ink-brush-dramatic", "source_style_anchor": "screen-print", "recommended": ["sparse", "balanced", "comparison", "quadrant"], "supported": ["list", "flow"], "avoid": ["dense", "mindmap"]},
+    {"treatment_profile_id": "comic-chalk-explainer", "source_style_anchor": "chalkboard", "recommended": ["sparse", "balanced", "dense", "list", "flow", "mindmap"], "supported": ["comparison", "quadrant"], "avoid": []},
+    {"treatment_profile_id": "comic-minimalist-spot-color", "source_style_anchor": "minimal", "recommended": ["sparse", "balanced", "dense"], "supported": ["list", "comparison", "flow", "mindmap", "quadrant"], "avoid": []}
+  ],
+  "comic_contract": {
+    "contract_version": "comic-shot-plan-v1",
+    "route_id": "comic-imagegen",
+    "compatible_scene_classes": ["narrative_illustration"],
+    "allowed_layouts": ["standard", "cinematic", "mixed", "splash"],
+    "forbidden_layouts": ["dense", "webtoon", "four-panel"],
+    "panel_count": {"minimum": 1, "maximum": 3},
+    "ordered_panel_structures": ["sequential-panels", "before-after-story"],
+    "visible_text_mode": "none",
+    "forbidden_visible_text": ["dialogue-bubble", "narration-box", "sound-effect", "generated-chinese-label"],
+    "generator_family": "codex-native-imagegen",
+    "output_format": "png",
+    "output_width": 1920,
+    "output_height": 1080
+  },
+  "deferred_routes": ["baoyu-diagram"]
+}

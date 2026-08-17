@@ -1,0 +1,114 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.paper-collage.dev/quality-review-scaffold.schema.json",
+  "title": "Paper Collage Quality Review Scaffold",
+  "type": "object",
+  "required": [
+    "$schema",
+    "schemaVersion",
+    "projectSlug",
+    "reviewScope",
+    "generatedAt",
+    "sourceReport",
+    "instructions",
+    "reviews"
+  ],
+  "properties": {
+    "$schema": {"type": "string"},
+    "schemaVersion": {"const": 3},
+    "projectSlug": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+    },
+    "reviewScope": {"enum": ["all", "style"]},
+    "generatedAt": {"type": "string", "format": "date-time"},
+    "sourceReport": {"$ref": "#/$defs/sourceReport"},
+    "instructions": {"type": "string", "minLength": 1},
+    "reviews": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/review"}
+    }
+  },
+  "$defs": {
+    "fingerprint": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "sourceReport": {
+      "type": "object",
+      "required": ["file", "schemaVersion", "fingerprint"],
+      "properties": {
+        "file": {"type": "string", "minLength": 1},
+        "schemaVersion": {"const": 7},
+        "fingerprint": {"$ref": "#/$defs/fingerprint"}
+      },
+      "additionalProperties": false
+    },
+    "review": {
+      "type": "object",
+      "required": [
+        "targetFingerprint",
+        "reviewer",
+        "requiredChecks",
+        "pendingChecks",
+        "passedChecks",
+        "failedChecks",
+        "evidenceFiles",
+        "note"
+      ],
+      "properties": {
+        "assetId": {"type": "string", "minLength": 1},
+        "compositeId": {"type": "string", "minLength": 1},
+        "targetFingerprint": {"$ref": "#/$defs/fingerprint"},
+        "reviewer": {"type": "string", "minLength": 1},
+        "requiredChecks": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1},
+          "uniqueItems": true
+        },
+        "pendingChecks": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1},
+          "uniqueItems": true
+        },
+        "passedChecks": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1},
+          "uniqueItems": true
+        },
+        "failedChecks": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1},
+          "uniqueItems": true
+        },
+        "evidenceFiles": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/evidenceFile"},
+          "uniqueItems": true
+        },
+        "note": {"type": "string"}
+      },
+      "oneOf": [
+        {
+          "required": ["assetId"],
+          "not": {"required": ["compositeId"]}
+        },
+        {
+          "required": ["compositeId"],
+          "not": {"required": ["assetId"]}
+        }
+      ],
+      "additionalProperties": false
+    },
+    "evidenceFile": {
+      "type": "object",
+      "required": ["file", "sha256"],
+      "properties": {
+        "file": {"type": "string", "minLength": 1},
+        "sha256": {"$ref": "#/$defs/fingerprint"}
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

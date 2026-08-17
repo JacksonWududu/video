@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 1,
+  "mediaId": "narration-1",
+  "mediaSha256": "a7f3cbdfd7e2c6482373157892c94758d2e32b13bef04d2693fc724e662f22d3",
+  "durationSeconds": 3,
+  "source": "deterministic-local-waveform-analysis-fixture",
+  "sampleRate": 48000,
+  "cues": [
+    {
+      "id": "cue-s1-open",
+      "kind": "narration-phrase",
+      "source": "authored",
+      "atSeconds": 0.15,
+      "text": "数据"
+    },
+    {
+      "id": "cue-s1-word-1",
+      "kind": "narration-word",
+      "source": "detected",
+      "atSeconds": 0.45,
+      "text": "数据"
+    },
+    {
+      "id": "cue-s1-word-2",
+      "kind": "narration-word",
+      "source": "detected",
+      "atSeconds": 0.9,
+      "text": "DATA"
+    },
+    {
+      "id": "cue-s1-word-3",
+      "kind": "narration-word",
+      "source": "detected",
+      "atSeconds": 1.35,
+      "text": "42"
+    },
+    {
+      "id": "cue-s1-emphasis",
+      "kind": "semantic-emphasis",
+      "source": "authored",
+      "atSeconds": 1.35,
+      "text": "42"
+    },
+    {
+      "id": "cue-s1-sentence",
+      "kind": "sentence",
+      "source": "detected",
+      "atSeconds": 1.75
+    },
+    {
+      "id": "cue-conflict-primary",
+      "kind": "narration-phrase",
+      "source": "authored",
+      "atSeconds": 0.6,
+      "text": "conflict"
+    }
+  ]
+}

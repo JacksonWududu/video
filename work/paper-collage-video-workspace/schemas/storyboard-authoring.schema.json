@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.paper-collage.dev/storyboard-authoring.schema.json",
+  "title": "Paper Collage Storyboard Authoring v12",
+  "description": "Author treatments plus editorial timing and responsive intent. compositionPlan, directing, resolved edit points, fingerprints, and budget demand are compiler-owned.",
+  "type": "object",
+  "required": ["schemaVersion", "status", "arc", "style", "motionDirection", "scenes", "sceneTransitions"],
+  "properties": {
+    "$schema": {"type": "string"},
+    "schemaVersion": {"const": 12},
+    "slug": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+    "status": {"enum": ["pending", "ready"]},
+    "arc": {"type": "string"},
+    "style": {
+      "type": "object",
+      "required": ["visualThesis", "compositionRules", "layerStrategy"],
+      "properties": {
+        "visualThesis": {"type": "string"},
+        "compositionRules": {"type": "array", "items": {"type": "string", "minLength": 1}},
+        "layerStrategy": {"type": "string"}
+      },
+      "additionalProperties": false
+    },
+    "motionDirection": {
+      "$ref": "https://local.paper-collage.dev/motion-contract.schema.json#/$defs/authoring"
+    },
+    "editorial": {"$ref": "editorial.schema.json#/$defs/editorialAuthoring"},
+    "spatialContracts": {
+      "type": "array",
+      "items": {
+        "$ref": "https://local.paper-collage.dev/spatial-contract.schema.json#/$defs/contract"
+      }
+    },
+    "scenes": {
+      "type": "array",
+      "minItems": 0,
+      "items": {
+        "type": "object",
+        "required": ["id", "title", "narrativeRole", "message", "blueprint", "estimatedDurationSeconds", "beats", "proofTimes"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "title": {"type": "string", "minLength": 1},
+          "narrativeRole": {"type": "string", "minLength": 1},
+          "message": {"type": "string", "minLength": 1},
+          "blueprint": {"enum": ["layered-reveal", "map-journey", "archive-stack", "character-procession", "discovery-wipe", "transformation-tableau", "chapter-tableau", "quiet-lockup"]},
+          "motionPolicy": {"enum": ["standard", "locked-static"]},
+          "staticRationale": {"type": "string", "minLength": 1},
+          "estimatedDurationSeconds": {"type": "number", "exclusiveMinimum": 0},
+          "encounters": {
+            "type": "array",
+            "items": {
+              "$ref": "https://local.paper-collage.dev/encounter-contract.schema.json#/$defs/contract"
+            }
+          },
+          "beats": {"type": "array", "minItems": 3, "items": {"$ref": "storyboard.schema.json#/$defs/beat"}},
+          "proofTimes": {"type": "array", "minItems": 3, "items": {"$ref": "storyboard.schema.json#/$defs/proofTime"}}
+        },
+        "allOf": [
+          {
+            "if": {
+              "required": ["motionPolicy"],
+              "properties": {"motionPolicy": {"const": "locked-static"}}
+            },
+            "then": {"required": ["staticRationale"]}
+          }
+        ],
+        "additionalProperties": false
+      }
+    },
+    "sceneTransitions": {"type": "array", "items": {"oneOf": [{"$ref": "#/$defs/intentRoutedBoundary"}, {"$ref": "storyboard.schema.json#/$defs/sceneBoundaryTransition"}]}},
+    "updatedAt": {"type": "string", "format": "date-time"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"status": {"const": "ready"}}},
+      "then": {"required": ["editorial"]}
+    }
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "intentRoutedBoundary": {
+      "type": "object",
+      "required": ["id", "fromSceneId", "toSceneId", "intent", "rationale"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "fromSceneId": {"type": "string", "minLength": 1},
+        "toSceneId": {"type": "string", "minLength": 1},
+        "intent": {"enum": ["continuity", "location-change", "time-passage", "focus-reveal", "chapter-reset", "impact"]},
+        "rationale": {"type": "string", "minLength": 1}
+      },
+      "additionalProperties": false
+    }
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "storyboard-shot-merge-request-v1",
+  "title": "Storyboard Shot Merge Request v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract_version",
+    "episode_workspace",
+    "presented_map_sha256",
+    "storyboard_checksum_sha256",
+    "shot_ids",
+    "renumber_strategy"
+  ],
+  "properties": {
+    "contract_version": {"const": "storyboard-shot-merge-request-v1"},
+    "episode_workspace": {"type": "string", "minLength": 1},
+    "presented_map_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "storyboard_checksum_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "shot_ids": {
+      "type": "array",
+      "minItems": 2,
+      "uniqueItems": true,
+      "items": {"type": "string", "pattern": "^S[0-9]{2,}$"}
+    },
+    "renumber_strategy": {"const": "compact_after_merge"}
+  }
+}

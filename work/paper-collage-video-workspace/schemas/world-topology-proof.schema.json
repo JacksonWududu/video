@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.paper-collage.dev/world-topology-proof.schema.json",
+  "title": "Provider-free travelling world topology proof",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "projectSlug",
+    "storyboardFingerprint",
+    "generatedAt",
+    "worlds",
+    "passed"
+  ],
+  "properties": {
+    "$schema": {"type": "string"},
+    "schemaVersion": {"const": 1},
+    "projectSlug": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+    },
+    "storyboardFingerprint": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "generatedAt": {"type": "string", "format": "date-time"},
+    "worlds": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "proofId",
+          "sceneId",
+          "groupId",
+          "fingerprint",
+          "direction",
+          "distanceViewports",
+          "stripIds",
+          "proofTimes",
+          "checks",
+          "evidence",
+          "passed"
+        ],
+        "properties": {
+          "proofId": {"type": "string", "minLength": 1},
+          "sceneId": {"type": "string", "minLength": 1},
+          "groupId": {"type": "string", "minLength": 1},
+          "fingerprint": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "direction": {"enum": ["left", "right"]},
+          "distanceViewports": {"type": "number", "minimum": 1},
+          "stripIds": {
+            "type": "array",
+            "minItems": 3,
+            "uniqueItems": true,
+            "items": {"type": "string", "minLength": 1}
+          },
+          "proofTimes": {
+            "type": "object",
+            "required": ["before", "seam", "after"],
+            "properties": {
+              "before": {"type": "number", "minimum": 0, "maximum": 1},
+              "seam": {"type": "number", "minimum": 0, "maximum": 1},
+              "after": {"type": "number", "minimum": 0, "maximum": 1}
+            },
+            "additionalProperties": false
+          },
+          "checks": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "required": ["id", "passed", "message"],
+              "properties": {
+                "id": {"type": "string", "minLength": 1},
+                "passed": {"type": "boolean"},
+                "message": {"type": "string", "minLength": 1}
+              },
+              "additionalProperties": false
+            }
+          },
+          "evidence": {"type": "string", "minLength": 1},
+          "passed": {"type": "boolean"}
+        },
+        "additionalProperties": false
+      }
+    },
+    "passed": {"type": "boolean"}
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,23 @@
+node_modules/
+.worktrees/
+.venv/
+.cache/
+out/
+build/
+dist/
+.DS_Store
+*.log
+providers.local.json
+
+# Agent-local production scratchpads and one-off repair helpers are evidence,
+# not reusable Skill source. Keep authoritative fixtures under fixtures/.
+.agent-tmp/
+
+# Personal/local video productions stay editable in this workspace, but are not
+# part of the reusable Skill or plugin distribution. Keep shared regression
+# fixtures in fixtures/ or plugins/paper-collage-video/assets/remotion-template/
+# instead of whitelisting a production here.
+/projects/*
+!/projects/.gitkeep
+/public/projects/*
+!/public/projects/.gitkeep

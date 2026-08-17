@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.paper-collage.dev/encounter-contract.schema.json",
+  "title": "Cue-bound physical encounter lifecycle",
+  "$defs": {
+    "contract": {
+      "type": "object",
+      "required": [
+        "id",
+        "travelerNodeId",
+        "targetNodeId",
+        "worldNodeId",
+        "narrationCueId",
+        "phaseBeatIds",
+        "entryEdge",
+        "exitEdge",
+        "minimumTravelViewports",
+        "cueToleranceSeconds"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+        },
+        "travelerNodeId": {"type": "string", "minLength": 1},
+        "targetNodeId": {"type": "string", "minLength": 1},
+        "worldNodeId": {"type": "string", "minLength": 1},
+        "narrationCueId": {"type": "string", "minLength": 1},
+        "phaseBeatIds": {
+          "type": "object",
+          "required": ["enter", "approach", "answer", "exit"],
+          "properties": {
+            "enter": {"type": "string", "minLength": 1},
+            "approach": {"type": "string", "minLength": 1},
+            "answer": {"type": "string", "minLength": 1},
+            "exit": {"type": "string", "minLength": 1}
+          },
+          "additionalProperties": false
+        },
+        "entryEdge": {"enum": ["left", "right"]},
+        "exitEdge": {"enum": ["left", "right"]},
+        "minimumTravelViewports": {
+          "type": "number",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "cueToleranceSeconds": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 0.5
+        }
+      },
+      "additionalProperties": false
+    },
+    "eventBinding": {
+      "type": "object",
+      "required": ["contractId", "phase"],
+      "properties": {
+        "contractId": {"type": "string", "minLength": 1},
+        "phase": {"enum": ["enter", "approach", "answer", "exit"]},
+        "narrationCueId": {"type": "string", "minLength": 1}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"phase": {"const": "answer"}}},
+          "then": {"required": ["narrationCueId"]},
+          "else": {"not": {"required": ["narrationCueId"]}}
+        }
+      ],
+      "additionalProperties": false
+    }
+  }
+}

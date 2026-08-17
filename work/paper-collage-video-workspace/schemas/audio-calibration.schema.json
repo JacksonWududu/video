@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.paper-collage.dev/audio-calibration.schema.json",
+  "title": "Paper Collage Technical Audio Mastering Record",
+  "type": "object",
+  "required": [
+    "$schema",
+    "schemaVersion",
+    "projectSlug",
+    "status",
+    "sourceFingerprint",
+    "currentNarrationVolume",
+    "recommendedNarrationVolume",
+    "generatedAt",
+    "processingNote",
+    "preflight"
+  ],
+  "properties": {
+    "$schema": {"type": "string"},
+    "schemaVersion": {"const": 2},
+    "projectSlug": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+    "status": {"enum": ["ready", "failed"]},
+    "sourceFingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "currentNarrationVolume": {"type": "number", "exclusiveMinimum": 0},
+    "recommendedNarrationVolume": {"type": "number", "exclusiveMinimum": 0},
+    "generatedAt": {"type": "string", "format": "date-time"},
+    "processingNote": {"type": "string", "minLength": 1},
+    "verifiedAt": {"type": "string", "format": "date-time"},
+    "preflight": {"type": "object"}
+  },
+  "additionalProperties": false
+}

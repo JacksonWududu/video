@@ -1,0 +1,273 @@
+{
+  "$schema": "../../schemas/project.schema.json",
+  "schemaVersion": 12,
+  "motionContract": null,
+  "slug": "vox-primitives",
+  "title": "VOX Production Primitives",
+  "intake": {
+    "schemaVersion": 2,
+    "status": "pending",
+    "aspectRatio": null,
+    "visualStylePreset": null,
+    "parallaxPreference": null,
+    "styleCatalogVersion": null,
+    "styleCatalogFingerprint": null,
+    "styleProfileFingerprint": null,
+    "confirmedAt": null,
+    "note": "Bundled deterministic fixture.",
+    "updatedAt": "2026-01-01T00:00:00.000Z"
+  },
+  "styleProfile": null,
+  "plan": {
+    "schemaVersion": 4,
+    "slug": "vox-primitives",
+    "status": "resolved",
+    "inputMode": "both",
+    "productionProfile": "full-depth",
+    "assetBudget": {"backgrounds": 2, "environmentLayers": 4, "characterSheets": 2, "styleSamples": 1, "baseImageAttempts": 9, "layerPackageAttemptReserve": 16, "maxGeneratedImages": 25},
+    "motionBudget": {"maxPoseSheetCalls": 2, "maxStatesPerSheet": 6, "maxContinuousTargets": 12},
+    "approvedImageBudget": {"imageAttemptLimit": 0, "expectedProviderImageCalls": 0, "profileHardCeiling": 25, "approvedAt": "2026-07-23T00:00:00.000Z"},
+    "requested": {"durationSeconds": 6, "sceneCount": 2},
+    "resolved": {"durationSeconds": 6, "sceneCount": 2, "estimatedNarrationSeconds": 1, "rationale": "A compact deterministic engineering sample.", "resolvedAt": "2026-07-23T00:00:00.000Z"},
+    "updatedAt": "2026-07-23T00:00:00.000Z"
+  },
+  "quality": {"minimumAssetScale": 1},
+  "video": {"width": 960, "height": 540, "fps": 30},
+  "theme": {
+    "canvas": "#263a3d",
+    "sceneBackground": "#d9c7a5",
+    "accent": "#f0c76a",
+    "ink": "#263a3d",
+    "subtitle": "#fff8ea",
+    "subtitleBackground": "rgba(38,58,61,.78)",
+    "foreground": "#263a3d",
+    "fontFamily": "Arial, Helvetica, sans-serif",
+    "surface": {
+      "texture": {"src": "textures/paper-grain.png", "opacity": 0.14, "blendMode": "multiply"},
+      "subjectEdge": {"mode": "paper-outline", "color": "#f5eedc", "widthPx": 3},
+      "subjectShadow": {"mode": "drop-shadow", "offsetXPx": 0, "offsetYPx": 10, "blurPx": 7, "color": "rgba(20,15,12,.28)"}
+    }
+  },
+  "voice": {"mode": "fictional", "provider": "local-fixture", "displayName": "Engineering tone"},
+  "audio": {
+    "narration": {"volume": 0.08},
+    "music": null,
+    "mastering": {"targetLufs": -16, "toleranceLufs": 3, "truePeakDbtp": -1}
+  },
+  "scenes": [
+    {
+      "id": "layered-world",
+      "label": "THE WORLD\nIN LAYERS",
+      "eyebrow": "DETERMINISTIC DEPTH",
+      "tailSeconds": 2.5,
+      "appearance": {
+        "background": "#d9c7a5",
+        "surfaceTexture": {"visible": true, "opacity": 0.12, "blendMode": "multiply"},
+        "chapter": {"visible": false},
+        "subtitles": {"variant": "hidden"}
+      },
+      "motion": {
+        "blueprint": "layered-reveal",
+        "intensity": 1,
+        "seed": 17,
+        "proofTimes": [
+          {"id": "world-establish", "at": 0.08, "label": "Depth planes established", "kind": "establish", "assertions": ["Four distinct planes remain readable."], "stateAssertions": []},
+          {"id": "world-action", "at": 0.5, "label": "Motif drift visible", "kind": "action", "assertions": ["Petals remain outside the central title safe area."], "stateAssertions": []},
+          {"id": "world-final", "at": 0.9, "label": "Outgoing beat locks", "kind": "final", "assertions": ["The title remains readable."], "stateAssertions": []}
+        ]
+      },
+      "composition": {
+        "coordinateSpace": {"width": 960, "height": 540},
+        "nodes": [
+          {
+            "id": "world-background",
+            "kind": "asset",
+            "assetRole": "background",
+            "src": "fixtures/vox-primitives/atlas-bg.svg",
+            "z": 0,
+            "depth": -1,
+            "transform": {"x": 0, "y": 0, "width": 1, "height": 1, "anchorX": 0, "anchorY": 0},
+            "motion": {"keyframes": [{"at": 0, "scale": 1}, {"at": 1, "scale": 1}]}
+          },
+          {
+            "id": "world-disc",
+            "kind": "shape",
+            "shape": "ellipse",
+            "style": {"fill": "#f5eedc", "stroke": "#263a3d", "strokeWidth": 5, "radius": 999},
+            "z": 1,
+            "depth": -0.2,
+            "transform": {"x": 0.54, "y": 0.5, "width": 0.48, "height": 0.74, "anchorX": 0.5, "anchorY": 0.5, "rotation": -4},
+            "motion": {"keyframes": [{"at": 0, "rotation": -0.01}, {"at": 1, "rotation": 0.01}]}
+          },
+          {
+            "id": "petal-field",
+            "kind": "motif-field",
+            "motifs": [{"id": "petal", "src": "fixtures/vox-primitives/petal.svg"}],
+            "count": 18,
+            "seed": 314,
+            "distribution": "scattered",
+            "fieldMotion": {"preset": "fall-drift", "cycles": 1.5},
+            "baseSize": 0.06,
+            "variation": {"scale": [0.65, 1.2], "rotation": [-28, 28], "opacity": [0.45, 0.85]},
+            "bounds": {"x": 0.03, "y": 0.05, "width": 0.94, "height": 0.88},
+            "exclusionZones": [
+              {"id": "world-title-zone", "shape": "rectangle", "x": 0.14, "y": 0.34, "width": 0.64, "height": 0.4, "padding": 0.025}
+            ],
+            "z": 2,
+            "depth": 0.3,
+            "transform": {"x": 0, "y": 0, "width": 1, "height": 1, "anchorX": 0, "anchorY": 0},
+            "motion": {"keyframes": [{"at": 0, "scale": 1}, {"at": 1, "scale": 1}]}
+          },
+          {
+            "id": "world-title",
+            "kind": "typography",
+            "text": "THE WORLD\nIN LAYERS",
+            "treatment": {
+              "fit": {"minFontSize": 40, "maxFontSize": 82, "maxLines": 2, "overflow": "error"},
+              "style": {"color": "#263a3d", "fontWeight": 900, "lineHeight": 0.86, "align": "left", "letterSpacing": -3, "fontFamily": "Arial, Helvetica, sans-serif"},
+              "effects": {},
+              "highlights": [],
+              "reveal": {"mode": "none", "editPointIds": []},
+              "emphasis": [],
+              "safeAreaMode": "inside",
+              "avoidZoneIds": ["world-title-zone"]
+            },
+            "z": 3,
+            "depth": 0.55,
+            "transform": {"x": 0.17, "y": 0.38, "width": 0.58, "height": 0.32, "anchorX": 0, "anchorY": 0},
+            "motion": {"keyframes": [{"at": 0, "offsetX": -0.015}, {"at": 1, "offsetX": 0.01}]}
+          },
+          {
+            "id": "world-foreground",
+            "kind": "asset",
+            "assetRole": "decorative",
+            "src": "fixtures/vox-primitives/foreground.svg",
+            "z": 4,
+            "depth": 1,
+            "transform": {"x": 0, "y": 0, "width": 1, "height": 1, "anchorX": 0, "anchorY": 0},
+            "motion": {"keyframes": [{"at": 0, "scale": 1}, {"at": 1, "scale": 1}]}
+          }
+        ]
+      },
+      "camera": {
+        "preset": "pan-right",
+        "intensity": 1,
+        "keyframes": [{"at": 0, "x": -24, "y": 5, "zoom": 1.01}, {"at": 1, "x": 24, "y": -5, "zoom": 1.04}],
+        "parallax": {"enabled": true, "strength": 0.9, "focalDepth": 0}
+      },
+      "narration": {"src": "fixtures/vox-primitives/tone.wav", "startSeconds": 0, "durationSeconds": 0.5, "text": ""},
+      "subtitles": [],
+      "events": [
+        {"id": "world-open-event", "beatId": "world-open", "at": 0.05, "targetId": "scene", "visual": {"kind": "hold", "durationSeconds": 0.15}, "proofTimeId": "world-establish"},
+        {"id": "world-field-event", "beatId": "world-field", "at": 0.48, "targetId": "petal-field", "visual": {"kind": "emphasis", "action": "pulse", "durationSeconds": 0.25, "intensity": 0.4}, "proofTimeId": "world-action"},
+        {"id": "world-cut-event", "beatId": "world-cut", "at": 0.9, "targetId": "scene", "visual": {"kind": "hold", "durationSeconds": 0.2}, "proofTimeId": "world-final"}
+      ]
+    },
+    {
+      "id": "beat-cut",
+      "label": "CUT ON\nTHE BEAT",
+      "eyebrow": "EDITORIAL RHYTHM",
+      "tailSeconds": 2.5,
+      "appearance": {
+        "background": "#c85b45",
+        "surfaceTexture": {"visible": true, "opacity": 0.1, "blendMode": "multiply"},
+        "chapter": {"visible": false},
+        "subtitles": {"variant": "hidden"}
+      },
+      "motion": {
+        "blueprint": "chapter-tableau",
+        "intensity": 1,
+        "seed": 29,
+        "proofTimes": [
+          {"id": "cut-establish", "at": 0.08, "label": "Incoming card established", "kind": "establish", "assertions": ["The new card is fully opaque."], "stateAssertions": []},
+          {"id": "cut-action", "at": 0.5, "label": "Edge burst visible", "kind": "peak", "assertions": ["Stars frame the title."], "stateAssertions": []},
+          {"id": "cut-final-proof", "at": 0.9, "label": "Final card holds", "kind": "final", "assertions": ["Title and depth remain readable."], "stateAssertions": []}
+        ]
+      },
+      "composition": {
+        "coordinateSpace": {"width": 960, "height": 540},
+        "nodes": [
+          {
+            "id": "cut-background",
+            "kind": "asset",
+            "assetRole": "background",
+            "src": "fixtures/vox-primitives/signal-bg.svg",
+            "z": 0,
+            "depth": -1,
+            "transform": {"x": 0, "y": 0, "width": 1, "height": 1, "anchorX": 0, "anchorY": 0},
+            "motion": {"keyframes": [{"at": 0, "scale": 1}, {"at": 1, "scale": 1}]}
+          },
+          {
+            "id": "cut-card",
+            "kind": "shape",
+            "shape": "rectangle",
+            "style": {"fill": "#f5eedc", "stroke": "#263a3d", "strokeWidth": 6, "radius": 4},
+            "z": 1,
+            "depth": -0.1,
+            "transform": {"x": 0.5, "y": 0.5, "width": 0.68, "height": 0.62, "anchorX": 0.5, "anchorY": 0.5, "rotation": 2},
+            "motion": {"keyframes": [{"at": 0, "rotation": 0.015}, {"at": 1, "rotation": -0.012}]}
+          },
+          {
+            "id": "star-field",
+            "kind": "motif-field",
+            "motifs": [{"id": "star", "src": "fixtures/vox-primitives/star.svg"}],
+            "count": 14,
+            "seed": 2718,
+            "distribution": "edge",
+            "fieldMotion": {"preset": "burst", "cycles": 1},
+            "baseSize": 0.065,
+            "variation": {"scale": [0.7, 1.25], "rotation": [-18, 18], "opacity": [0.55, 0.95]},
+            "bounds": {"x": 0.06, "y": 0.08, "width": 0.88, "height": 0.82},
+            "exclusionZones": [
+              {"id": "cut-title-zone", "shape": "rectangle", "x": 0.14, "y": 0.35, "width": 0.72, "height": 0.42, "padding": 0.02}
+            ],
+            "z": 2,
+            "depth": 0.35,
+            "transform": {"x": 0, "y": 0, "width": 1, "height": 1, "anchorX": 0, "anchorY": 0},
+            "motion": {"keyframes": [{"at": 0, "scale": 1}, {"at": 1, "scale": 1}]}
+          },
+          {
+            "id": "cut-title",
+            "kind": "typography",
+            "text": "CUT ON\nTHE BEAT",
+            "treatment": {
+              "fit": {"minFontSize": 40, "maxFontSize": 88, "maxLines": 2, "overflow": "error"},
+              "style": {"color": "#263a3d", "fontWeight": 900, "lineHeight": 0.85, "align": "center", "letterSpacing": -4, "fontFamily": "Arial, Helvetica, sans-serif"},
+              "effects": {},
+              "highlights": [],
+              "reveal": {"mode": "none", "editPointIds": []},
+              "emphasis": [],
+              "safeAreaMode": "inside",
+              "avoidZoneIds": ["cut-title-zone"]
+            },
+            "z": 3,
+            "depth": 0.7,
+            "transform": {"x": 0.5, "y": 0.39, "width": 0.72, "height": 0.34, "anchorX": 0.5, "anchorY": 0},
+            "motion": {"keyframes": [{"at": 0, "scale": 0.98}, {"at": 1, "scale": 1.02}]}
+          }
+        ]
+      },
+      "camera": {
+        "preset": "pan-left",
+        "intensity": 1,
+        "keyframes": [{"at": 0, "x": 20, "y": -4, "zoom": 1.03}, {"at": 1, "x": -18, "y": 4, "zoom": 1.01}],
+        "parallax": {"enabled": true, "strength": 0.85, "focalDepth": 0}
+      },
+      "narration": {"src": "fixtures/vox-primitives/tone.wav", "startSeconds": 0, "durationSeconds": 0.5, "text": ""},
+      "subtitles": [],
+      "events": [
+        {"id": "cut-open-event", "beatId": "cut-open", "at": 0.05, "targetId": "scene", "visual": {"kind": "hold", "durationSeconds": 0.15}, "proofTimeId": "cut-establish"},
+        {"id": "cut-burst-event", "beatId": "cut-burst", "at": 0.48, "targetId": "star-field", "visual": {"kind": "emphasis", "action": "pulse", "durationSeconds": 0.25, "intensity": 0.5}, "proofTimeId": "cut-action"},
+        {"id": "cut-final-event", "beatId": "cut-final", "at": 0.9, "targetId": "scene", "visual": {"kind": "hold", "durationSeconds": 0.2}, "proofTimeId": "cut-final-proof"}
+      ]
+    }
+  ],
+  "sceneTransitions": [{
+    "id": "world-to-cut",
+    "fromSceneId": "layered-world",
+    "toSceneId": "beat-cut",
+    "intent": "chapter-reset",
+    "rationale": "The explanation resolves into a new editorial card on the outgoing accent.",
+    "treatment": {"type": "cut", "motivation": "rhythmic", "durationSeconds": 0, "beatId": "world-cut"}
+  }]
+}

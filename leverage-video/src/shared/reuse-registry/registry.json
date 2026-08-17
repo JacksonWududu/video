@@ -1,0 +1,89 @@
+{
+  "schema_version": "shared-module-registry-v1",
+  "modules": [
+    {
+      "module_id": "action-state-schedule",
+      "path": "leverage-video/src/shared/action-state-schedule",
+      "use_when": "Computing or validating duration-driven character state counts, frame occurrences, and revoice hold constraints.",
+      "required_for_new_episode_script": false
+    },
+    {
+      "module_id": "assembly-plan",
+      "path": "leverage-video/src/shared/assembly-plan",
+      "use_when": "Building a knowledge-video assembly plan from locked timing, active approved rasters, and approved whiteboard clips while rejecting retired Comic routes.",
+      "required_for_new_episode_script": true
+    },
+    {
+      "module_id": "audio-tools",
+      "path": "leverage-video/src/shared/audio-tools",
+      "use_when": "Creating offline word timestamps or comparing ASR output with locked narration.",
+      "required_for_new_episode_script": false
+    },
+    {
+      "module_id": "episode-tooling",
+      "path": "leverage-video/src/shared/episode-tooling",
+      "use_when": "Hashing, validating, atomically writing, or normalizing episode artifacts.",
+      "required_for_new_episode_script": false
+    },
+    {
+      "module_id": "full-frame-mask-sweep",
+      "path": "leverage-video/src/shared/full-frame-mask-sweep",
+      "use_when": "Rendering an approved Ian handdrawn full-frame raster.",
+      "required_for_new_episode_script": false
+    },
+    {
+      "module_id": "gen-think",
+      "path": "leverage-video/src/shared/gen-think",
+      "use_when": "Rendering the approved shared GEN-THINK action family.",
+      "required_for_new_episode_script": false
+    },
+    {
+      "module_id": "render-qa",
+      "path": "leverage-video/src/shared/render-qa",
+      "use_when": "Probing and fully decoding still, preview, master, or delivery media.",
+      "required_for_new_episode_script": false
+    },
+    {
+      "module_id": "reuse-registry",
+      "path": "leverage-video/src/shared/reuse-registry",
+      "use_when": "Auditing shared modules before creating episode-local script code.",
+      "required_for_new_episode_script": false
+    },
+    {
+      "module_id": "scene-transitions",
+      "path": "leverage-video/src/shared/scene-transitions",
+      "use_when": "Resolving and rendering every ordinary inter-shot transition.",
+      "required_for_new_episode_script": false
+    },
+    {
+      "module_id": "video-scenes",
+      "path": "leverage-video/src/shared/video-scenes",
+      "use_when": "Composing cover, narration, active imagegen/Ian/Ink GraphicScene/WhiteboardScene output, with DoodleScene and ComicScene retained only for historical read-only parsing.",
+      "required_for_new_episode_script": true
+    },
+    {
+      "module_id": "visual-language",
+      "path": "leverage-video/src/shared/visual-language",
+      "use_when": "Locking visual_structure_id and treatment_profile_id, or reading retired Comic planning evidence without creating new work.",
+      "required_for_new_episode_script": false
+    },
+    {
+      "module_id": "visual-generation-routes",
+      "path": "leverage-video/src/shared/visual-generation-routes",
+      "use_when": "Validating per-shot white-cat constraints, active imagegen, Ian, Ink Doodle Knowledge Card, or optional Whiteboard routes, retired comic-imagegen/doodle-slides exclusions, and route-specific transition recommendations before review or production.",
+      "required_for_new_episode_script": false
+    },
+    {
+      "module_id": "visual-direction-review-form",
+      "path": "leverage-video/src/shared/visual-direction-review-form",
+      "use_when": "Presenting the six-column per-shot visual-direction review form, validating full or partial structured submissions, deriving route treatments, and identifying rows or adjacent transitions that require re-presentation.",
+      "required_for_new_episode_script": false
+    },
+    {
+      "module_id": "watercolor-bloom",
+      "path": "leverage-video/src/shared/watercolor-bloom",
+      "use_when": "Rendering every adjacent image change inside a shot.",
+      "required_for_new_episode_script": false
+    }
+  ]
+}

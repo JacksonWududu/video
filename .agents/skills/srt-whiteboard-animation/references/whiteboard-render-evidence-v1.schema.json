@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "whiteboard-render-evidence-v1",
+  "title": "Knowledge-video whiteboard render evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract_version", "visual_generation_route", "shot_id", "source_image",
+    "normalized_image", "annotation", "preview", "clip", "source_dimensions",
+    "source_aspect_ratio_relative_error", "normalized_dimensions", "total_frames",
+    "element_order", "media"
+  ],
+  "properties": {
+    "contract_version": {"const": "whiteboard-render-evidence-v1"},
+    "visual_generation_route": {"const": "srt-whiteboard-animation"},
+    "shot_id": {"type": "string", "minLength": 1},
+    "source_image": {"$ref": "#/$defs/artifact"},
+    "normalized_image": {"$ref": "#/$defs/artifact"},
+    "annotation": {"$ref": "#/$defs/artifact"},
+    "preview": {"$ref": "#/$defs/artifact"},
+    "clip": {"$ref": "#/$defs/artifact"},
+    "source_dimensions": {"type": "array", "prefixItems": [{"type": "integer", "minimum": 1}, {"type": "integer", "minimum": 1}], "minItems": 2, "maxItems": 2},
+    "source_aspect_ratio_relative_error": {"type": "number", "minimum": 0, "maximum": 0.005},
+    "normalized_dimensions": {"const": [1920, 1080]},
+    "total_frames": {"type": "integer", "minimum": 16},
+    "element_order": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+    "media": {
+      "type": "object",
+      "required": ["width", "height", "fps", "frame_count", "codec", "audio_streams", "final_frame_verified", "full_frame_hold_verified_frames"],
+      "properties": {
+        "width": {"const": 1920}, "height": {"const": 1080}, "fps": {"const": 30},
+        "frame_count": {"type": "integer", "minimum": 16}, "codec": {"const": "h264"},
+        "audio_streams": {"const": 0}, "final_frame_verified": {"const": true},
+        "full_frame_hold_verified_frames": {"type": "integer", "minimum": 15},
+        "final_hold_max_mae": {"type": "number", "minimum": 0},
+        "ffmpeg_path": {"type": "string", "minLength": 1}
+      }
+    }
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "artifact": {
+      "type": "object", "additionalProperties": false, "required": ["path", "sha256"],
+      "properties": {"path": {"type": "string", "minLength": 1}, "sha256": {"$ref": "#/$defs/sha256"}}
+    }
+  }
+}

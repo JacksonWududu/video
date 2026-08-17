@@ -1,0 +1,32 @@
+{
+  "name": "leverage-explainer-video",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "studio": "remotion studio src/index.ts --no-open",
+    "still": "remotion still src/index.ts LeverageExplainer out/check.png --frame=3600",
+    "render": "remotion render src/index.ts LeverageExplainer out/leverage-explainer.mp4 --codec=h264 --audio-codec=aac",
+    "still:vertical": "remotion still src/index.ts LeverageExplainerVertical out/check-vertical.png --frame=3600 --browser-executable='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'",
+    "render:vertical": "remotion render src/index.ts LeverageExplainerVertical out/leverage-explainer-vertical.mp4 --codec=h264 --audio-codec=aac --crf=18 --concurrency=1 --browser-executable='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'",
+    "still:voice1-preview": "remotion still src/index.ts LeverageVoice1Preview30 out/voice1-preview-check.png --frame=600 --browser-executable='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'",
+    "render:voice1-preview": "remotion render src/index.ts LeverageVoice1Preview30 out/leverage-voice1-preview-30s.mp4 --codec=h264 --audio-codec=aac --crf=18 --concurrency=1 --browser-executable='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'",
+    "prerender:topic3-prefix-v3": "node ../.agents/skills/assemble-video-master/scripts/validate-scene-transitions.mjs src/topic3/schema/assembly-plan-v2.json src/topic3/script/video/Topic3Video.tsx",
+    "render:topic3-prefix-v3": "remotion render src/topic3/script/video/index.ts ZhiXingHeYiBaseV2 src/topic3/assets/video/assembly-base-prefix-open-through-s06-v3.mp4 --codec=h264 --audio-codec=aac --crf=18 --concurrency=1 --frames=0-2409 --public-dir=src --browser-executable='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'",
+    "prerender:topic3-prefix-v4": "node ../.agents/skills/assemble-video-master/scripts/validate-scene-transitions.mjs src/topic3/schema/assembly-plan-v2.json src/topic3/script/video/Topic3Video.tsx",
+    "render:topic3-prefix-v4": "remotion render src/topic3/script/video/index.ts ZhiXingHeYiBaseV2 src/topic3/assets/video/assembly-base-prefix-open-through-s06-v4.mp4 --codec=h264 --audio-codec=aac --crf=18 --concurrency=1 --frames=0-2409 --public-dir=src --browser-executable='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'",
+    "prerender:topic3-s04-s05-watercolor-demo-v1": "node ../.agents/skills/assemble-video-master/scripts/validate-scene-transitions.mjs src/topic3/schema/assembly-plan-v2.json src/topic3/script/video/Topic3Video.tsx && node src/topic3/script/test-s04-s05-complex-watercolor-demo-v1.mjs",
+    "render:topic3-s04-s05-watercolor-demo-v1": "remotion render src/topic3/script/video/index.ts S04S05ComplexWatercolorBloomDemo src/topic3/assets/video/s04-to-s05-complex-watercolor-bloom-demo-v03.mp4 --codec=h264 --crf=18 --concurrency=1 --public-dir=src --browser-executable='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'"
+  },
+  "dependencies": {
+    "@remotion/captions": "4.0.505",
+    "@remotion/cli": "4.0.505",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "remotion": "4.0.505"
+  },
+  "devDependencies": {
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.4",
+    "typescript": "5.9.3"
+  }
+}

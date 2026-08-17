@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.paper-collage.dev/semantic-slices.schema.json",
+  "title": "Paper Collage Registered Semantic Slice Derivation",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "projectSlug",
+    "sceneId",
+    "topologyId",
+    "alphaThreshold",
+    "minimumComponentPixels",
+    "sources"
+  ],
+  "properties": {
+    "$schema": {"type": "string"},
+    "schemaVersion": {"const": 1},
+    "projectSlug": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+    "sceneId": {"type": "string", "minLength": 1},
+    "topologyId": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+    "alphaThreshold": {"type": "integer", "minimum": 1, "maximum": 254},
+    "minimumComponentPixels": {"type": "integer", "minimum": 1},
+    "sources": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["assetId", "slices"],
+        "properties": {
+          "assetId": {"type": "string", "minLength": 1},
+          "sourceSha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+          "slices": {
+            "type": "array",
+            "minItems": 2,
+            "items": {
+              "type": "object",
+              "required": [
+                "assetId",
+                "nodeId",
+                "semanticRole",
+                "output",
+                "components"
+              ],
+              "properties": {
+                "assetId": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+                "nodeId": {"type": "string", "minLength": 1},
+                "semanticRole": {
+                  "enum": [
+                    "floor-element",
+                    "submerged-plant",
+                    "egg-cluster",
+                    "aquatic-animal",
+                    "surface-animal",
+                    "emergent-plant",
+                    "surface-effect"
+                  ]
+                },
+                "output": {"type": "string", "minLength": 1},
+                "components": {
+                  "oneOf": [
+                    {"const": "remaining"},
+                    {
+                      "type": "array",
+                      "minItems": 1,
+                      "items": {
+                        "type": "object",
+                        "required": ["left", "top", "width", "height"],
+                        "properties": {
+                          "left": {"type": "integer", "minimum": 0},
+                          "top": {"type": "integer", "minimum": 0},
+                          "width": {"type": "integer", "minimum": 1},
+                          "height": {"type": "integer", "minimum": 1}
+                        },
+                        "additionalProperties": false
+                      }
+                    }
+                  ]
+                }
+              },
+              "additionalProperties": false
+            }
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

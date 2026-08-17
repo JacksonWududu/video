@@ -1,0 +1,351 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.paper-collage.dev/editorial.schema.json",
+  "title": "VOX Editorial System Contract v1",
+  "$defs": {
+    "normalizedPoint": {
+      "type": "object",
+      "required": ["x", "y"],
+      "properties": {
+        "x": {"type": "number", "minimum": 0, "maximum": 1},
+        "y": {"type": "number", "minimum": 0, "maximum": 1}
+      },
+      "additionalProperties": false
+    },
+    "normalizedRectangle": {
+      "type": "object",
+      "required": ["x", "y", "width", "height"],
+      "properties": {
+        "x": {"type": "number", "minimum": 0, "maximum": 1},
+        "y": {"type": "number", "minimum": 0, "maximum": 1},
+        "width": {"type": "number", "exclusiveMinimum": 0, "maximum": 1},
+        "height": {"type": "number", "exclusiveMinimum": 0, "maximum": 1},
+        "padding": {"type": "number", "minimum": 0, "maximum": 0.25}
+      },
+      "additionalProperties": false
+    },
+    "timebase": {
+      "type": "object",
+      "required": ["fps", "rounding"],
+      "properties": {
+        "fps": {"type": "number", "exclusiveMinimum": 0},
+        "rounding": {"enum": ["nearest", "floor", "ceil"]}
+      },
+      "additionalProperties": false
+    },
+    "media": {
+      "type": "object",
+      "required": ["id", "kind", "src", "sha256", "durationSeconds", "timelineMode"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "kind": {"enum": ["narration", "sfx", "music"]},
+        "src": {"type": "string", "minLength": 1},
+        "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+        "durationSeconds": {"type": "number", "exclusiveMinimum": 0},
+        "timingDataSrc": {"type": "string", "minLength": 1},
+        "timelineMode": {"enum": ["scene-local", "global"]},
+        "sceneOffsetSeconds": {"type": "number", "minimum": 0}
+      },
+      "additionalProperties": false
+    },
+    "cue": {
+      "type": "object",
+      "required": ["id", "kind", "source", "timingBasis", "mediaId", "sceneId", "atSeconds", "priority", "toleranceSeconds"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "kind": {
+          "enum": [
+            "narration-word",
+            "narration-phrase",
+            "sentence",
+            "semantic-emphasis",
+            "sfx-onset",
+            "sfx-peak",
+            "sfx-tail",
+            "music-beat",
+            "music-bar",
+            "music-accent",
+            "manual"
+          ]
+        },
+        "source": {"enum": ["authored", "detected"]},
+        "timingBasis": {"enum": ["actual-audio", "manual"]},
+        "mediaId": {"type": "string", "minLength": 1},
+        "sceneId": {"type": "string", "minLength": 1},
+        "atSeconds": {"type": "number", "minimum": 0},
+        "endSeconds": {"type": "number", "minimum": 0},
+        "text": {"type": "string"},
+        "priority": {"type": "integer", "minimum": 0, "maximum": 100},
+        "toleranceSeconds": {"type": "number", "minimum": 0, "maximum": 1}
+      },
+      "additionalProperties": false
+    },
+    "editPoint": {
+      "type": "object",
+      "required": ["id", "cueIds", "conflictPolicy"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "cueIds": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "priority": {"type": "integer", "minimum": 0, "maximum": 100},
+        "toleranceSeconds": {"type": "number", "minimum": 0, "maximum": 1},
+        "conflictPolicy": {"enum": ["merge", "highest-priority", "offset-within-window", "reject"]}
+      },
+      "additionalProperties": false
+    },
+    "binding": {
+      "type": "object",
+      "required": ["id", "sceneId", "targetType", "targetId", "editPointId"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "sceneId": {"type": "string", "minLength": 1},
+        "targetType": {
+          "enum": [
+            "scene-boundary",
+            "typography-reveal",
+            "typography-emphasis",
+            "graphic-action",
+            "annotation-lifecycle",
+            "data-state",
+            "editorial-transition"
+          ]
+        },
+        "targetId": {"type": "string", "minLength": 1},
+        "editPointId": {"type": "string", "minLength": 1},
+        "mode": {"enum": ["word", "line", "element", "state", "boundary"]},
+        "offsetSeconds": {"type": "number", "minimum": -1, "maximum": 1}
+      },
+      "additionalProperties": false
+    },
+    "exclusionZone": {
+      "type": "object",
+      "required": ["id", "role", "x", "y", "width", "height"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "role": {"enum": ["title", "subtitle", "motif-field", "subject", "data", "custom"]},
+        "x": {"type": "number", "minimum": 0, "maximum": 1},
+        "y": {"type": "number", "minimum": 0, "maximum": 1},
+        "width": {"type": "number", "exclusiveMinimum": 0, "maximum": 1},
+        "height": {"type": "number", "exclusiveMinimum": 0, "maximum": 1},
+        "padding": {"type": "number", "minimum": 0, "maximum": 0.25}
+      },
+      "additionalProperties": false
+    },
+    "responsiveProfile": {
+      "type": "object",
+      "required": ["id", "width", "height", "safeArea", "densityBudget", "typographyScale", "parallaxScale", "exclusionZones"],
+      "properties": {
+        "id": {"enum": ["16:9", "9:16", "1:1"]},
+        "width": {"type": "integer", "minimum": 1},
+        "height": {"type": "integer", "minimum": 1},
+        "safeArea": {"$ref": "#/$defs/normalizedRectangle"},
+        "densityBudget": {"type": "integer", "minimum": 1, "maximum": 100},
+        "typographyScale": {"type": "number", "exclusiveMinimum": 0, "maximum": 3},
+        "parallaxScale": {"type": "number", "minimum": 0, "maximum": 3},
+        "exclusionZones": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/exclusionZone"}
+        }
+      },
+      "additionalProperties": false
+    },
+    "placement": {
+      "type": "object",
+      "required": ["targetId", "role", "preferredAnchor", "densityCost"],
+      "properties": {
+        "targetId": {"type": "string", "minLength": 1},
+        "role": {"enum": ["title", "subtitle", "subject", "data", "annotation", "card", "motif"]},
+        "preferredAnchor": {"enum": ["top", "top-right", "right", "bottom-right", "bottom", "bottom-left", "left", "top-left", "center"]},
+        "fallbackAnchors": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"enum": ["top", "top-right", "right", "bottom-right", "bottom", "bottom-left", "left", "top-left", "center"]}
+        },
+        "densityCost": {"type": "integer", "minimum": 1, "maximum": 20},
+        "profileOverrides": {
+          "type": "object",
+          "properties": {
+            "16:9": {"$ref": "#/$defs/normalizedRectangle"},
+            "9:16": {"$ref": "#/$defs/normalizedRectangle"},
+            "1:1": {"$ref": "#/$defs/normalizedRectangle"}
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "sceneDirecting": {
+      "type": "object",
+      "required": ["sceneId", "compositionProfile", "typographyProfile", "subjectFraming", "placements"],
+      "properties": {
+        "sceneId": {"type": "string", "minLength": 1},
+        "compositionProfile": {"type": "string", "minLength": 1},
+        "typographyProfile": {"type": "string", "minLength": 1},
+        "subjectFraming": {
+          "type": "object",
+          "required": ["mode", "focusPoint"],
+          "properties": {
+            "mode": {"enum": ["contain", "cover", "portrait-focus", "data-focus"]},
+            "focusPoint": {"$ref": "#/$defs/normalizedPoint"}
+          },
+          "additionalProperties": false
+        },
+        "parallaxScale": {
+          "type": "object",
+          "properties": {
+            "16:9": {"type": "number", "minimum": 0, "maximum": 3},
+            "9:16": {"type": "number", "minimum": 0, "maximum": 3},
+            "1:1": {"type": "number", "minimum": 0, "maximum": 3}
+          },
+          "additionalProperties": false
+        },
+        "cropFocus": {
+          "type": "object",
+          "properties": {
+            "16:9": {"$ref": "#/$defs/normalizedPoint"},
+            "9:16": {"$ref": "#/$defs/normalizedPoint"},
+            "1:1": {"$ref": "#/$defs/normalizedPoint"}
+          },
+          "additionalProperties": false
+        },
+        "placements": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/placement"}
+        }
+      },
+      "additionalProperties": false
+    },
+    "anchorReference": {
+      "type": "object",
+      "required": ["targetId", "anchor"],
+      "properties": {
+        "targetId": {"type": "string", "minLength": 1},
+        "anchor": {"enum": ["top", "top-right", "right", "bottom-right", "bottom", "bottom-left", "left", "top-left", "center"]},
+        "point": {"$ref": "#/$defs/normalizedPoint"}
+      },
+      "additionalProperties": false
+    },
+    "matchDescriptor": {
+      "type": "object",
+      "minProperties": 1,
+      "properties": {
+        "shape": {"type": "string", "minLength": 1},
+        "color": {"type": "string", "minLength": 1},
+        "value": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+        "width": {"type": "number", "exclusiveMinimum": 0, "maximum": 1},
+        "height": {"type": "number", "exclusiveMinimum": 0, "maximum": 1}
+      },
+      "additionalProperties": false
+    },
+    "advancedTransition": {
+      "type": "object",
+      "required": ["id", "scope", "type", "sceneId", "editPointId", "semanticIntent", "sourceAnchor", "destinationAnchor", "sourceDescriptor", "destinationDescriptor", "matchDimensions", "continuityTolerance", "invalidPolicy", "treatment"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "scope": {"enum": ["scene-boundary", "within-shot"]},
+        "type": {"enum": ["match-cut", "graphic-match", "shape-match", "position-scale-match", "color-value-match", "within-shot-card-switch", "panel-replace", "data-state-transition"]},
+        "sceneId": {"type": "string", "minLength": 1},
+        "destinationSceneId": {"type": "string", "minLength": 1},
+        "editPointId": {"type": "string", "minLength": 1},
+        "semanticIntent": {"type": "string", "minLength": 1},
+        "sourceAnchor": {"$ref": "#/$defs/anchorReference"},
+        "destinationAnchor": {"$ref": "#/$defs/anchorReference"},
+        "sourceDescriptor": {"$ref": "#/$defs/matchDescriptor"},
+        "destinationDescriptor": {"$ref": "#/$defs/matchDescriptor"},
+        "matchDimensions": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"enum": ["shape", "position", "scale", "color", "value"]}
+        },
+        "continuityTolerance": {"type": "number", "minimum": 0, "maximum": 1},
+        "invalidPolicy": {"enum": ["reject", "fallback"]},
+        "fallback": {"enum": ["cut", "wipe", "panel-replace"]},
+        "treatment": {"enum": ["hard-cut", "card-switch", "panel-replace", "data-state", "slide", "wipe", "scale-swap", "value-tween"]}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"scope": {"const": "scene-boundary"}}},
+          "then": {"required": ["destinationSceneId"]}
+        },
+        {
+          "if": {"properties": {"invalidPolicy": {"const": "fallback"}}},
+          "then": {"required": ["fallback"]}
+        }
+      ],
+      "additionalProperties": false
+    },
+    "resolvedEditPoint": {
+      "type": "object",
+      "required": ["id", "sceneId", "cueIds", "resolvedSeconds", "mediaFrame", "sceneFrame", "renderFrame", "priority", "toleranceSeconds", "conflictPolicy", "sources", "timingBasis"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "sceneId": {"type": "string", "minLength": 1},
+        "cueIds": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+        "resolvedSeconds": {"type": "number", "minimum": 0},
+        "mediaFrame": {"type": "integer", "minimum": 0},
+        "sceneFrame": {"type": "integer", "minimum": 0},
+        "renderFrame": {"type": "integer", "minimum": 0},
+        "priority": {"type": "integer", "minimum": 0, "maximum": 100},
+        "toleranceSeconds": {"type": "number", "minimum": 0, "maximum": 1},
+        "conflictPolicy": {"enum": ["merge", "highest-priority", "offset-within-window", "reject"]},
+        "sources": {"type": "array", "items": {"enum": ["authored", "detected"]}},
+        "timingBasis": {"type": "array", "items": {"enum": ["actual-audio", "manual"]}}
+      },
+      "additionalProperties": false
+    },
+    "editorialAuthoring": {
+      "type": "object",
+      "required": ["timebase", "wordTimingPolicy", "media", "cues", "editPoints", "bindings", "responsiveProfiles", "sceneDirecting", "transitions"],
+      "properties": {
+        "timebase": {"$ref": "#/$defs/timebase"},
+        "wordTimingPolicy": {"enum": ["require", "phrase-fallback", "block"]},
+        "media": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/media"}},
+        "cues": {"type": "array", "items": {"$ref": "#/$defs/cue"}},
+        "editPoints": {"type": "array", "items": {"$ref": "#/$defs/editPoint"}},
+        "bindings": {"type": "array", "items": {"$ref": "#/$defs/binding"}},
+        "responsiveProfiles": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "items": {"$ref": "#/$defs/responsiveProfile"}
+        },
+        "sceneDirecting": {"type": "array", "items": {"$ref": "#/$defs/sceneDirecting"}},
+        "transitions": {"type": "array", "items": {"$ref": "#/$defs/advancedTransition"}},
+        "activeProfile": {"enum": ["16:9", "9:16", "1:1"]}
+      },
+      "additionalProperties": true
+    },
+    "editorialCompiled": {
+      "allOf": [
+        {"$ref": "#/$defs/editorialAuthoring"},
+        {
+          "type": "object",
+          "required": ["resolvedEditPoints", "conflicts", "responsivePlans", "transitionPlans", "fingerprint"],
+          "properties": {
+            "resolvedEditPoints": {"type": "array", "items": {"$ref": "#/$defs/resolvedEditPoint"}},
+            "conflicts": {"type": "array", "items": {"type": "object"}},
+            "responsivePlans": {"type": "array", "items": {"type": "object"}},
+            "transitionPlans": {"type": "array", "items": {"type": "object"}},
+            "fingerprint": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+          }
+        }
+      ]
+    },
+    "editorialProject": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["status"],
+          "properties": {"status": {"const": "pending"}},
+          "additionalProperties": false
+        },
+        {"$ref": "#/$defs/editorialCompiled"}
+      ]
+    }
+  }
+}

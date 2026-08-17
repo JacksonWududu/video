@@ -1,0 +1,528 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.paper-collage.dev/asset-request.schema.json",
+  "title": "Paper Collage Provider Asset Request",
+  "type": "object",
+  "required": ["schemaVersion", "projectSlug", "assetId", "capability", "output"],
+  "properties": {
+    "$schema": {"type": "string"},
+    "schemaVersion": {"const": 8},
+    "projectSlug": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+    "assetId": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+    "capability": {"enum": ["text", "image", "voice"]},
+    "output": {"type": "string", "minLength": 1},
+    "providerSource": {
+      "type": "object",
+      "required": ["mode", "minimumWidth", "minimumHeight", "aspectRatioTolerance", "normalization"],
+      "properties": {
+        "mode": {"const": "provider-native"},
+        "minimumWidth": {"type": "integer", "minimum": 2},
+        "minimumHeight": {"type": "integer", "minimum": 2},
+        "aspectRatioTolerance": {"type": "number", "minimum": 0, "maximum": 0.1},
+        "normalization": {
+          "type": "object",
+          "required": ["method", "targetCanvas"],
+          "properties": {
+            "method": {"const": "deterministic-resize"},
+            "targetCanvas": {
+              "type": "object",
+              "required": ["width", "height"],
+              "properties": {
+                "width": {"type": "integer", "minimum": 1},
+                "height": {"type": "integer", "minimum": 1}
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "worldTopologyBinding": {
+      "type": "object",
+      "required": ["schemaVersion", "proofId", "fingerprint", "stripId"],
+      "properties": {
+        "schemaVersion": {"const": 1},
+        "proofId": {"type": "string", "minLength": 1},
+        "fingerprint": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "stripId": {"type": "string", "minLength": 1}
+      },
+      "additionalProperties": false
+    },
+    "prompt": {"type": "string"},
+    "styleProfileBinding": {
+      "$ref": "https://local.paper-collage.dev/style-profile.schema.json#/$defs/binding"
+    },
+    "text": {"type": "string"},
+    "voiceId": {"type": "string"},
+    "model": {"type": "string"},
+    "settings": {"type": "object"},
+    "outputSurface": {
+      "type": "object",
+      "required": ["mode"],
+      "properties": {
+        "mode": {"enum": ["alpha", "chroma-key", "opaque", "layer-sheet", "seamless-strip-x"]},
+        "keyColor": {"type": "string", "pattern": "^#[0-9a-fA-F]{6}$"},
+        "tolerance": {"type": "integer", "minimum": 0, "maximum": 255},
+        "keyPlane": {"$ref": "#/$defs/observedKeyPlane"},
+        "minimumViewportSpan": {"type": "number", "minimum": 1}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"mode": {"const": "chroma-key"}}},
+          "then": {"required": ["keyColor"]}
+        },
+        {
+          "if": {"properties": {"mode": {"const": "seamless-strip-x"}}},
+          "then": {"required": ["minimumViewportSpan"]}
+        }
+      ],
+      "additionalProperties": false
+    },
+    "timingBinding": {
+      "type": "object",
+      "required": ["sceneId"],
+      "properties": {
+        "sceneId": {"type": "string", "minLength": 1},
+        "minDurationSeconds": {"type": "number", "exclusiveMinimum": 0},
+        "maxDurationSeconds": {"type": "number", "exclusiveMinimum": 0}
+      },
+      "anyOf": [
+        {"required": ["minDurationSeconds"]},
+        {"required": ["maxDurationSeconds"]}
+      ],
+      "additionalProperties": false
+    },
+    "compositionBinding": {
+      "type": "object",
+      "required": ["sceneId", "nodeId", "pattern", "outputRole", "canvas", "derivation"],
+      "properties": {
+        "sceneId": {"type": "string", "minLength": 1},
+        "nodeId": {"type": "string", "minLength": 1},
+        "pattern": {"enum": ["free", "supported-subject", "registered-environment", "registered-depth-stack", "looping-environment", "state-sequence", "canonical-container"]},
+        "registrationId": {"type": "string", "minLength": 1},
+        "sourceMasterAssetId": {"type": "string", "minLength": 1},
+        "outputRole": {"type": "string", "minLength": 1},
+        "canvas": {
+          "type": "object",
+          "required": ["width", "height"],
+          "properties": {
+            "width": {"type": "integer", "minimum": 1},
+            "height": {"type": "integer", "minimum": 1}
+          },
+          "additionalProperties": false
+        },
+        "derivation": {
+          "type": "object",
+          "required": ["method"],
+          "properties": {
+            "method": {"enum": ["provider-generation", "provider-edit", "alpha-extraction", "crop", "seamless-period-crop", "mask-application", "manual-import"]},
+            "parentAssetId": {"type": "string", "minLength": 1}
+          },
+          "additionalProperties": false
+        }
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"pattern": {"enum": ["supported-subject", "registered-environment", "registered-depth-stack", "state-sequence", "canonical-container"]}}},
+          "then": {"required": ["registrationId", "sourceMasterAssetId"]}
+        }
+      ],
+      "additionalProperties": false
+    },
+    "containerPackageBinding": {
+      "type": "object",
+      "required": [
+        "familyId",
+        "sourcePackageId",
+        "sourceStrategy",
+        "registrationId",
+        "sourceMasterAssetId",
+        "canvas",
+        "packageRole",
+        "cleanPlateAssetId",
+        "canonicalFrameAssetId",
+        "contentSheetAssetId",
+        "interiorMaskAssetId",
+        "authoritativeSurfaceId",
+        "interiorShape",
+        "alignmentPolicy",
+        "states",
+        "sheetLayout",
+        "terminalStateId",
+        "terminalPolicy",
+        "frameRedrawPolicy",
+        "duplicateSurfacePolicy",
+        "recoveryPolicy"
+      ],
+      "properties": {
+        "familyId": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+        "sourcePackageId": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+        "sourceStrategy": {"const": "canonical-frame-with-content-sheet"},
+        "registrationId": {"type": "string", "minLength": 1},
+        "sourceMasterAssetId": {"type": "string", "minLength": 1},
+        "canvas": {"$ref": "composition.schema.json#/$defs/coordinateSpace"},
+        "packageRole": {"enum": ["clean-plate", "canonical-frame", "content-state-sheet"]},
+        "cleanPlateAssetId": {"type": "string", "minLength": 1},
+        "canonicalFrameAssetId": {"type": "string", "minLength": 1},
+        "contentSheetAssetId": {"type": "string", "minLength": 1},
+        "interiorMaskAssetId": {"type": "string", "minLength": 1},
+        "authoritativeSurfaceId": {"type": "string", "minLength": 1},
+        "interiorShape": {
+          "$ref": "https://local.paper-collage.dev/canonical-container.schema.json#/$defs/interiorShape"
+        },
+        "alignmentPolicy": {
+          "$ref": "https://local.paper-collage.dev/canonical-container.schema.json#/properties/alignmentPolicy"
+        },
+        "states": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 12,
+          "items": {
+            "type": "object",
+            "required": ["stateId", "row", "column", "at", "fillLevel"],
+            "properties": {
+              "stateId": {"type": "string", "minLength": 1},
+              "row": {"type": "integer", "minimum": 0},
+              "column": {"type": "integer", "minimum": 0},
+              "at": {"type": "number", "minimum": 0, "maximum": 1},
+              "fillLevel": {"type": "number", "minimum": 0, "maximum": 1}
+            },
+            "additionalProperties": false
+          }
+        },
+        "sheetLayout": {
+          "type": "object",
+          "required": ["columns", "rows"],
+          "properties": {
+            "columns": {"type": "integer", "minimum": 1, "maximum": 4},
+            "rows": {"type": "integer", "minimum": 1, "maximum": 4}
+          },
+          "additionalProperties": false
+        },
+        "terminalStateId": {"type": "string", "minLength": 1},
+        "terminalPolicy": {
+          "$ref": "https://local.paper-collage.dev/canonical-container.schema.json#/properties/terminalPolicy"
+        },
+        "frameRedrawPolicy": {"const": "forbidden-in-content-states"},
+        "duplicateSurfacePolicy": {"const": "single-authoritative-state-sequence"},
+        "recoveryPolicy": {
+          "$ref": "https://local.paper-collage.dev/canonical-container.schema.json#/$defs/recoveryPolicy"
+        }
+      },
+      "additionalProperties": false
+    },
+    "layerPackageBinding": {
+      "type": "object",
+      "required": ["sourcePackageId", "pattern", "motionCapability", "sourceStrategy", "registrationId", "sourceMasterAssetId", "canvas", "packageRole", "completeness", "memberAssetIds", "referenceAssetIds", "sheetLayout", "recoveryPolicy"],
+      "properties": {
+        "sourcePackageId": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+        "pattern": {"enum": ["supported-subject", "registered-depth-stack"]},
+        "motionCapability": {"const": "bounded-relative"},
+        "sourceStrategy": {"enum": ["registered-layer-sheet", "context-preserving-layer-edits"]},
+        "registrationId": {"type": "string", "minLength": 1},
+        "sourceMasterAssetId": {"type": "string", "minLength": 1},
+        "canvas": {
+          "type": "object",
+          "required": ["width", "height"],
+          "properties": {
+            "width": {"type": "integer", "minimum": 1},
+            "height": {"type": "integer", "minimum": 1}
+          },
+          "additionalProperties": false
+        },
+        "packageRole": {"enum": ["reference", "registered-sheet", "support-rear", "subject", "support-front"]},
+        "completeness": {"enum": ["clean-plate", "full-silhouette", "full-overlay", null]},
+        "memberAssetIds": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"}
+        },
+        "referenceAssetIds": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"}
+        },
+        "sheetLayout": {
+          "oneOf": [
+            {"type": "null"},
+            {
+              "type": "object",
+              "required": ["columns", "rows", "cells"],
+              "properties": {
+                "columns": {"const": 2},
+                "rows": {"const": 2},
+                "providerSource": {
+                  "oneOf": [
+                    {"type": "null"},
+                    {
+                      "type": "object",
+                      "required": ["canvasMode", "minimumWidth", "minimumHeight", "cellExtraction"],
+                      "properties": {
+                        "canvasMode": {"const": "provider-native"},
+                        "minimumWidth": {"type": "integer", "minimum": 2},
+                        "minimumHeight": {"type": "integer", "minimum": 2},
+                        "cellExtraction": {"const": "explicit-rects"}
+                      },
+                      "additionalProperties": false
+                    }
+                  ]
+                },
+                "cells": {
+                  "type": "array",
+                  "minItems": 4,
+                  "maxItems": 4,
+                  "items": {
+                    "type": "object",
+                    "required": ["packageRole", "row", "column", "outputSurface"],
+                    "properties": {
+                      "packageRole": {"enum": ["reference", "support-rear", "subject", "support-front"]},
+                      "row": {"type": "integer", "minimum": 0, "maximum": 1},
+                      "column": {"type": "integer", "minimum": 0, "maximum": 1},
+                      "outputSurface": {
+                        "type": "object",
+                        "required": ["mode"],
+                        "properties": {
+                          "mode": {"enum": ["alpha", "chroma-key", "opaque"]},
+                          "keyColor": {"type": "string", "pattern": "^#[0-9a-fA-F]{6}$"},
+                          "tolerance": {"type": "integer", "minimum": 0, "maximum": 255},
+                          "keyPlane": {"$ref": "#/$defs/observedKeyPlane"}
+                        },
+                        "allOf": [
+                          {
+                            "if": {"properties": {"mode": {"const": "chroma-key"}}},
+                            "then": {"required": ["keyColor"]}
+                          }
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "additionalProperties": false
+            }
+          ]
+        },
+        "recoveryPolicy": {
+          "type": "object",
+          "required": ["completeSourceContext", "localDeterministicFixFirst", "isolatedMemberGeneration", "providerRepair", "fallback"],
+          "properties": {
+            "completeSourceContext": {"const": true},
+            "localDeterministicFixFirst": {"const": true},
+            "isolatedMemberGeneration": {"const": "forbidden"},
+            "providerRepair": {"const": "masked-complete-source-edit"},
+            "fallback": {"const": "full-source-regeneration"}
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "stateAnchor": {
+      "type": "object",
+      "required": ["id", "x", "y"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "x": {"type": "number", "minimum": 0, "maximum": 1},
+        "y": {"type": "number", "minimum": 0, "maximum": 1}
+      },
+      "additionalProperties": false
+    },
+    "stateAnchorPolicy": {
+      "type": "object",
+      "required": ["requiredAnchorIds", "maximumDrift"],
+      "properties": {
+        "requiredAnchorIds": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "maximumDrift": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 0.1
+        }
+      },
+      "additionalProperties": false
+    },
+    "stateBinding": {
+      "type": "object",
+      "required": ["poseFamilyId", "stateId", "registrationId", "sourceMasterAssetId", "facing", "anchors", "identityReferenceAssetId"],
+      "properties": {
+        "poseFamilyId": {"type": "string", "minLength": 1},
+        "stateId": {"type": "string", "minLength": 1},
+        "registrationId": {"type": "string", "minLength": 1},
+        "sourceMasterAssetId": {"type": "string", "minLength": 1},
+        "facing": {"enum": ["left", "right", "front", "back", "neutral"]},
+        "anchors": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/$defs/stateAnchor"}
+        },
+        "identityReferenceAssetId": {"type": "string", "minLength": 1}
+      },
+      "additionalProperties": false
+    },
+    "stateSheetBinding": {
+      "type": "object",
+      "required": ["poseFamilyId", "registrationId", "sourceMasterAssetId", "identityReferenceAssetId", "anchorPolicy", "layout", "states", "recoveryPolicy"],
+      "properties": {
+        "poseFamilyId": {"type": "string", "minLength": 1},
+        "registrationId": {"type": "string", "minLength": 1},
+        "sourceMasterAssetId": {"type": "string", "minLength": 1},
+        "identityReferenceAssetId": {"type": "string", "minLength": 1},
+        "anchorPolicy": {"$ref": "#/$defs/stateAnchorPolicy"},
+        "layout": {
+          "type": "object",
+          "required": ["columns", "rows"],
+          "properties": {
+            "columns": {"type": "integer", "minimum": 1},
+            "rows": {"type": "integer", "minimum": 1}
+          },
+          "additionalProperties": false
+        },
+        "states": {
+          "type": "array",
+          "minItems": 2,
+          "items": {
+            "type": "object",
+            "required": ["stateId", "row", "column", "facing", "anchors"],
+            "properties": {
+              "stateId": {"type": "string", "minLength": 1},
+              "row": {"type": "integer", "minimum": 0},
+              "column": {"type": "integer", "minimum": 0},
+              "facing": {"enum": ["left", "right", "front", "back", "neutral"]},
+              "anchors": {
+                "type": "array",
+                "minItems": 1,
+                "items": {"$ref": "#/$defs/stateAnchor"}
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "recoveryPolicy": {
+          "type": "object",
+          "required": ["strategy", "localDeterministicFixFirst", "isolatedCellGeneration", "fallback"],
+          "properties": {
+            "strategy": {"const": "preserve-sheet-context"},
+            "localDeterministicFixFirst": {"const": true},
+            "isolatedCellGeneration": {"const": "forbidden"},
+            "fallback": {"const": "full-sheet-regeneration"}
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "stateSheetRecoveryBinding": {
+      "type": "object",
+      "required": ["mode", "sourceSheetAssetId", "targetStateIds"],
+      "properties": {
+        "mode": {"enum": ["masked-sheet-edit", "full-sheet-regeneration"]},
+        "sourceSheetAssetId": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+        "targetStateIds": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "maskAssetId": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+        "maskPolarity": {"const": "white-is-editable"}
+      },
+      "allOf": [
+        {
+          "if": {"required": ["mode"], "properties": {"mode": {"const": "masked-sheet-edit"}}},
+          "then": {"required": ["maskAssetId", "maskPolarity"]}
+        }
+      ],
+      "additionalProperties": false
+    },
+    "semanticBinding": {
+      "type": "object",
+      "required": ["riskClass", "contractIds"],
+      "properties": {
+        "riskClass": {"enum": ["decorative", "identity-critical", "topology-critical", "mechanism-critical", "diagram-critical"]},
+        "contractIds": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"}
+        },
+        "generationFamily": {
+          "type": "object",
+          "required": ["familyId", "identityMemberIds", "referenceAssetIds"],
+          "properties": {
+            "familyId": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+            "identityMemberIds": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"}},
+            "stateMemberIds": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"}},
+            "referenceAssetIds": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"}}
+          },
+          "additionalProperties": false
+        }
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"riskClass": {"const": "decorative"}}},
+          "then": {"properties": {"contractIds": {"maxItems": 0}}}
+        },
+        {
+          "if": {"properties": {"riskClass": {"const": "identity-critical"}}},
+          "then": {"required": ["generationFamily"], "properties": {"contractIds": {"minItems": 1}}}
+        },
+        {
+          "if": {"properties": {"riskClass": {"enum": ["topology-critical", "mechanism-critical", "diagram-critical"]}}},
+          "then": {"properties": {"contractIds": {"minItems": 1}}}
+        }
+      ],
+      "additionalProperties": false
+    },
+    "quality": {
+      "type": "object",
+      "properties": {
+        "kind": {"enum": ["background", "environment", "character", "prop", "decorative", "character-sheet", "style-sample", "mechanism", "diagram", "image"]},
+        "requiredChecks": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"enum": ["no-text", "no-watermark", "no-people", "safe-area-clear", "style-consistent", "style-profile-conformant", "subject-complete", "identity-consistent", "identity-distinct-within-frame", "identity-family-consistent", "cross-scene-identity-continuity", "cell-separation", "untargeted-cells-unchanged", "background-uniform", "edge-clean", "silhouette-fidelity", "negative-space-clean", "background-leak-free", "mechanism-complete", "load-path-readable", "physical-plausibility", "reference-conformant", "diagram-edge-clean", "small-text-legible", "no-procedural-noise-on-semantic-lines", "clean-plate-clear", "canonical-frame-only", "container-content-only", "container-state-separation", "container-fill-progression"]}
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false,
+  "allOf": [
+    {"if": {"properties": {"capability": {"const": "text"}}}, "then": {"required": ["prompt"]}},
+    {"if": {"properties": {"capability": {"const": "image"}}}, "then": {"required": ["prompt", "styleProfileBinding", "compositionBinding", "outputSurface", "quality"]}},
+    {"if": {"properties": {"capability": {"const": "image"}}}, "then": {"required": ["semanticBinding"]}},
+    {"if": {"properties": {"compositionBinding": {"properties": {"pattern": {"const": "state-sequence"}}}}}, "then": {"oneOf": [{"required": ["stateBinding"]}, {"required": ["stateSheetBinding"]}]}},
+    {"if": {"properties": {"compositionBinding": {"properties": {"pattern": {"const": "registered-depth-stack"}}}}}, "then": {"required": ["layerPackageBinding"]}},
+    {"if": {"properties": {"compositionBinding": {"properties": {"pattern": {"const": "canonical-container"}}}}}, "then": {"required": ["containerPackageBinding"]}},
+    {"if": {"required": ["layerPackageBinding"]}, "then": {"properties": {"capability": {"const": "image"}}}},
+    {"if": {"required": ["containerPackageBinding"]}, "then": {"properties": {"capability": {"const": "image"}}}},
+    {"if": {"required": ["stateSheetRecoveryBinding"]}, "then": {"required": ["stateSheetBinding", "quality", "compositionBinding"], "properties": {"compositionBinding": {"properties": {"pattern": {"const": "state-sequence"}}}}}},
+    {"if": {"properties": {"capability": {"const": "voice"}}}, "then": {"required": ["text"]}},
+    {"if": {"required": ["timingBinding"]}, "then": {"properties": {"capability": {"const": "voice"}}}}
+  ],
+  "$defs": {
+    "observedKeyPlane": {
+      "type": "object",
+      "required": ["mode", "policyId"],
+      "properties": {
+        "mode": {"const": "provider-native-observed"},
+        "policyId": {"const": "flat-v1"}
+      },
+      "additionalProperties": false
+    }
+  }
+}

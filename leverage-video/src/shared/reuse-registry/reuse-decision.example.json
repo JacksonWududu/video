@@ -1,0 +1,27 @@
+{
+  "note": "Illustrative shape only. Run create-reuse-decision.mjs to generate current checksums and fingerprints.",
+  "schema_version": "shared-reuse-decision-v1",
+  "episode_workspace": "leverage-video/src/example-episode",
+  "registry_checksum_sha256": "generated-by-create-reuse-decision",
+  "audited_at": "generated-by-create-reuse-decision",
+  "pre_script_inventory": [],
+  "decisions": [
+    {
+      "module_id": "video-scenes",
+      "module_fingerprint_sha256": "generated-by-create-reuse-decision",
+      "decision": "reuse",
+      "reason": "The episode entry point imports the shared plan-driven KnowledgeVideo renderer.",
+      "consumers": [
+        {
+          "kind": "source",
+          "path": "leverage-video/src/example-episode/script/video/index.tsx",
+          "checksum_sha256": "record-after-script-creation",
+          "shared_import_marker": "shared/video-scenes"
+        }
+      ],
+      "verification": [
+        "Tests are executed as real commands outside this decision file."
+      ]
+    }
+  ]
+}

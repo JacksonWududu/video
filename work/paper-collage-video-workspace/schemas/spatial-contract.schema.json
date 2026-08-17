@@ -1,0 +1,377 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.paper-collage.dev/spatial-contract.schema.json",
+  "title": "Paper Collage Spatial Contract v1",
+  "$defs": {
+    "normalizedPoint": {
+      "type": "object",
+      "required": ["x", "y"],
+      "properties": {
+        "x": {"type": "number", "minimum": 0, "maximum": 1},
+        "y": {"type": "number", "minimum": 0, "maximum": 1}
+      },
+      "additionalProperties": false
+    },
+    "subjectAnchor": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["mode", "x", "y"],
+          "properties": {
+            "mode": {"const": "normalized"},
+            "x": {"type": "number", "minimum": 0, "maximum": 1},
+            "y": {"type": "number", "minimum": 0, "maximum": 1}
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["mode", "name"],
+          "properties": {
+            "mode": {"const": "state-anchor"},
+            "name": {"type": "string", "minLength": 1}
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "supportSurface": {
+      "type": "object",
+      "required": ["points"],
+      "properties": {
+        "points": {
+          "type": "array",
+          "minItems": 2,
+          "items": {"$ref": "#/$defs/normalizedPoint"}
+        }
+      },
+      "additionalProperties": false
+    },
+    "supportScreenBand": {
+      "type": "object",
+      "required": ["minY", "maxY"],
+      "properties": {
+        "minY": {"type": "number", "minimum": 0, "maximum": 1},
+        "maxY": {"type": "number", "minimum": 0, "maximum": 1}
+      },
+      "additionalProperties": false
+    },
+    "frontOcclusion": {
+      "type": "object",
+      "required": ["nodeId", "relation"],
+      "properties": {
+        "nodeId": {"type": "string", "minLength": 1},
+        "relation": {"enum": ["in-front-of-subject", "behind-subject"]},
+        "minimumAlphaOverlap": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "subtitleClearance": {
+      "type": "object",
+      "required": ["minimumGap"],
+      "properties": {
+        "minimumGap": {"type": "number", "minimum": 0, "maximum": 1}
+      },
+      "additionalProperties": false
+    },
+    "grounding": {
+      "type": "object",
+      "required": [
+        "id",
+        "kind",
+        "sceneId",
+        "subjectNodeId",
+        "supportNodeId",
+        "proofTimeIds",
+        "subjectAnchor",
+        "supportSurface",
+        "supportScreenBand",
+        "mode",
+        "maxGap",
+        "maxPenetration",
+        "maxRelativeDrift"
+      ],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "kind": {"const": "grounding"},
+        "sceneId": {"type": "string", "minLength": 1},
+        "subjectNodeId": {"type": "string", "minLength": 1},
+        "supportNodeId": {"type": "string", "minLength": 1},
+        "proofTimeIds": {
+          "type": "array",
+          "minItems": 2,
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "subjectAnchor": {"$ref": "#/$defs/subjectAnchor"},
+        "supportSurface": {"$ref": "#/$defs/supportSurface"},
+        "supportScreenBand": {"$ref": "#/$defs/supportScreenBand"},
+        "mode": {"enum": ["contact", "locked-contact"]},
+        "maxGap": {"type": "number", "minimum": 0, "maximum": 1},
+        "maxPenetration": {"type": "number", "minimum": 0, "maximum": 1},
+        "maxRelativeDrift": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "frontOcclusion": {"$ref": "#/$defs/frontOcclusion"},
+        "subtitleClearance": {"$ref": "#/$defs/subtitleClearance"}
+      },
+      "additionalProperties": false
+    },
+    "sceneProof": {
+      "type": "object",
+      "required": ["sceneId", "proofTimeId"],
+      "properties": {
+        "sceneId": {"type": "string", "minLength": 1},
+        "proofTimeId": {"type": "string", "minLength": 1}
+      },
+      "additionalProperties": false
+    },
+    "continuityPair": {
+      "type": "object",
+      "required": [
+        "role",
+        "fromNodeId",
+        "toNodeId",
+        "requireSameFamily",
+        "maxPositionDelta",
+        "maxScaleDelta"
+      ],
+      "properties": {
+        "role": {"enum": ["world", "subject", "prop", "support"]},
+        "fromNodeId": {"type": "string", "minLength": 1},
+        "toNodeId": {"type": "string", "minLength": 1},
+        "requireSameFamily": {"type": "boolean"},
+        "maxPositionDelta": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 2
+        },
+        "maxScaleDelta": {"type": "number", "minimum": 0, "maximum": 2}
+      },
+      "additionalProperties": false
+    },
+    "continuity": {
+      "type": "object",
+      "required": [
+        "id",
+        "kind",
+        "from",
+        "to",
+        "nodePairs",
+        "groundingContractIds",
+        "maxCameraPositionDelta",
+        "maxCameraZoomDelta"
+      ],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "kind": {"const": "continuity"},
+        "from": {"$ref": "#/$defs/sceneProof"},
+        "to": {"$ref": "#/$defs/sceneProof"},
+        "nodePairs": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/$defs/continuityPair"}
+        },
+        "groundingContractIds": {
+          "type": "array",
+          "minItems": 2,
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "maxCameraPositionDelta": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 2
+        },
+        "maxCameraZoomDelta": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 2
+        }
+      },
+      "additionalProperties": false
+    },
+    "gait": {
+      "type": "object",
+      "required": [
+        "id",
+        "kind",
+        "sceneId",
+        "nodeId",
+        "fromProofTimeId",
+        "throughProofTimeId",
+        "stateIds",
+        "minimumChangesPerSecond",
+        "continueThroughWindowEnd"
+      ],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "kind": {"const": "gait"},
+        "sceneId": {"type": "string", "minLength": 1},
+        "nodeId": {"type": "string", "minLength": 1},
+        "fromProofTimeId": {"type": "string", "minLength": 1},
+        "throughProofTimeId": {"type": "string", "minLength": 1},
+        "stateIds": {
+          "type": "array",
+          "minItems": 2,
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "minimumChangesPerSecond": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 30
+        },
+        "continueThroughWindowEnd": {"type": "boolean"}
+      },
+      "additionalProperties": false
+    },
+    "travelFacing": {
+      "type": "object",
+      "required": [
+        "id",
+        "kind",
+        "sceneId",
+        "nodeId",
+        "fromProofTimeId",
+        "throughProofTimeId",
+        "direction",
+        "expectedFacing",
+        "minimumTravel",
+        "rationale"
+      ],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "kind": {"const": "travel-facing"},
+        "sceneId": {"type": "string", "minLength": 1},
+        "nodeId": {"type": "string", "minLength": 1},
+        "fromProofTimeId": {"type": "string", "minLength": 1},
+        "throughProofTimeId": {"type": "string", "minLength": 1},
+        "direction": {"enum": ["left", "right"]},
+        "expectedFacing": {"enum": ["left", "right", "front", "back", "neutral"]},
+        "minimumTravel": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 2
+        },
+        "rationale": {"type": "string", "minLength": 1}
+      },
+      "additionalProperties": false
+    },
+    "pathLocomotion": {
+      "type": "object",
+      "required": [
+        "id",
+        "kind",
+        "sceneId",
+        "nodeId",
+        "worldNodeId",
+        "fromProofTimeId",
+        "throughProofTimeId",
+        "turnProofTimeIds",
+        "stateIds",
+        "minimumChangesPerSecond",
+        "continueThroughWindowEnd",
+        "minimumTravel",
+        "minimumDepthTravel",
+        "minimumProjectionScaleDelta",
+        "requiredDepthDirections",
+        "minimumDirectionSectors",
+        "maximumHeadingErrorDegrees",
+        "maximumTurnDegreesPerSecond",
+        "requireCameraFollow"
+      ],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "kind": {"const": "path-locomotion"},
+        "sceneId": {"type": "string", "minLength": 1},
+        "nodeId": {"type": "string", "minLength": 1},
+        "worldNodeId": {"type": "string", "minLength": 1},
+        "fromProofTimeId": {"type": "string", "minLength": 1},
+        "throughProofTimeId": {"type": "string", "minLength": 1},
+        "turnProofTimeIds": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "stateIds": {
+          "type": "array",
+          "minItems": 2,
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "minimumChangesPerSecond": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 30
+        },
+        "continueThroughWindowEnd": {"type": "boolean"},
+        "minimumTravel": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 20
+        },
+        "minimumDepthTravel": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 20
+        },
+        "minimumProjectionScaleDelta": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 4
+        },
+        "requiredDepthDirections": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"enum": ["toward-camera", "away-camera"]}
+        },
+        "minimumDirectionSectors": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 8
+        },
+        "maximumHeadingErrorDegrees": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 90
+        },
+        "maximumTurnDegreesPerSecond": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 1080
+        },
+        "screenSafeBand": {
+          "type": "object",
+          "required": ["minX", "maxX", "minY", "maxY", "rationale"],
+          "properties": {
+            "minX": {"type": "number", "minimum": 0, "maximum": 1},
+            "maxX": {"type": "number", "minimum": 0, "maximum": 1},
+            "minY": {"type": "number", "minimum": 0, "maximum": 1},
+            "maxY": {"type": "number", "minimum": 0, "maximum": 1},
+            "rationale": {"type": "string", "minLength": 1}
+          },
+          "additionalProperties": false
+        },
+        "requireCameraFollow": {"type": "boolean"}
+      },
+      "additionalProperties": false
+    },
+    "contract": {
+      "oneOf": [
+        {"$ref": "#/$defs/grounding"},
+        {"$ref": "#/$defs/continuity"},
+        {"$ref": "#/$defs/gait"},
+        {"$ref": "#/$defs/travelFacing"},
+        {"$ref": "#/$defs/pathLocomotion"}
+      ]
+    }
+  }
+}

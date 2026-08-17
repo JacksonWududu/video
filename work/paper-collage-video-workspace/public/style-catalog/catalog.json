@@ -1,0 +1,487 @@
+{
+  "$schema": "../../schemas/style-catalog.schema.json",
+  "schemaVersion": 3,
+  "version": "2026-07-30.2",
+  "canonicalSubject": "同一森林跑道中的乌龟与兔子，用于只比较视觉语言，不代表项目最终构图。",
+  "styles": [
+    {
+      "id": "childrens-picture-book-paper",
+      "label": "儿童绘本纸片",
+      "summary": "圆润、温暖、层次清楚，适合儿童故事和轻松寓言。",
+      "image": "style-catalog/childrens-picture-book-paper.png",
+      "profile": {
+        "schemaVersion": 2,
+        "generation": {
+          "promptDirectives": [
+            "Use rounded hand-cut paper shapes with warm watercolor grain and soft child-friendly proportions.",
+            "Keep faces, silhouettes, and foreground actions simple, readable, and emotionally clear."
+          ],
+          "negativeDirectives": [
+            "Photorealism, hard 3D plastic surfaces, and dense adult editorial detail."
+          ],
+          "compositionPrinciples": [
+            "Favor broad color blocks and generous breathing room around the main action.",
+            "Use three clearly separated paper depths without hiding the character silhouette."
+          ],
+          "preferredSurfaces": ["alpha", "opaque", "layer-sheet"]
+        },
+        "motion": {
+          "pacing": "gentle",
+          "preferredIdlePresets": ["breathe", "float", "sway"],
+          "transitionSet": "paper-story",
+          "visualSfx": {
+            "policy": "rare",
+            "maxPerScene": 1,
+            "allowedKinds": ["impact", "motion"],
+            "durationRangeSeconds": [0.2, 0.55]
+          }
+        },
+        "render": {
+          "theme": {
+            "canvas": "#6f3d2f",
+            "sceneBackground": "#d89b63",
+            "accent": "#d65a4a",
+            "ink": "#4a3027",
+            "subtitle": "#fff8e8",
+            "subtitleBackground": "rgba(74, 48, 39, .78)",
+            "foreground": "#9f563d",
+            "fontFamily": "STKaiti, KaiTi, \"Noto Serif SC\", serif",
+            "surface": {
+              "texture": {
+                "src": "textures/paper-grain.png",
+                "opacity": 0.14,
+                "blendMode": "multiply"
+              },
+              "subjectEdge": {
+                "mode": "paper-outline",
+                "color": "#fff4dc",
+                "widthPx": 4
+              },
+              "subjectShadow": {
+                "mode": "drop-shadow",
+                "offsetXPx": 0,
+                "offsetYPx": 8,
+                "blurPx": 8,
+                "color": "rgba(64, 39, 28, .24)"
+              }
+            }
+          }
+        },
+        "quality": {
+          "requiredAssetChecks": ["style-consistent", "style-profile-conformant"],
+          "requiredCompositeChecks": ["style-profile-consistent"],
+          "reviewFocus": [
+            "Rounded warm paper shapes match the selected reference card.",
+            "The frame remains inviting, uncluttered, and readable for children."
+          ]
+        }
+      }
+    },
+    {
+      "id": "hand-drawn-cutout-explainer",
+      "label": "手绘剪纸 / 手绘解释",
+      "summary": "手绘线条、剪纸边缘和解释性图形，适合知识讲解与活泼叙事。",
+      "image": "style-catalog/hand-drawn-cutout-explainer.png",
+      "profile": {
+        "schemaVersion": 2,
+        "generation": {
+          "promptDirectives": [
+            "Use visible hand-drawn ink contours, cut-paper edges, and graphic explanatory marks.",
+            "Build clear modular layers that can support annotations, mechanisms, and lively local motion."
+          ],
+          "negativeDirectives": [
+            "Polished corporate vectors, photorealism, and unstructured decorative clutter."
+          ],
+          "compositionPrinciples": [
+            "Give the hero action a strong silhouette and reserve clean space for explanatory graphics.",
+            "Mix imperfect paper geometry with disciplined visual hierarchy and explicit relationships."
+          ],
+          "preferredSurfaces": ["alpha", "chroma-key", "opaque", "layer-sheet"]
+        },
+        "motion": {
+          "pacing": "playful",
+          "preferredIdlePresets": ["breathe", "drift", "sway"],
+          "transitionSet": "paper-story",
+          "visualSfx": {
+            "policy": "selective",
+            "maxPerScene": 2,
+            "allowedKinds": ["impact", "motion"],
+            "durationRangeSeconds": [0.2, 0.6]
+          }
+        },
+        "render": {
+          "theme": {
+            "canvas": "#6e1e19",
+            "sceneBackground": "#8a271f",
+            "accent": "#e3a43a",
+            "ink": "#3f241c",
+            "subtitle": "#fff8ea",
+            "subtitleBackground": "rgba(58, 25, 18, .76)",
+            "foreground": "#8d251e",
+            "fontFamily": "STKaiti, KaiTi, \"Noto Serif SC\", serif",
+            "surface": {
+              "texture": {
+                "src": "textures/paper-grain.png",
+                "opacity": 0.14,
+                "blendMode": "multiply"
+              },
+              "subjectEdge": {
+                "mode": "paper-outline",
+                "color": "#f5eedc",
+                "widthPx": 3
+              },
+              "subjectShadow": {
+                "mode": "drop-shadow",
+                "offsetXPx": 0,
+                "offsetYPx": 10,
+                "blurPx": 7,
+                "color": "rgba(20, 15, 12, .28)"
+              }
+            }
+          }
+        },
+        "quality": {
+          "requiredAssetChecks": ["style-consistent", "style-profile-conformant"],
+          "requiredCompositeChecks": ["style-profile-consistent"],
+          "reviewFocus": [
+            "Hand-drawn contours and physical cut-paper edges remain visible across assets.",
+            "Explanatory graphics support the story without replacing semantic action."
+          ]
+        }
+      }
+    },
+    {
+      "id": "archival-collage",
+      "label": "复古档案拼贴",
+      "summary": "旧纸、印刷网点和档案照片感，适合历史、纪实与怀旧叙事。",
+      "image": "style-catalog/archival-collage.png",
+      "profile": {
+        "schemaVersion": 2,
+        "generation": {
+          "promptDirectives": [
+            "Use aged paper, restrained sepia color, halftone print texture, and archival cutout framing.",
+            "Treat photographs and documents as tactile evidence layers with legible hierarchy."
+          ],
+          "negativeDirectives": [
+            "Glossy modern gradients, neon color, and playful preschool proportions."
+          ],
+          "compositionPrinciples": [
+            "Organize evidence in measured overlapping planes with one dominant archival focal point.",
+            "Preserve readable margins, captions, and document edges instead of filling every gap."
+          ],
+          "preferredSurfaces": ["alpha", "opaque", "layer-sheet"]
+        },
+        "motion": {
+          "pacing": "measured",
+          "preferredIdlePresets": ["drift", "still", "breathe"],
+          "transitionSet": "paper-story",
+          "visualSfx": {
+            "policy": "rare",
+            "maxPerScene": 1,
+            "allowedKinds": ["impact", "motion"],
+            "durationRangeSeconds": [0.25, 0.6]
+          }
+        },
+        "render": {
+          "theme": {
+            "canvas": "#342d27",
+            "sceneBackground": "#756552",
+            "accent": "#a84d3f",
+            "ink": "#26211d",
+            "subtitle": "#f3e8d0",
+            "subtitleBackground": "rgba(38, 33, 29, .82)",
+            "foreground": "#4a4036",
+            "fontFamily": "Songti SC, STSong, \"Noto Serif SC\", serif",
+            "surface": {
+              "texture": {
+                "src": "textures/paper-grain.png",
+                "opacity": 0.14,
+                "blendMode": "multiply"
+              },
+              "subjectEdge": {
+                "mode": "paper-outline",
+                "color": "#d9ccb0",
+                "widthPx": 2
+              },
+              "subjectShadow": {
+                "mode": "drop-shadow",
+                "offsetXPx": 2,
+                "offsetYPx": 6,
+                "blurPx": 4,
+                "color": "rgba(24, 20, 17, .38)"
+              }
+            }
+          }
+        },
+        "quality": {
+          "requiredAssetChecks": ["style-consistent", "style-profile-conformant"],
+          "requiredCompositeChecks": ["style-profile-consistent"],
+          "reviewFocus": [
+            "Paper age, print texture, and archival framing agree with the reference card.",
+            "Evidence hierarchy stays sober and legible without decorative nostalgia overpowering facts."
+          ]
+        }
+      }
+    },
+    {
+      "id": "korean-cinematic-comic",
+      "label": "韩漫影视插画",
+      "summary": "精致线稿、柔和渐变与电影感光影，适合情绪叙事和现代幻想。",
+      "image": "style-catalog/korean-cinematic-comic.png",
+      "profile": {
+        "schemaVersion": 2,
+        "generation": {
+          "promptDirectives": [
+            "Use elegant clean line art, refined expressions, soft controlled gradients, and cinematic lighting with atmospheric depth.",
+            "Keep characters polished and emotionally readable while preserving a screen-oriented illustrated finish."
+          ],
+          "negativeDirectives": [
+            "Speech balloons, captions, readable text, sound-effect lettering, logos, panel borders, and long-scroll comic layouts.",
+            "Paper cutout edges, craft fibers, paper shadows, global paper texture, photorealism, and glossy 3D rendering."
+          ],
+          "compositionPrinciples": [
+            "Build cinematic depth through lighting, color, and overlapping planes while keeping the main action immediately readable.",
+            "Reserve clean subtitle-safe space and use restrained motion accents instead of dense comic-page decoration."
+          ],
+          "preferredSurfaces": ["alpha", "chroma-key", "opaque", "layer-sheet", "seamless-strip-x"]
+        },
+        "motion": {
+          "pacing": "measured",
+          "preferredIdlePresets": ["breathe", "drift", "float"],
+          "transitionSet": "clean-video",
+          "visualSfx": {
+            "policy": "rare",
+            "maxPerScene": 1,
+            "allowedKinds": ["impact", "motion"],
+            "durationRangeSeconds": [0.2, 0.5]
+          }
+        },
+        "render": {
+          "theme": {
+            "canvas": "#111827",
+            "sceneBackground": "#D9EAF7",
+            "accent": "#E85D9E",
+            "ink": "#172033",
+            "subtitle": "#FFFFFF",
+            "subtitleBackground": "rgba(17, 24, 39, .78)",
+            "foreground": "#4338CA",
+            "fontFamily": "PingFang SC, \"Noto Sans SC\", sans-serif",
+            "surface": {
+              "texture": null,
+              "subjectEdge": {
+                "mode": "none"
+              },
+              "subjectShadow": {
+                "mode": "none"
+              }
+            }
+          }
+        },
+        "quality": {
+          "requiredAssetChecks": ["style-consistent", "style-profile-conformant"],
+          "requiredCompositeChecks": ["style-profile-consistent"],
+          "reviewFocus": [
+            "Clean line work, expressive faces, gradient restraint, and cinematic light agree with the selected reference card.",
+            "The video frame remains free of baked dialogue balloons, captions, readable lettering, and long-scroll comic layout.",
+            "Any visual sound accent is sparse, editable, event-bound, and never substitutes for audio or subtitles."
+          ]
+        }
+      }
+    },
+    {
+      "id": "japanese-animation-comic",
+      "label": "日漫动画插画",
+      "summary": "清晰轮廓、平涂分色与明确明暗块，适合轻快冒险和角色动作。",
+      "image": "style-catalog/japanese-animation-comic.png",
+      "profile": {
+        "schemaVersion": 2,
+        "generation": {
+          "promptDirectives": [
+            "Use clean confident contours, crisp flat color separation, and clear graphic light-and-shadow blocks.",
+            "Keep silhouettes lively and readable with limited highlights and restrained screen-tone accents where useful."
+          ],
+          "negativeDirectives": [
+            "Speech balloons, captions, readable text, sound-effect lettering, logos, panel borders, and long-scroll comic layouts.",
+            "Paper cutout edges, craft fibers, paper shadows, global paper texture, photorealism, and glossy 3D rendering."
+          ],
+          "compositionPrinciples": [
+            "Stage character actions with clear silhouettes and graphic color grouping that reads instantly in a video frame.",
+            "Keep backgrounds simpler than the focal action and reserve uncluttered subtitle-safe space."
+          ],
+          "preferredSurfaces": ["alpha", "chroma-key", "opaque", "layer-sheet", "seamless-strip-x"]
+        },
+        "motion": {
+          "pacing": "playful",
+          "preferredIdlePresets": ["breathe", "sway", "float"],
+          "transitionSet": "clean-video",
+          "visualSfx": {
+            "policy": "selective",
+            "maxPerScene": 2,
+            "allowedKinds": ["impact", "motion"],
+            "durationRangeSeconds": [0.18, 0.5]
+          }
+        },
+        "render": {
+          "theme": {
+            "canvas": "#101522",
+            "sceneBackground": "#DCEEFF",
+            "accent": "#FF5A5F",
+            "ink": "#182033",
+            "subtitle": "#FFFFFF",
+            "subtitleBackground": "rgba(16, 21, 34, .80)",
+            "foreground": "#2563EB",
+            "fontFamily": "PingFang SC, \"Noto Sans SC\", sans-serif",
+            "surface": {
+              "texture": null,
+              "subjectEdge": {
+                "mode": "none"
+              },
+              "subjectShadow": {
+                "mode": "none"
+              }
+            }
+          }
+        },
+        "quality": {
+          "requiredAssetChecks": ["style-consistent", "style-profile-conformant"],
+          "requiredCompositeChecks": ["style-profile-consistent"],
+          "reviewFocus": [
+            "Contours, flat color separation, and graphic shadow blocks agree with the selected reference card.",
+            "The video frame remains free of baked dialogue balloons, captions, readable lettering, and long-scroll comic layout.",
+            "Visual impact or motion accents remain brief editable event layers rather than persistent page decoration."
+          ]
+        }
+      }
+    },
+    {
+      "id": "hong-kong-action-comic",
+      "label": "港漫动作插画",
+      "summary": "强劲墨线、浓烈色彩与爆发性速度感，适合武打、冲突和英雄叙事。",
+      "image": "style-catalog/hong-kong-action-comic.png",
+      "profile": {
+        "schemaVersion": 2,
+        "generation": {
+          "promptDirectives": [
+            "Use forceful brush-and-ink contours, dense varied ink weight, saturated dramatic color, and dry-brush texture inside illustrated forms.",
+            "Express heroic tension with sharp directional energy and restrained speed strokes around decisive action."
+          ],
+          "negativeDirectives": [
+            "Speech balloons, captions, readable text, sound-effect lettering, logos, panel borders, and long-scroll comic layouts.",
+            "Paper cutout edges, craft fibers, paper shadows, global paper texture, photorealism, and glossy 3D rendering."
+          ],
+          "compositionPrinciples": [
+            "Drive the eye with bold diagonals and concentrated ink contrast while preserving a clear hero silhouette.",
+            "Use explosive accents only at decisive events and preserve readable subtitle-safe space."
+          ],
+          "preferredSurfaces": ["alpha", "chroma-key", "opaque", "layer-sheet", "seamless-strip-x"]
+        },
+        "motion": {
+          "pacing": "dynamic",
+          "preferredIdlePresets": ["sway", "drift", "breathe"],
+          "transitionSet": "clean-video",
+          "visualSfx": {
+            "policy": "expressive",
+            "maxPerScene": 2,
+            "allowedKinds": ["impact", "motion"],
+            "durationRangeSeconds": [0.16, 0.45]
+          }
+        },
+        "render": {
+          "theme": {
+            "canvas": "#170D0A",
+            "sceneBackground": "#5A1712",
+            "accent": "#F2B134",
+            "ink": "#120B09",
+            "subtitle": "#FFF7E6",
+            "subtitleBackground": "rgba(18, 11, 9, .84)",
+            "foreground": "#9F1D16",
+            "fontFamily": "PingFang SC, \"Noto Sans SC\", sans-serif",
+            "surface": {
+              "texture": null,
+              "subjectEdge": {
+                "mode": "none"
+              },
+              "subjectShadow": {
+                "mode": "none"
+              }
+            }
+          }
+        },
+        "quality": {
+          "requiredAssetChecks": ["style-consistent", "style-profile-conformant"],
+          "requiredCompositeChecks": ["style-profile-consistent"],
+          "reviewFocus": [
+            "Brush weight, saturated color, directional energy, and internal dry-brush texture agree with the selected reference card.",
+            "The video frame remains free of baked dialogue balloons, captions, readable lettering, and long-scroll comic layout.",
+            "Impact and motion accents are tied to decisive events and do not become continuous visual noise."
+          ]
+        }
+      }
+    },
+    {
+      "id": "american-superhero-comic",
+      "label": "美漫英雄插画",
+      "summary": "粗重轮廓、高对比色块与印刷网点，适合英雄动作和高能讲解。",
+      "image": "style-catalog/american-superhero-comic.png",
+      "profile": {
+        "schemaVersion": 2,
+        "generation": {
+          "promptDirectives": [
+            "Use bold black outlines, powerful readable silhouettes, high-contrast color blocks, and controlled halftone print accents inside the artwork.",
+            "Stage action with dramatic rim light, confident anatomy, and kinetic heroic emphasis for a polished screen-oriented result."
+          ],
+          "negativeDirectives": [
+            "Speech balloons, captions, readable text, sound-effect lettering, logos, panel borders, and long-scroll comic layouts.",
+            "Paper cutout edges, craft fibers, paper shadows, global paper texture, photorealism, and glossy 3D rendering."
+          ],
+          "compositionPrinciples": [
+            "Build bold depth and action through silhouette, contrast, and directional staging instead of dense comic-page panels.",
+            "Keep halftone accents controlled and reserve uncluttered subtitle-safe space around the central action."
+          ],
+          "preferredSurfaces": ["alpha", "chroma-key", "opaque", "layer-sheet", "seamless-strip-x"]
+        },
+        "motion": {
+          "pacing": "dynamic",
+          "preferredIdlePresets": ["breathe", "sway", "drift"],
+          "transitionSet": "clean-video",
+          "visualSfx": {
+            "policy": "expressive",
+            "maxPerScene": 2,
+            "allowedKinds": ["impact", "motion"],
+            "durationRangeSeconds": [0.18, 0.5]
+          }
+        },
+        "render": {
+          "theme": {
+            "canvas": "#081A33",
+            "sceneBackground": "#0B4F8A",
+            "accent": "#FFD23F",
+            "ink": "#07111F",
+            "subtitle": "#FFFFFF",
+            "subtitleBackground": "rgba(7, 17, 31, .84)",
+            "foreground": "#D62828",
+            "fontFamily": "PingFang SC, \"Noto Sans SC\", sans-serif",
+            "surface": {
+              "texture": null,
+              "subjectEdge": {
+                "mode": "none"
+              },
+              "subjectShadow": {
+                "mode": "none"
+              }
+            }
+          }
+        },
+        "quality": {
+          "requiredAssetChecks": ["style-consistent", "style-profile-conformant"],
+          "requiredCompositeChecks": ["style-profile-consistent"],
+          "reviewFocus": [
+            "Bold outlines, high-contrast color, controlled halftone accents, and heroic staging agree with the selected reference card.",
+            "The video frame remains free of baked dialogue balloons, captions, readable lettering, and long-scroll comic layout.",
+            "Impact and motion accents stay brief, editable, and synchronized to discrete events."
+          ]
+        }
+      }
+    }
+  ]
+}

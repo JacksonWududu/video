@@ -1,0 +1,170 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.paper-collage.dev/canonical-container-binding.schema.json",
+  "title": "Canonical Container Manifest Binding",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "familyId",
+    "sourcePackageId",
+    "sourceStrategy",
+    "registrationId",
+    "sourceMasterAssetId",
+    "canvas",
+    "origin",
+    "role",
+    "stateId",
+    "authoritativeSurfaceId",
+    "canonicalFrameAssetId",
+    "canonicalFrameSha256",
+    "cleanPlateAssetId",
+    "cleanPlateSha256",
+    "contentSheetAssetId",
+    "contentSheetSha256",
+    "interiorMaskAssetId",
+    "interiorMaskSha256",
+    "interiorShape",
+    "alignmentPolicy",
+    "metrics",
+    "terminalStateId",
+    "terminalPolicy",
+    "recoveryPolicy",
+    "familyFingerprint"
+  ],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "familyId": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+    "sourcePackageId": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+    "sourceStrategy": {"const": "canonical-frame-with-content-sheet"},
+    "registrationId": {"type": "string", "minLength": 1},
+    "sourceMasterAssetId": {"type": "string", "minLength": 1},
+    "canvas": {"$ref": "composition.schema.json#/$defs/coordinateSpace"},
+    "origin": {"const": "top-left"},
+    "role": {
+      "enum": [
+        "clean-plate",
+        "canonical-frame",
+        "content-state-sheet",
+        "interior-mask",
+        "content-state"
+      ]
+    },
+    "stateId": {
+      "oneOf": [
+        {"type": "null"},
+        {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"}
+      ]
+    },
+    "authoritativeSurfaceId": {
+      "oneOf": [
+        {"type": "null"},
+        {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"}
+      ]
+    },
+    "canonicalFrameAssetId": {"type": "string", "minLength": 1},
+    "canonicalFrameSha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "cleanPlateAssetId": {"type": "string", "minLength": 1},
+    "cleanPlateSha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "contentSheetAssetId": {"type": "string", "minLength": 1},
+    "contentSheetSha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "interiorMaskAssetId": {"type": "string", "minLength": 1},
+    "interiorMaskSha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "interiorShape": {
+      "$ref": "https://local.paper-collage.dev/canonical-container.schema.json#/$defs/interiorShape"
+    },
+    "alignmentPolicy": {
+      "$ref": "https://local.paper-collage.dev/canonical-container.schema.json#/properties/alignmentPolicy"
+    },
+    "metrics": {
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "required": [
+            "rawBounds",
+            "alignedBounds",
+            "maskBounds",
+            "translation",
+            "centerDrift",
+            "bottomGap",
+            "fillLevel",
+            "fillLevelDeviation",
+            "rimGap",
+            "bottomBandCoverage",
+            "interiorRetention",
+            "clippedPixels",
+            "outsideMaskPixels"
+          ],
+          "properties": {
+            "rawBounds": {"$ref": "#/$defs/pixelBounds"},
+            "alignedBounds": {"$ref": "#/$defs/pixelBounds"},
+            "maskBounds": {"$ref": "#/$defs/pixelBounds"},
+            "translation": {
+              "type": "object",
+              "required": ["x", "y"],
+              "properties": {
+                "x": {"type": "integer"},
+                "y": {"type": "integer"}
+              },
+              "additionalProperties": false
+            },
+            "centerDrift": {"type": "number", "minimum": 0},
+            "bottomGap": {"type": "number", "minimum": 0},
+            "fillLevel": {"type": "number", "minimum": 0, "maximum": 1},
+            "fillLevelDeviation": {"type": "number", "minimum": 0},
+            "rimGap": {"type": "number", "minimum": 0, "maximum": 1},
+            "bottomBandCoverage": {"type": "number", "minimum": 0, "maximum": 1},
+            "interiorRetention": {"type": "number", "minimum": 0, "maximum": 1},
+            "clippedPixels": {"type": "integer", "minimum": 0},
+            "outsideMaskPixels": {"type": "integer", "minimum": 0}
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "terminalStateId": {"type": "string", "minLength": 1},
+    "terminalPolicy": {
+      "$ref": "https://local.paper-collage.dev/canonical-container.schema.json#/properties/terminalPolicy"
+    },
+    "recoveryPolicy": {
+      "$ref": "https://local.paper-collage.dev/canonical-container.schema.json#/$defs/recoveryPolicy"
+    },
+    "familyFingerprint": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+  },
+  "$defs": {
+    "pixelBounds": {
+      "type": "object",
+      "required": ["left", "top", "width", "height"],
+      "properties": {
+        "left": {"type": "integer", "minimum": 0},
+        "top": {"type": "integer", "minimum": 0},
+        "width": {"type": "integer", "minimum": 1},
+        "height": {"type": "integer", "minimum": 1}
+      },
+      "additionalProperties": false
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"role": {"const": "content-state"}}},
+      "then": {
+        "properties": {
+          "stateId": {"type": "string", "minLength": 1},
+          "authoritativeSurfaceId": {"type": "string", "minLength": 1},
+          "metrics": {"type": "object"}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"role": {"not": {"const": "content-state"}}}},
+      "then": {
+        "properties": {
+          "stateId": {"type": "null"},
+          "authoritativeSurfaceId": {"type": "null"},
+          "metrics": {"type": "null"}
+        }
+      }
+    }
+  ],
+  "additionalProperties": false
+}

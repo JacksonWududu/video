@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "mediaId": "narration-2",
+  "mediaSha256": "dc2e211c1a9dbb286524e02e3a0e9f9f4ca0bf2288a542f8386728873321a1ca",
+  "durationSeconds": 3,
+  "source": "deterministic-local-waveform-analysis-fixture",
+  "sampleRate": 48000,
+  "cues": [
+    {
+      "id": "cue-s2-open",
+      "kind": "narration-phrase",
+      "source": "authored",
+      "atSeconds": 0.15
+    },
+    {
+      "id": "cue-s2-line-1",
+      "kind": "sentence",
+      "source": "detected",
+      "atSeconds": 0.3
+    },
+    {
+      "id": "cue-s2-line-2",
+      "kind": "sentence",
+      "source": "detected",
+      "atSeconds": 0.75
+    }
+  ]
+}

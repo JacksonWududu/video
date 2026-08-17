@@ -1,0 +1,15 @@
+{
+  "schema_version": "visual-generation-route-transition-recommendations-v1",
+  "shared_fallback_rule_id": "scene-transition-semantic-fallback-v1",
+  "rules": [
+    {
+      "rule_id": "legacy-comic-to-whiteboard-v1",
+      "source_route": "comic-imagegen",
+      "boundary_change_class": "route_change",
+      "next_route": "srt-whiteboard-animation",
+      "kind": "wipe",
+      "options": {"direction": "from-right"},
+      "scope": "legacy-read-only"
+    }
+  ]
+}

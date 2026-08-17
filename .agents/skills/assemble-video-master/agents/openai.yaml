@@ -1,0 +1,4 @@
+interface:
+  display_name: "Assemble Video Master"
+  short_description: "Assemble approved visuals through route-specific scenes"
+  default_prompt: "Use $assemble-video-master to validate the current approved v3 visual-direction map while accepting unchanged completed v1/v2 evidence only as explicit legacy read-only input; route active ImageGen and checksum-pinned xuan-paper-diorama through NarrativeScene, Ian and checksum-pinned ink-doodle-knowledge-card through GraphicScene, and Whiteboard through WhiteboardScene; reject retired Comic and Doodle output; render each approved transition; ask for the final caption-delivery choice—caption-free, captioned, or both—and deliver only the selected full-video roles."

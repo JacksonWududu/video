@@ -1,0 +1,98 @@
+{
+  "schemaVersion": 12,
+  "motionContract": null,
+  "slug": "composition-v5-fixture",
+  "title": "Composition v5 Fixture",
+  "intake": {
+    "schemaVersion": 2,
+    "status": "pending",
+    "aspectRatio": null,
+    "visualStylePreset": null,
+    "parallaxPreference": null,
+    "styleCatalogVersion": null,
+    "styleCatalogFingerprint": null,
+    "styleProfileFingerprint": null,
+    "confirmedAt": null,
+    "note": "Bundled deterministic fixture.",
+    "updatedAt": "2026-01-01T00:00:00.000Z"
+  },
+  "styleProfile": null,
+  "plan": {
+    "schemaVersion": 4,
+    "slug": "composition-v5-fixture",
+    "status": "resolved",
+    "inputMode": "both",
+    "productionProfile": "draft",
+    "assetBudget": {"backgrounds": 1, "environmentLayers": 1, "characterSheets": 1, "styleSamples": 1, "baseImageAttempts": 4, "layerPackageAttemptReserve": 2, "maxGeneratedImages": 6},
+    "motionBudget": {"maxPoseSheetCalls": 1, "maxStatesPerSheet": 4, "maxContinuousTargets": 2},
+    "approvedImageBudget": {"imageAttemptLimit": 0, "expectedProviderImageCalls": 0, "profileHardCeiling": 6, "approvedAt": "2026-01-01T00:00:00.000Z"},
+    "requested": {"durationSeconds": 2, "sceneCount": 1},
+    "resolved": {"durationSeconds": 2, "sceneCount": 1, "estimatedNarrationSeconds": 1, "rationale": "Deterministic renderer fixture", "resolvedAt": "2026-01-01T00:00:00.000Z"},
+    "updatedAt": "2026-01-01T00:00:00.000Z"
+  },
+  "quality": {"minimumAssetScale": 0.5},
+  "video": {"width": 1920, "height": 1080, "fps": 30},
+  "theme": {
+    "canvas": "#6e1e19", "sceneBackground": "#d9dfcf", "accent": "#a33a2d", "ink": "#4a291f",
+    "subtitle": "#fff8ea", "subtitleBackground": "rgba(58,25,18,.72)",
+    "foreground": "#8d251e",
+    "surface": {
+      "texture": {"src": "textures/paper-grain.png", "opacity": 0.14, "blendMode": "multiply"},
+      "subjectEdge": {"mode": "paper-outline", "color": "#f5eedc", "widthPx": 3},
+      "subjectShadow": {"mode": "drop-shadow", "offsetXPx": 0, "offsetYPx": 10, "blurPx": 7, "color": "rgba(20,15,12,.28)"}
+    }
+  },
+  "voice": {"mode": "fictional", "provider": "fixture", "displayName": "Fixture"},
+  "audio": {"narration": {"volume": 0.01}, "music": null, "mastering": {"targetLufs": -24, "toleranceLufs": 3, "truePeakDbtp": -18}},
+  "scenes": [{
+    "id": "fixture", "label": "注册组合", "eyebrow": "V5", "tailSeconds": 1,
+    "motion": {
+      "blueprint": "chapter-tableau", "intensity": 0.6, "seed": 41,
+      "proofTimes": [
+        {"id": "establish", "at": 0.08, "label": "岸水建立", "kind": "establish", "assertions": ["树位于岸线上方，水位于下方"], "stateAssertions": [{"nodeId": "traveler", "stateId": "reading"}]},
+        {"id": "action", "at": 0.5, "label": "船中主体", "kind": "peak", "assertions": ["人物下身被前船舷遮挡并抬手指向"], "stateAssertions": [{"nodeId": "traveler", "stateId": "pointing"}]},
+        {"id": "final", "at": 0.9, "label": "关系稳定", "kind": "final", "assertions": ["船人共享运动且岸水边界不漂移"], "stateAssertions": [{"nodeId": "traveler", "stateId": "pointing"}]}
+      ]
+    },
+    "composition": {
+      "coordinateSpace": {"width": 1920, "height": 1080},
+      "nodes": [
+        {
+          "id": "river", "kind": "group", "pattern": "registered-environment", "z": 0,
+          "coordinateSpace": {"width": 1920, "height": 1080},
+          "transform": {"x": 0, "y": 0, "width": 1, "height": 1, "anchorX": 0, "anchorY": 0},
+          "motion": {"keyframes": [{"at": 0, "scale": 1}, {"at": 1, "scale": 1.01}]},
+          "registration": {"id": "river-family", "sourceMasterAssetId": "river-master", "canvas": {"width": 1920, "height": 1080}, "origin": "top-left"},
+          "boundaries": [{"id": "shoreline", "normalizedY": 0.58, "upperSemantic": "land", "lowerSemantic": "water"}],
+          "children": [
+            {"id": "sky", "kind": "asset", "assetRole": "background", "src": "fixtures/composition-v4/sky.svg", "z": 0, "registrationId": "river-family", "semanticCoverage": ["sky"], "transform": {"x": 0, "y": 0, "width": 1, "height": 1, "anchorX": 0, "anchorY": 0}, "motion": {"keyframes": [{"at": 0, "offsetX": 0}, {"at": 1, "offsetX": 0}] }},
+            {"id": "bank", "kind": "asset", "assetRole": "environment", "src": "fixtures/composition-v4/bank.svg", "z": 1, "registrationId": "river-family", "semanticCoverage": ["bank", "trees"], "clip": {"boundaryId": "shoreline", "side": "upper"}, "transform": {"x": 0, "y": 0, "width": 1, "height": 1, "anchorX": 0, "anchorY": 0}, "motion": {"keyframes": [{"at": 0, "offsetX": 0}, {"at": 1, "offsetX": 0}] }},
+            {"id": "water", "kind": "asset", "assetRole": "environment", "src": "fixtures/composition-v4/water.svg", "z": 2, "registrationId": "river-family", "semanticCoverage": ["water"], "clip": {"boundaryId": "shoreline", "side": "lower"}, "transform": {"x": 0, "y": 0, "width": 1, "height": 1, "anchorX": 0, "anchorY": 0}, "motion": {"keyframes": [{"at": 0, "offsetX": -0.005}, {"at": 1, "offsetX": 0.005}] }}
+          ]
+        },
+        {
+          "id": "boat-rig", "kind": "group", "pattern": "supported-subject", "z": 5,
+          "coordinateSpace": {"width": 1000, "height": 600},
+          "transform": {"x": 0.52, "y": 0.62, "width": 0.58, "anchorX": 0.5, "anchorY": 0.5},
+          "motion": {"keyframes": [{"at": 0, "offsetX": -0.01}, {"at": 1, "offsetX": 0.01}]},
+          "registration": {"id": "boat-family", "sourceMasterAssetId": "boat-master", "canvas": {"width": 1000, "height": 600}, "origin": "top-left"},
+          "support": {"subjectId": "traveler", "contactAnchor": {"x": 0.5, "y": 0.7}, "contactZone": [[0.25,0.55],[0.78,0.55],[0.8,0.86],[0.22,0.86]], "occlusionZone": [[0.16,0.58],[0.85,0.58],[0.85,0.9],[0.16,0.9]]},
+          "children": [
+            {"id": "boat-rear", "kind": "asset", "assetRole": "prop", "src": "fixtures/composition-v4/boat-rear.svg", "slot": "support-rear", "z": 0, "registrationId": "boat-family", "transform": {"x": 0, "y": 0, "width": 1, "height": 1, "anchorX": 0, "anchorY": 0}, "motion": {"keyframes": [{"at": 0, "offsetX": 0}, {"at": 1, "offsetX": 0}]}},
+            {"id": "traveler", "kind": "state-sequence", "assetRole": "character", "poseFamilyId": "traveler-poses", "registration": {"id": "boat-family", "sourceMasterAssetId": "traveler-pose-sheet", "canvas": {"width": 1000, "height": 600}, "origin": "top-left"}, "anchorPolicy": {"requiredAnchorIds": ["ground-contact"], "maximumDrift": 0.02}, "states": [{"id": "reading", "src": "fixtures/composition-v4/traveler.svg", "at": 0, "facing": "right", "anchors": [{"id": "ground-contact", "x": 0.5, "y": 0.9}], "identityReferenceAssetId": "traveler-master", "identityReferenceSha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"}, {"id": "pointing", "src": "fixtures/composition-v4/traveler-pointing.svg", "at": 0.45, "facing": "right", "anchors": [{"id": "ground-contact", "x": 0.5, "y": 0.9}], "identityReferenceAssetId": "traveler-master", "identityReferenceSha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"}], "playback": {"mode": "once", "cycles": 1}, "transition": {"type": "cut", "durationSeconds": 0}, "slot": "subject", "z": 1, "transform": {"x": 0, "y": 0, "width": 1, "height": 1, "anchorX": 0, "anchorY": 0}, "motion": {"keyframes": [{"at": 0, "offsetY": 0}, {"at": 1, "offsetY": -0.01}]}},
+            {"id": "boat-front", "kind": "asset", "assetRole": "prop", "src": "fixtures/composition-v4/boat-front.svg", "slot": "support-front", "z": 2, "registrationId": "boat-family", "transform": {"x": 0, "y": 0, "width": 1, "height": 1, "anchorX": 0, "anchorY": 0}, "motion": {"keyframes": [{"at": 0, "offsetX": 0}, {"at": 1, "offsetX": 0}]}}
+          ]
+        }
+      ]
+    },
+    "camera": {"preset": "static", "intensity": 0.2},
+    "narration": {"src": "projects/starter-demo/audio/narration/01-test-tone.wav", "startSeconds": 0, "durationSeconds": 1, "text": ""},
+    "subtitles": [{"fromSeconds": 0.1, "toSeconds": 1.8, "text": "注册边界与支撑遮挡"}],
+    "events": [
+      {"id": "establish-event", "beatId": "establish", "at": 0, "targetId": "river", "visual": {"kind": "emphasis", "action": "lift", "durationSeconds": 0.3, "intensity": 0.5}},
+      {"id": "boat-event", "beatId": "action", "at": 0.5, "targetId": "boat-rig", "visual": {"kind": "emphasis", "action": "lift", "durationSeconds": 0.4, "intensity": 0.4}},
+      {"id": "final-event", "beatId": "final", "at": 0.9, "targetId": "boat-rig", "visual": {"kind": "emphasis", "action": "settle", "durationSeconds": 0.2, "intensity": 0.3}}
+    ]
+  }],
+  "sceneTransitions": []
+}

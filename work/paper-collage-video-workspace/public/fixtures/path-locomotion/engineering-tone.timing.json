@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "mediaId": "path-locomotion-audio",
+  "mediaSha256": "6bc11544024246fd9a9ef7a6c29e25f9f89cc5378196949a6a44456f7fcfb4f2",
+  "durationSeconds": 8,
+  "source": "deterministic-local-waveform-fixture",
+  "sampleRate": 48000,
+  "cues": [
+    {
+      "id": "pond-route-fixture-cue",
+      "kind": "narration-phrase",
+      "source": "authored",
+      "atSeconds": 0.08,
+      "endSeconds": 0.4
+    }
+  ]
+}

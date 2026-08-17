@@ -1,0 +1,7 @@
+interface:
+  display_name: "Audit Narration Script"
+  short_description: "Audit pasted or local narration scripts"
+  default_prompt: "Use $audit-narration-script to audit this pasted or local narration text and return findings plus revision suggestions without rewriting it."
+
+policy:
+  allow_implicit_invocation: false

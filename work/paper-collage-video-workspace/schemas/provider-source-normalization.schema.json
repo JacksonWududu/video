@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.paper-collage.dev/provider-source-normalization.schema.json",
+  "title": "Deterministic provider-native image normalization",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "projectSlug",
+    "sourceAssetId",
+    "assetId",
+    "output",
+    "kernel"
+  ],
+  "properties": {
+    "$schema": {"type": "string"},
+    "schemaVersion": {"const": 1},
+    "projectSlug": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+    },
+    "sourceAssetId": {"type": "string", "minLength": 1},
+    "assetId": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+    },
+    "output": {"type": "string", "minLength": 1},
+    "kernel": {"const": "lanczos3"}
+  },
+  "additionalProperties": false
+}

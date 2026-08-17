@@ -1,0 +1,162 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.paper-collage.dev/looping-strip.schema.json",
+  "title": "Horizontal Looping Environment Strip Derivation v1",
+  "type": "object",
+  "required": ["schemaVersion", "projectSlug", "sceneId", "groupId", "nodeId", "stripId", "assetId", "role", "sourceAssetId", "output", "axis", "seamStrategy", "canonicalTile", "edgeBandPixels", "thresholds", "minimumViewportSpan", "proofViewports", "recoveryPolicy", "applyToProject"],
+  "properties": {
+    "$schema": {"type": "string"},
+    "schemaVersion": {"const": 1},
+    "projectSlug": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+    "sceneId": {"type": "string", "minLength": 1},
+    "groupId": {"type": "string", "minLength": 1},
+    "nodeId": {"type": "string", "minLength": 1},
+    "stripId": {"type": "string", "minLength": 1},
+    "assetId": {"type": "string", "minLength": 1},
+    "role": {"enum": ["far", "mid", "ground", "near"]},
+    "sourceAssetId": {"type": "string", "minLength": 1},
+    "output": {"type": "string", "minLength": 1},
+    "axis": {"const": "x"},
+    "seamStrategy": {"enum": ["exact", "overlap-crop", "mirror-crop"]},
+    "canonicalTile": {
+      "type": "object",
+      "required": ["left", "top", "width", "height"],
+      "properties": {
+        "left": {"type": "integer", "minimum": 0},
+        "top": {"type": "integer", "minimum": 0},
+        "width": {"type": "integer", "minimum": 1},
+        "height": {"type": "integer", "minimum": 1}
+      },
+      "additionalProperties": false
+    },
+    "sourceSurface": {
+      "type": "object",
+      "required": ["mode"],
+      "properties": {
+        "mode": {"enum": ["opaque", "chroma-key", "baked-checkerboard-alpha"]},
+        "keyColor": {"type": "string", "pattern": "^#[0-9a-fA-F]{6}$"}
+      },
+      "additionalProperties": false
+    },
+    "checkerboardAlpha": {
+      "type": "object",
+      "required": ["transparentDistance", "opaqueDistance"],
+      "properties": {
+        "transparentDistance": {"type": "number", "minimum": 0, "maximum": 255},
+        "opaqueDistance": {"type": "number", "exclusiveMinimum": 0, "maximum": 255}
+      },
+      "additionalProperties": false
+    },
+    "decorativeScatter": {
+      "type": "object",
+      "required": ["seed", "canvas", "regions", "placements"],
+      "properties": {
+        "seed": {"type": "integer"},
+        "canvas": {
+          "type": "object",
+          "required": ["width", "height"],
+          "properties": {
+            "width": {"type": "integer", "minimum": 1},
+            "height": {"type": "integer", "minimum": 1}
+          },
+          "additionalProperties": false
+        },
+        "regions": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "items": {
+            "type": "object",
+            "required": ["id", "left", "top", "width", "height"],
+            "properties": {
+              "id": {"type": "string", "minLength": 1},
+              "left": {"type": "integer", "minimum": 0},
+              "top": {"type": "integer", "minimum": 0},
+              "width": {"type": "integer", "minimum": 1},
+              "height": {"type": "integer", "minimum": 1}
+            },
+            "additionalProperties": false
+          }
+        },
+        "placements": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "items": {
+            "type": "object",
+            "required": ["sourceId", "x", "y", "scale", "rotation", "flipX", "anchorX", "anchorY"],
+            "properties": {
+              "sourceId": {"type": "string", "minLength": 1},
+              "x": {"type": "number", "minimum": 0, "maximum": 1},
+              "y": {"type": "number", "minimum": 0, "maximum": 1},
+              "scale": {"type": "number", "exclusiveMinimum": 0, "maximum": 2},
+              "rotation": {"type": "number", "minimum": -30, "maximum": 30},
+              "flipX": {"type": "boolean"},
+              "anchorX": {"type": "number", "minimum": 0, "maximum": 1},
+              "anchorY": {"type": "number", "minimum": 0, "maximum": 1}
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "alphaFeather": {
+      "type": "object",
+      "required": ["topPixels", "bottomPixels"],
+      "properties": {
+        "topPixels": {"type": "integer", "minimum": 0, "maximum": 1024},
+        "bottomPixels": {"type": "integer", "minimum": 0, "maximum": 1024}
+      },
+      "additionalProperties": false
+    },
+    "edgeStabilizationPixels": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 64
+    },
+    "edgeBandPixels": {"type": "integer", "minimum": 1, "maximum": 128},
+    "thresholds": {
+      "type": "object",
+      "required": ["rgbMean", "rgbMaximum", "alphaMean", "alphaMaximum"],
+      "properties": {
+        "rgbMean": {"type": "number", "minimum": 0, "maximum": 1},
+        "rgbMaximum": {"type": "number", "minimum": 0, "maximum": 1},
+        "alphaMean": {"type": "number", "minimum": 0, "maximum": 1},
+        "alphaMaximum": {"type": "number", "minimum": 0, "maximum": 1}
+      },
+      "additionalProperties": false
+    },
+    "minimumViewportSpan": {"type": "number", "minimum": 1},
+    "proofViewports": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": {
+        "type": "object",
+        "required": ["profile", "width", "height", "renderHeight"],
+        "properties": {
+          "profile": {"enum": ["16:9", "9:16", "1:1"]},
+          "width": {"type": "integer", "minimum": 1},
+          "height": {"type": "integer", "minimum": 1},
+          "renderHeight": {"type": "integer", "minimum": 1}
+        },
+        "additionalProperties": false
+      }
+    },
+    "recoveryPolicy": {
+      "type": "object",
+      "required": ["strategy", "localDeterministicFixFirst", "isolatedEdgeGeneration", "providerRepair", "fallback"],
+      "properties": {
+        "strategy": {"const": "preserve-complete-strip-context"},
+        "localDeterministicFixFirst": {"const": true},
+        "isolatedEdgeGeneration": {"const": "forbidden"},
+        "providerRepair": {"const": "masked-complete-strip-edit"},
+        "fallback": {"const": "full-strip-regeneration"}
+      },
+      "additionalProperties": false
+    },
+    "applyToProject": {"type": "boolean"}
+  },
+  "additionalProperties": false
+}

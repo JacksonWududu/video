@@ -1,0 +1,166 @@
+{
+  "schema_version": "gen-think-shared-production-v1",
+  "family_id": "GEN-THINK",
+  "scope": "shared_reusable_visual_library",
+  "library_path": "leverage-video/src/shared/gen-think",
+  "status": "shared_loop_ready_no_consumers_selected",
+  "source_approval": {
+    "review_manifest_path": "leverage-video/src/shared/gen-think/schema/gen-think-review-v01.json",
+    "decision_message": "批准 GEN-THINK 五图",
+    "decision_time": "2026-08-13T12:05:39+08:00",
+    "scope_clarification_message": "只批准 GEN-THINK 五图 ， 不批准 topic3 现有 37 张图片",
+    "approved_exact_byte_count": 5,
+    "topic3_visual_batch_approved": false
+  },
+  "canvas": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 30,
+    "aspect": "16:9",
+    "orientation": "landscape"
+  },
+  "derivative_method": "ffmpeg proportional scale-to-cover with Lanczos plus smallest centered crop; no stretch and no padding",
+  "states": [
+    {
+      "asset_id": "GEN-THINK-master-v04",
+      "source_path": "leverage-video/src/shared/gen-think/assets/image/gen-think-master-v04.png",
+      "source_checksum_sha256": "d3a3f7a146cb44eb4aa571bf73e7cc80c8bf0492dc35ac3c41fc3425b6595093",
+      "source_dimensions": [1672, 940],
+      "derivative_path": "leverage-video/src/shared/gen-think/assets/image/gen-think-master-v04-1920x1080-v01.png",
+      "derivative_checksum_sha256": "e3d84b7867bf0899c2929578068eb3a3397b9aff75814f250e4b96732f94375a",
+      "derivative_dimensions": [1920, 1080],
+      "qa_result": "pass"
+    },
+    {
+      "asset_id": "GEN-THINK-action-01-v01",
+      "source_path": "leverage-video/src/shared/gen-think/assets/image/gen-think-action-01-v01.png",
+      "source_checksum_sha256": "fa3f9551d627597de601cc22bf0744f4afb91526c9b28f9036de258f9baff505",
+      "source_dimensions": [1672, 940],
+      "derivative_path": "leverage-video/src/shared/gen-think/assets/image/gen-think-action-01-v01-1920x1080-v01.png",
+      "derivative_checksum_sha256": "6053d1dbc618372f35b6943eaf44e4134a43e043fddbbf39d3621148ad7ca946",
+      "derivative_dimensions": [1920, 1080],
+      "qa_result": "pass"
+    },
+    {
+      "asset_id": "GEN-THINK-action-02-v02",
+      "source_path": "leverage-video/src/shared/gen-think/assets/image/gen-think-action-02-v02.png",
+      "source_checksum_sha256": "8febdc5675db8950ac94744b30c5079a7483877ffe88dfc40aa385240808fca4",
+      "source_dimensions": [1672, 940],
+      "derivative_path": "leverage-video/src/shared/gen-think/assets/image/gen-think-action-02-v02-1920x1080-v01.png",
+      "derivative_checksum_sha256": "a16568c5def1c96b8789efc4d7fbec697271457451dc266c2c5357943f90ba13",
+      "derivative_dimensions": [1920, 1080],
+      "qa_result": "pass"
+    },
+    {
+      "asset_id": "GEN-THINK-action-03-v01",
+      "source_path": "leverage-video/src/shared/gen-think/assets/image/gen-think-action-03-v01.png",
+      "source_checksum_sha256": "fb5c85763ff5f81de0b3edfc5a9f0473f3b4601895503fde7d85d2fbca161030",
+      "source_dimensions": [1672, 940],
+      "derivative_path": "leverage-video/src/shared/gen-think/assets/image/gen-think-action-03-v01-1920x1080-v01.png",
+      "derivative_checksum_sha256": "bd21a0852c2dae937db2486681a9aa24644403dc0a04926dccbbbc4097cd2664",
+      "derivative_dimensions": [1920, 1080],
+      "qa_result": "pass"
+    },
+    {
+      "asset_id": "GEN-THINK-action-04-v01",
+      "source_path": "leverage-video/src/shared/gen-think/assets/image/gen-think-action-04-v01.png",
+      "source_checksum_sha256": "27935232ce09f71d881f7436653d2df331e2fb44c0487ccf5c9606400bc07f26",
+      "source_dimensions": [1672, 940],
+      "derivative_path": "leverage-video/src/shared/gen-think/assets/image/gen-think-action-04-v01-1920x1080-v01.png",
+      "derivative_checksum_sha256": "6762b39d7c4157cb201c8cd1f1277fd852a2aa54fefa319e7d780e64dccf44f3",
+      "derivative_dimensions": [1920, 1080],
+      "qa_result": "pass"
+    }
+  ],
+  "component": {
+    "composition_id": "GenThinkLoop",
+    "entry_path": "leverage-video/src/shared/gen-think/script/index.ts",
+    "entry_checksum_sha256": "62033bf4209bf7f68521a514ae1f047b22b062c10527df6ca86ce94f0cab58b7",
+    "root_path": "leverage-video/src/shared/gen-think/script/Root.tsx",
+    "root_checksum_sha256": "7e29301cf1f96ba7d3244e939ea4521a1206cfd37c63ec6485ed17e1a2898bdc",
+    "component_path": "leverage-video/src/shared/gen-think/script/GenThinkLoop.tsx",
+    "component_checksum_sha256": "7660b7cfb6c3b99362fd9d04de4611d804400539d1ed563dcad2a59c8569ea59",
+    "timing_path": "leverage-video/src/shared/gen-think/script/timing.ts",
+    "timing_checksum_sha256": "ac6eb1e0efc969f31bb3511f8e12164e4a923567b7a690d8973c238d0ff86d59",
+    "timing_test_path": "leverage-video/src/shared/gen-think/script/timing.test.ts",
+    "timing_test_checksum_sha256": "429f1c3b86c6f57e40b3c0cd146c8b146b3108351e193b7161aecfdf8183911a",
+    "watercolor_transition_test_path": "leverage-video/src/shared/gen-think/script/watercolor-contract.test.mjs",
+    "watercolor_transition_test_checksum_sha256": "251dd441ef9666d868724b9b5db9f91ba54cb092ca52e8b08a41e3316757209d",
+    "duration_prop": "durationInFrames",
+    "minimum_duration_in_frames": 5,
+    "state_hold_target_seconds": 1.5,
+    "render_mode": "watercolor_bloom_every_boundary_v1",
+    "transition_contract": {
+      "rule_id": "intra-shot-watercolor-bloom-v1",
+      "kind": "watercolor-bloom",
+      "duration_seconds": 0.6,
+      "duration_in_frames_at_30_fps": 18,
+      "renderer": "leverage-video/src/shared/watercolor-bloom",
+      "renderer_source_path": "leverage-video/src/shared/watercolor-bloom/WatercolorBloomImage.tsx",
+      "renderer_source_checksum_sha256": "68fecedae25a09d9f11bfd725d4f97c30e1e98d8a2788ce05dda6c61fe0eb4f6",
+      "applies_to": "every_adjacent_state_boundary_after_the_first_occurrence",
+      "easing": "frame_driven_four_phase_impact_burst_seep_settle",
+      "pigment_policy": "warm_reference_three_palette_v1",
+      "warm_palettes": [
+        ["#F3C95F", "#E7A83E", "#C88442"],
+        ["#F2BD6B", "#E99655", "#C87145"],
+        ["#EFCF70", "#E9A648", "#D67A4A"]
+      ],
+      "visible_neutral_pigment": "forbidden",
+      "visible_deposit_edge": "same_hue_low_opacity_0.12_to_0.16",
+      "radiating_tendrils": "forbidden_removed_from_mask_and_visible_layers",
+      "subsequent_occurrences": "reveal_active_image_through_shared_deterministic_color_ink_mask_over_previous_image",
+      "first_occurrence": "direct_full_image_no_transition",
+      "forbidden": ["hard_cut_between_states", "crossfade", "manual_opacity_fade", "morph", "optical_flow", "frame_interpolation", "unapproved_in_between_frames"]
+    },
+    "loop_order": [
+      "GEN-THINK-master-v04",
+      "GEN-THINK-action-01-v01",
+      "GEN-THINK-action-02-v02",
+      "GEN-THINK-action-03-v01",
+      "GEN-THINK-action-04-v01"
+    ],
+    "consumer_mapping_policy": "user_selects_every_consumer_shot_and_exact_frame_window"
+  },
+  "preview": {
+    "status": "qa_passed",
+    "path": "leverage-video/src/shared/gen-think/assets/video/gen-think-loop-preview-10s-v09.mp4",
+    "checksum_sha256": "4572713e6ffb66ce049f46a15391722993d2367c73cc9aae2706a611e90e473f",
+    "size_bytes": 8931714,
+    "dimensions": [1920, 1080],
+    "fps": 30,
+    "frame_count": 300,
+    "duration_seconds": 10.0,
+    "video_codec": "h264",
+    "pixel_format": "yuvj420p",
+    "audio_stream_count": 0,
+    "subtitle_stream_count": 0,
+    "full_decode_result": "pass",
+    "black_frame_result": "pass_none_detected",
+    "contact_sheet_path": "leverage-video/src/shared/gen-think/assets/image/gen-think-loop-preview-watercolor-contact-sheet-v09.png",
+    "contact_sheet_checksum_sha256": "23e317769f37bfa9d82d7955c072ac8437882c55e4eb8da61740178dd56bd4ea",
+    "contact_sheet_dimensions": [1920, 1080],
+    "first_frame_still_path": "leverage-video/src/shared/gen-think/assets/image/gen-think-loop-still-shared-entry-f000-v06.png",
+    "first_frame_still_checksum_sha256": "9de39331dccd37c96dda19d947ead4dee204d6ce9efe68c07897a5fc7a256611",
+    "transition_midpoint_still_path": "leverage-video/src/shared/gen-think/assets/image/gen-think-watercolor-transition-action01-f039-v04.png",
+    "transition_midpoint_still_checksum_sha256": "ffbfd2846f48182c083b95478471a095b70870e5c802499058c2514a074c293b",
+    "determinism_check": {
+      "frame": 39,
+      "repeat_count": 2,
+      "matching_checksum_sha256": "faad2a6a73cd08d0a5b716734cc7e6cffcb64e5315588c81edb3bae546c462d1",
+      "result": "pass_identical_bytes"
+    },
+    "non_divisible_duration_test": {
+      "duration_in_frames": 451,
+      "rendered_frame": 450,
+      "still_path": "leverage-video/src/shared/gen-think/assets/image/gen-think-loop-still-duration451-f450-v06.png",
+      "still_checksum_sha256": "fbb55b8ef5040308f352a62ef8907f75623aae60e3d568d2705b28dd8b3efa76",
+      "result": "pass"
+    }
+  },
+  "consumers": [],
+  "consumer_selection_owner": "user",
+  "bgm": {"mode": "disabled"},
+  "documentation_path": "leverage-video/src/shared/gen-think/docs/gen-think-production-v01.md",
+  "documentation_checksum_sha256": "ce54651c32cbe6e77c2141b3f5a264fd9a74220e57a17d719f199c37996582d4"
+}

@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "mediaId": "sfx",
+  "mediaSha256": "f25430e76b3ea979b25486ec539a3287c310ce630b7546713967febe17bace2a",
+  "durationSeconds": 3,
+  "source": "deterministic-local-waveform-analysis-fixture",
+  "sampleRate": 48000,
+  "cues": [
+    {
+      "id": "cue-sfx-onset",
+      "kind": "sfx-onset",
+      "source": "detected",
+      "atSeconds": 0.6
+    },
+    {
+      "id": "cue-sfx-peak",
+      "kind": "sfx-peak",
+      "source": "detected",
+      "atSeconds": 0.72
+    },
+    {
+      "id": "cue-sfx-tail",
+      "kind": "sfx-tail",
+      "source": "detected",
+      "atSeconds": 1.05
+    }
+  ]
+}

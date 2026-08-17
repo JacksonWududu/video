@@ -1,0 +1,209 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.paper-collage.dev/assets-manifest.schema.json",
+  "title": "Paper Collage Generated Asset Manifest",
+  "type": "object",
+  "required": ["schemaVersion", "projectSlug", "assets"],
+  "properties": {
+    "$schema": {"type": "string"},
+    "schemaVersion": {"const": 4},
+    "projectSlug": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+    "assets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["recordId", "assetId", "capability", "file", "provider", "adapter", "requestFingerprint", "reusedFrom", "sha256", "sizeBytes", "recordedAt", "request", "compositionBinding", "familyFingerprint", "lifecycle"],
+        "properties": {
+          "recordId": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+          "assetId": {"type": "string"},
+          "capability": {"enum": ["text", "image", "voice"]},
+          "file": {"type": "string"},
+          "provider": {"type": "string"},
+          "adapter": {"enum": ["host", "command", "manual", "registered-sheet-cell", "registered-family-member", "semantic-slice-derivative", "looping-strip-derivative", "canonical-container-derivative", "provider-source-derivative"]},
+          "tool": {"type": ["string", "null"]},
+          "model": {"type": ["string", "null"]},
+          "externalId": {"type": ["string", "null"]},
+          "attemptId": {"type": ["string", "null"]},
+          "recoveredFromClosedAttempt": {"type": "boolean"},
+          "recoveredFromRejectedAttempt": {"type": "boolean"},
+          "requestFingerprint": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+          "reusedFrom": {"type": ["string", "null"]},
+          "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+          "sizeBytes": {"type": "integer", "minimum": 1},
+          "media": {
+            "type": ["object", "null"],
+            "properties": {
+              "width": {"type": "integer", "minimum": 1},
+              "height": {"type": "integer", "minimum": 1},
+              "format": {"type": ["string", "null"]},
+              "hasAlpha": {"type": "boolean"}
+            },
+            "additionalProperties": false
+          },
+          "recordedAt": {"type": "string", "format": "date-time"},
+          "request": {"type": "object"},
+          "providerSource": {
+            "oneOf": [
+              {"type": "null"},
+              {
+                "type": "object",
+                "required": [
+                  "schemaVersion",
+                  "mode",
+                  "rawCanvas",
+                  "targetCanvas",
+                  "normalization",
+                  "normalizationRequired",
+                  "observationFingerprint"
+                ],
+                "properties": {
+                  "schemaVersion": {"const": 1},
+                  "mode": {"const": "provider-native"},
+                  "rawCanvas": {
+                    "type": "object",
+                    "required": ["width", "height"],
+                    "properties": {
+                      "width": {"type": "integer", "minimum": 1},
+                      "height": {"type": "integer", "minimum": 1}
+                    },
+                    "additionalProperties": false
+                  },
+                  "targetCanvas": {
+                    "type": "object",
+                    "required": ["width", "height"],
+                    "properties": {
+                      "width": {"type": "integer", "minimum": 1},
+                      "height": {"type": "integer", "minimum": 1}
+                    },
+                    "additionalProperties": false
+                  },
+                  "normalization": {"const": "deterministic-resize"},
+                  "normalizationRequired": {"type": "boolean"},
+                  "observationFingerprint": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  }
+                },
+                "additionalProperties": false
+              }
+            ]
+          },
+          "compositionBinding": {"type": ["object", "null"]},
+          "stateBinding": {"type": ["object", "null"]},
+          "stateSheetBinding": {"type": ["object", "null"]},
+          "stateSheetRecoveryBinding": {"type": ["object", "null"]},
+          "sourceSheetAssetId": {"type": ["string", "null"]},
+          "registeredFamilyBinding": {
+            "oneOf": [
+              {"type": "null"},
+              {"$ref": "https://local.paper-collage.dev/registered-family-binding.schema.json"}
+            ]
+          },
+          "containerPackageBinding": {
+            "oneOf": [
+              {"type": "null"},
+              {"$ref": "https://local.paper-collage.dev/asset-request.schema.json#/properties/containerPackageBinding"}
+            ]
+          },
+          "canonicalContainerBinding": {
+            "oneOf": [
+              {"type": "null"},
+              {"$ref": "https://local.paper-collage.dev/canonical-container-binding.schema.json"}
+            ]
+          },
+          "loopingStripBinding": {
+            "oneOf": [
+              {"type": "null"},
+              {"$ref": "https://local.paper-collage.dev/composition.schema.json#/$defs/loopingStripBinding"}
+            ]
+          },
+          "semanticSliceBinding": {
+            "oneOf": [
+              {"type": "null"},
+              {
+                "type": "object",
+                "required": [
+                  "schemaVersion",
+                  "topologyId",
+                  "sourceAssetId",
+                  "sourceSha256",
+                  "semanticRole",
+                  "alphaThreshold",
+                  "minimumComponentPixels",
+                  "components",
+                  "sourceAlphaPixels",
+                  "outputAlphaPixels",
+                  "outputCanvasPreserved",
+                  "boundaryCutPixels",
+                  "sliceFingerprint"
+                ],
+                "properties": {
+                  "schemaVersion": {"const": 1},
+                  "topologyId": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+                  "sourceAssetId": {"type": "string", "minLength": 1},
+                  "sourceSha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+                  "semanticRole": {
+                    "enum": [
+                      "floor-element",
+                      "submerged-plant",
+                      "egg-cluster",
+                      "aquatic-animal",
+                      "surface-animal",
+                      "emergent-plant",
+                      "surface-effect"
+                    ]
+                  },
+                  "alphaThreshold": {"type": "integer", "minimum": 1, "maximum": 254},
+                  "minimumComponentPixels": {"type": "integer", "minimum": 1},
+                  "components": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                      "type": "object",
+                      "required": ["left", "top", "width", "height", "pixelCount"],
+                      "properties": {
+                        "left": {"type": "integer", "minimum": 0},
+                        "top": {"type": "integer", "minimum": 0},
+                        "width": {"type": "integer", "minimum": 1},
+                        "height": {"type": "integer", "minimum": 1},
+                        "pixelCount": {"type": "integer", "minimum": 1}
+                      },
+                      "additionalProperties": false
+                    }
+                  },
+                  "sourceAlphaPixels": {"type": "integer", "minimum": 1},
+                  "outputAlphaPixels": {"type": "integer", "minimum": 1},
+                  "outputCanvasPreserved": {"const": true},
+                  "boundaryCutPixels": {"const": 0},
+                  "sliceFingerprint": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+                },
+                "additionalProperties": false
+              }
+            ]
+          },
+          "semanticBinding": {"type": ["object", "null"]},
+          "providerObservation": {
+            "oneOf": [
+              {"type": "null"},
+              {"$ref": "https://local.paper-collage.dev/provider-observation.schema.json"}
+            ]
+          },
+          "familyFingerprint": {"type": ["string", "null"], "pattern": "^[a-f0-9]{64}$"},
+          "lifecycle": {
+            "type": "object",
+            "required": ["status", "changedAt", "reason", "supersededBy"],
+            "properties": {
+              "status": {"enum": ["active", "superseded", "rejected", "recovery-source"]},
+              "changedAt": {"type": "string", "format": "date-time"},
+              "reason": {"type": "string"},
+              "supersededBy": {"type": ["string", "null"], "pattern": "^[a-f0-9]{64}$"}
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

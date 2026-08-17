@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "ian-knowledge-video-frame-v1",
+  "title": "Ian knowledge-video single-frame manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract_version", "episode_workspace", "queue_item_id", "shot_id",
+    "visual_generation_route", "treatment_profile_id", "visible_text_mode",
+    "exact_visible_text", "visible_text_placement", "visual_direction_review",
+    "generation_constraints", "verified_visible_text", "output_raster"
+  ],
+  "properties": {
+    "contract_version": {"const": "ian-knowledge-video-frame-v1"},
+    "episode_workspace": {"type": "string", "minLength": 1},
+    "queue_item_id": {"type": "string", "minLength": 1},
+    "shot_id": {"type": "string", "minLength": 1},
+    "visual_generation_route": {"const": "ian-handdrawn-ppt"},
+    "treatment_profile_id": {"type": "string", "minLength": 1},
+    "visible_text_mode": {"enum": ["none", "required"]},
+    "exact_visible_text": {"type": ["string", "null"]},
+    "visible_text_placement": {"type": ["string", "null"]},
+    "visual_direction_review": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256", "presented_map_sha256"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1, "description": "Repository-root-relative path inside the resolved episode workspace."},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "presented_map_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "generation_constraints": {
+      "const": {
+        "output_raster_count": 1,
+        "automatic_page_number": false,
+        "automatic_title": false,
+        "automatic_subtitle": false,
+        "automatic_labels": false,
+        "signature": false,
+        "contact_sheet_embedded": false
+      }
+    },
+    "verified_visible_text": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1},
+      "maxItems": 1
+    },
+    "output_raster": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256", "width", "height", "role"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1, "description": "Repository-root-relative path inside the resolved episode workspace."},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "width": {"const": 1920},
+        "height": {"const": 1080},
+        "role": {"const": "final-production-raster"}
+      }
+    }
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  }
+}

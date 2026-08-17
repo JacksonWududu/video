@@ -1,0 +1,90 @@
+{
+  "schemaVersion": 1,
+  "familyId": "vessel-family",
+  "sourcePackageId": "vessel-source-package",
+  "sourceStrategy": "canonical-frame-with-content-sheet",
+  "registrationId": "vessel-registration",
+  "sourceMasterAssetId": "vessel-master",
+  "canvas": {
+    "width": 200,
+    "height": 120
+  },
+  "origin": "top-left",
+  "role": "content-state",
+  "stateId": "high",
+  "authoritativeSurfaceId": "vessel-water",
+  "canonicalFrameAssetId": "vessel-canonical-frame",
+  "canonicalFrameSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "cleanPlateAssetId": "vessel-clean-plate",
+  "cleanPlateSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "contentSheetAssetId": "vessel-content-sheet",
+  "contentSheetSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "interiorMaskAssetId": "vessel-interior-mask",
+  "interiorMaskSha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "interiorShape": {
+    "kind": "polygon",
+    "points": [
+      [0.2, 0.1],
+      [0.8, 0.1],
+      [0.8, 0.9],
+      [0.2, 0.9]
+    ]
+  },
+  "alignmentPolicy": {
+    "mode": "center-bottom",
+    "maximumTranslationX": 0.1,
+    "maximumTranslationY": 0.1,
+    "maximumCenterDrift": 0.02,
+    "maximumBottomGap": 0.02,
+    "maximumFillLevelDeviation": 0.04,
+    "minimumInteriorRetention": 0.95
+  },
+  "metrics": {
+    "rawBounds": {
+      "left": 58,
+      "top": 16,
+      "width": 100,
+      "height": 86
+    },
+    "alignedBounds": {
+      "left": 50,
+      "top": 22,
+      "width": 100,
+      "height": 86
+    },
+    "maskBounds": {
+      "left": 40,
+      "top": 12,
+      "width": 121,
+      "height": 97
+    },
+    "translation": {
+      "x": -8,
+      "y": 6
+    },
+    "centerDrift": 0,
+    "bottomGap": 0,
+    "fillLevel": 0.8866,
+    "fillLevelDeviation": 0.0134,
+    "rimGap": 0.1031,
+    "bottomBandCoverage": 0.8264,
+    "interiorRetention": 1,
+    "clippedPixels": 0,
+    "outsideMaskPixels": 0
+  },
+  "terminalStateId": "high",
+  "terminalPolicy": {
+    "minimumFillLevel": 0.88,
+    "maximumRimGap": 0.12,
+    "minimumBottomBandCoverage": 0.75,
+    "bottomBandHeight": 0.1
+  },
+  "recoveryPolicy": {
+    "strategy": "preserve-content-sheet-context",
+    "localDeterministicFixFirst": true,
+    "isolatedStateGeneration": "forbidden",
+    "providerRepair": "masked-complete-sheet-edit",
+    "fallback": "full-content-sheet-regeneration"
+  },
+  "familyFingerprint": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+}

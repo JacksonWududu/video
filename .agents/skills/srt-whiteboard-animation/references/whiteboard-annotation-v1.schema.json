@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "whiteboard-annotation-v1",
+  "title": "Knowledge-video whiteboard annotation",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract_version", "shot_id", "visual_generation_route", "white_cat_present",
+    "scene_class", "canvas", "source_image_sha256", "normalized_image_sha256",
+    "locked_source_text", "total_frames", "final_hold_frames", "subtitle_safe_area",
+    "visible_text_mode", "approved_visible_text", "text_layers",
+    "performing_subject_present", "action_family_policy", "elements"
+  ],
+  "properties": {
+    "contract_version": {"const": "whiteboard-annotation-v1"},
+    "shot_id": {"type": "string", "minLength": 1},
+    "visual_generation_route": {"const": "srt-whiteboard-animation"},
+    "white_cat_present": {"const": false},
+    "scene_class": {"enum": ["narrative_illustration", "structured_graphic"]},
+    "canvas": {
+      "const": {"width": 1920, "height": 1080, "fps": 30}
+    },
+    "source_image_sha256": {"$ref": "#/$defs/sha256"},
+    "normalized_image_sha256": {"$ref": "#/$defs/sha256"},
+    "locked_source_text": {"type": "string", "minLength": 1},
+    "total_frames": {"type": "integer", "minimum": 16},
+    "final_hold_frames": {"type": "integer", "minimum": 15},
+    "subtitle_safe_area": {"$ref": "#/$defs/rect"},
+    "visible_text_mode": {"enum": ["none", "approved_exact_chinese"]},
+    "approved_visible_text": {"type": "array", "items": {"type": "string", "minLength": 1}},
+    "text_layers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["text", "region"],
+        "properties": {"text": {"type": "string", "minLength": 1}, "region": {"$ref": "#/$defs/rect"}}
+      }
+    },
+    "performing_subject_present": {"type": "boolean"},
+    "action_family_policy": {
+      "type": ["string", "null"],
+      "enum": [null, "whiteboard-element-sequence-replaces-action-family-v1"]
+    },
+    "elements": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/element"}
+    }
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "rect": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["x", "y", "width", "height"],
+      "properties": {
+        "x": {"type": "integer", "minimum": 0},
+        "y": {"type": "integer", "minimum": 0},
+        "width": {"type": "integer", "minimum": 1},
+        "height": {"type": "integer", "minimum": 1}
+      }
+    },
+    "element": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "sequence", "semantic_role", "subtitle_span", "region", "protected_regions", "start_frame", "end_frame"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "sequence": {"type": "integer", "minimum": 1},
+        "semantic_role": {"type": "string", "minLength": 1},
+        "type": {"type": "string"},
+        "subtitle_span": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["start", "end", "text"],
+          "properties": {
+            "start": {"type": "integer", "minimum": 0},
+            "end": {"type": "integer", "minimum": 1},
+            "text": {"type": "string", "minLength": 1}
+          }
+        },
+        "region": {"$ref": "#/$defs/rect"},
+        "protected_regions": {"type": "array", "items": {"$ref": "#/$defs/rect"}},
+        "start_frame": {"type": "integer", "minimum": 0},
+        "end_frame": {"type": "integer", "minimum": 1}
+      }
+    }
+  }
+}

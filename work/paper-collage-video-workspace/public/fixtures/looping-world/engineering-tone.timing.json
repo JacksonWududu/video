@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "mediaId": "looping-world-audio",
+  "mediaSha256": "93456d2198a9dfec61f813e1f8074e6a4941efdceb204daa800c7ed268743412",
+  "durationSeconds": 12,
+  "source": "deterministic-local-waveform-fixture",
+  "sampleRate": 48000,
+  "cues": [
+    {
+      "id": "road-journey-fixture-cue",
+      "kind": "narration-phrase",
+      "source": "authored",
+      "atSeconds": 0.08,
+      "endSeconds": 0.4
+    }
+  ]
+}

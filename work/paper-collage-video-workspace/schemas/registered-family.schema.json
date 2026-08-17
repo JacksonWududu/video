@@ -1,0 +1,215 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.paper-collage.dev/registered-family.schema.json",
+  "title": "Paper Collage Registered Family Derivation",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "projectSlug",
+    "sceneId",
+    "groupId",
+    "familyId",
+    "pattern",
+    "motionCapability",
+    "sourcePackageId",
+    "sourceStrategy",
+    "revealEnvelope",
+    "registration",
+    "members",
+    "recoveryPolicy",
+    "applyToProject"
+  ],
+  "properties": {
+    "$schema": {"type": "string"},
+    "schemaVersion": {"const": 2},
+    "projectSlug": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+    "sceneId": {"type": "string", "minLength": 1},
+    "groupId": {"type": "string", "minLength": 1},
+    "familyId": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+    "pattern": {"enum": ["supported-subject", "registered-depth-stack"]},
+    "motionCapability": {"const": "bounded-relative"},
+    "sourcePackageId": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+    "sourceStrategy": {"enum": ["registered-layer-sheet", "context-preserving-layer-edits"]},
+    "revealEnvelope": {"$ref": "composition.schema.json#/$defs/layerRevealEnvelope"},
+    "registration": {
+      "type": "object",
+      "required": ["id", "sourceMasterAssetId", "canvas", "origin"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "sourceMasterAssetId": {"type": "string", "minLength": 1},
+        "canvas": {
+          "type": "object",
+          "required": ["width", "height"],
+          "properties": {
+            "width": {"type": "integer", "minimum": 1},
+            "height": {"type": "integer", "minimum": 1}
+          },
+          "additionalProperties": false
+        },
+        "origin": {"const": "top-left"}
+      },
+      "additionalProperties": false
+    },
+    "members": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": {"$ref": "#/$defs/member"}
+    },
+    "recoveryPolicy": {"$ref": "#/$defs/recoveryPolicy"},
+    "applyToProject": {"type": "boolean"}
+  },
+  "$defs": {
+    "rect": {
+      "type": "object",
+      "required": ["left", "top", "width", "height"],
+      "properties": {
+        "left": {"type": "integer", "minimum": 0},
+        "top": {"type": "integer", "minimum": 0},
+        "width": {"type": "integer", "minimum": 1},
+        "height": {"type": "integer", "minimum": 1}
+      },
+      "additionalProperties": false
+    },
+    "source": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["kind", "assetId", "packageRole"],
+          "properties": {
+            "kind": {"const": "registered-layer-sheet"},
+            "assetId": {"type": "string", "minLength": 1},
+            "packageRole": {"enum": ["support-rear", "subject", "support-front"]},
+            "reuseAsRole": {"const": "support-rear"}
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["kind", "assetId"],
+          "properties": {
+            "kind": {"const": "layer-package-member"},
+            "assetId": {"type": "string", "minLength": 1}
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["kind", "assetId", "poseFamilyId", "stateId"],
+          "properties": {
+            "kind": {"const": "state-sheet-cell"},
+            "assetId": {"type": "string", "minLength": 1},
+            "poseFamilyId": {"type": "string", "minLength": 1},
+            "stateId": {"type": "string", "minLength": 1}
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "clip": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["kind", "rect"],
+          "properties": {
+            "kind": {"const": "rectangle"},
+            "rect": {"$ref": "#/$defs/rect"}
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["kind", "points"],
+          "properties": {
+            "kind": {"const": "polygon"},
+            "points": {
+              "type": "array",
+              "minItems": 3,
+              "items": {
+                "type": "array",
+                "prefixItems": [
+                  {"type": "number", "minimum": 0, "maximum": 1},
+                  {"type": "number", "minimum": 0, "maximum": 1}
+                ],
+                "items": false
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "derivation": {
+      "type": "object",
+      "properties": {
+        "placement": {"$ref": "#/$defs/rect"},
+        "sourceRect": {"$ref": "#/$defs/rect"},
+        "keying": {
+          "type": "object",
+          "required": [
+            "keyColor",
+            "transparentThreshold",
+            "opaqueThreshold",
+            "edgeFeather",
+            "matteErode",
+            "edgePadding"
+          ],
+          "properties": {
+            "keyColor": {"type": "string", "pattern": "^#[0-9a-fA-F]{6}$"},
+            "transparentThreshold": {"type": "number", "minimum": 0, "maximum": 255},
+            "opaqueThreshold": {"type": "number", "exclusiveMinimum": 0, "maximum": 441.7},
+            "edgeFeather": {"type": "number", "minimum": 0, "maximum": 8},
+            "matteErode": {"type": "integer", "minimum": 0, "maximum": 8},
+            "edgePadding": {"type": "integer", "minimum": 0, "maximum": 32}
+          },
+          "additionalProperties": false
+        },
+        "maskAssetId": {"type": "string", "minLength": 1},
+        "maskChannel": {"enum": ["alpha", "luminance"]},
+        "invertMask": {"type": "boolean"},
+        "clip": {"$ref": "#/$defs/clip"}
+      },
+      "allOf": [
+        {
+          "if": {"required": ["maskAssetId"]},
+          "then": {"required": ["maskChannel", "invertMask"]}
+        }
+      ],
+      "additionalProperties": false
+    },
+    "member": {
+      "type": "object",
+      "required": ["assetId", "nodeId", "role", "slot", "completeness", "output", "source", "derivation"],
+      "properties": {
+        "assetId": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+        "nodeId": {"type": "string", "minLength": 1},
+        "role": {"enum": ["support-rear", "subject", "support-front"]},
+        "slot": {"enum": ["support-rear", "subject", "support-front"]},
+        "completeness": {"enum": ["clean-plate", "full-silhouette", "full-overlay"]},
+        "output": {"type": "string", "minLength": 1},
+        "source": {"$ref": "#/$defs/source"},
+        "derivation": {"$ref": "#/$defs/derivation"}
+      },
+      "additionalProperties": false
+    },
+    "recoveryPolicy": {
+      "type": "object",
+      "required": [
+        "strategy",
+        "localDeterministicFixFirst",
+        "isolatedMemberGeneration",
+        "providerRepair",
+        "fallback"
+      ],
+      "properties": {
+        "strategy": {"const": "preserve-family-context"},
+        "localDeterministicFixFirst": {"const": true},
+        "isolatedMemberGeneration": {"const": "forbidden"},
+        "providerRepair": {"const": "masked-complete-source-edit"},
+        "fallback": {"const": "full-source-regeneration"}
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

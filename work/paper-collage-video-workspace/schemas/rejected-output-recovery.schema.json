@@ -1,0 +1,119 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.paper-collage.dev/rejected-output-recovery.schema.json",
+  "title": "Rejected Provider Output Recovery Source",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "projectSlug",
+    "attemptId",
+    "historicalRequest",
+    "source",
+    "recoveryAssetId",
+    "reason",
+    "cells"
+  ],
+  "properties": {
+    "$schema": {"type": "string"},
+    "schemaVersion": {"const": 1},
+    "projectSlug": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+    "attemptId": {"type": "string", "pattern": "^img-[0-9a-f-]+$"},
+    "historicalRequest": {"type": "string", "minLength": 1},
+    "source": {
+      "type": "object",
+      "required": ["file", "sha256"],
+      "properties": {
+        "file": {"type": "string", "minLength": 1},
+        "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+      },
+      "additionalProperties": false
+    },
+    "recoveryAssetId": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+    "reason": {"type": "string", "minLength": 1},
+    "surfaceRecovery": {
+      "type": "object",
+      "required": ["mode", "policyId"],
+      "properties": {
+        "mode": {"const": "baked-checkerboard-alpha"},
+        "policyId": {"const": "checkerboard-alpha-v1"}
+      },
+      "additionalProperties": false
+    },
+    "cells": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 64,
+      "items": {
+        "type": "object",
+        "required": ["packageRole", "sourceRect"],
+        "properties": {
+          "packageRole": {"enum": ["image", "subject", "support-front", "state"]},
+          "stateId": {"type": "string", "minLength": 1},
+          "sourceRect": {
+            "type": "object",
+            "required": ["left", "top", "width", "height"],
+            "properties": {
+              "left": {"type": "integer", "minimum": 0},
+              "top": {"type": "integer", "minimum": 0},
+              "width": {"type": "integer", "minimum": 2},
+              "height": {"type": "integer", "minimum": 2}
+            },
+            "additionalProperties": false
+          },
+          "keyPlane": {
+            "type": "object",
+            "required": ["mode", "policyId"],
+            "properties": {
+              "mode": {"const": "provider-native-observed"},
+              "policyId": {"const": "flat-v1"}
+            },
+            "additionalProperties": false
+          },
+          "observedKeyColorHint": {
+            "type": "string",
+            "pattern": "^#[0-9a-fA-F]{6}$",
+            "description": "Optional provider-shifted flat-plane color used only to seed deterministic recovery observation; the original requested key color remains recorded."
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "required": ["packageRole"],
+              "properties": {"packageRole": {"const": "state"}}
+            },
+            "then": {"required": ["stateId"]},
+            "else": {"not": {"required": ["stateId"]}}
+          }
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "required": ["surfaceRecovery"]
+      },
+      "then": {
+        "properties": {
+          "cells": {
+            "maxItems": 1,
+            "items": {
+              "properties": {
+                "packageRole": {"const": "image"}
+              }
+            }
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "cells": {
+            "items": {"required": ["keyPlane"]}
+          }
+        }
+      }
+    }
+  ],
+  "additionalProperties": false
+}

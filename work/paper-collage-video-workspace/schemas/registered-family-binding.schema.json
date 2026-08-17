@@ -1,0 +1,247 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.paper-collage.dev/registered-family-binding.schema.json",
+  "title": "Registered Family Manifest Binding",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "familyId",
+    "pattern",
+    "motionCapability",
+    "sourcePackageId",
+    "sourceStrategy",
+    "revealEnvelope",
+    "registrationId",
+    "sourceMasterAssetId",
+    "canvas",
+    "origin",
+    "role",
+    "slot",
+    "completeness",
+    "nodeId",
+    "source",
+    "derivation",
+    "recoveryPolicy",
+    "familyFingerprint"
+  ],
+  "properties": {
+    "schemaVersion": {"const": 2},
+    "familyId": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+    "pattern": {"enum": ["supported-subject", "registered-depth-stack"]},
+    "motionCapability": {"const": "bounded-relative"},
+    "sourcePackageId": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+    "sourceStrategy": {"enum": ["registered-layer-sheet", "context-preserving-layer-edits"]},
+    "revealEnvelope": {"$ref": "composition.schema.json#/$defs/layerRevealEnvelope"},
+    "registrationId": {"type": "string", "minLength": 1},
+    "sourceMasterAssetId": {"type": "string", "minLength": 1},
+    "canvas": {
+      "type": "object",
+      "required": ["width", "height"],
+      "properties": {
+        "width": {"type": "integer", "minimum": 1},
+        "height": {"type": "integer", "minimum": 1}
+      },
+      "additionalProperties": false
+    },
+    "origin": {"const": "top-left"},
+    "role": {"enum": ["support-rear", "subject", "support-front"]},
+    "slot": {"enum": ["support-rear", "subject", "support-front"]},
+    "completeness": {"enum": ["clean-plate", "full-silhouette", "full-overlay"]},
+    "nodeId": {"type": "string", "minLength": 1},
+    "source": {
+      "type": "object",
+      "required": [
+        "kind",
+        "assetId",
+        "stateId",
+        "sourceSheetAssetId",
+        "sourceFamilyFingerprint",
+        "sha256"
+      ],
+      "properties": {
+        "kind": {"enum": ["registered-layer-sheet", "layer-package-member", "state-sheet-cell"]},
+        "assetId": {"type": "string", "minLength": 1},
+        "stateId": {"type": ["string", "null"]},
+        "sourceSheetAssetId": {"type": ["string", "null"]},
+        "sourceFamilyFingerprint": {
+          "type": ["string", "null"],
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+      },
+      "additionalProperties": false
+    },
+    "derivation": {
+      "type": "object",
+      "required": [
+        "placement",
+        "sourceRect",
+        "sourceSurface",
+        "keying",
+        "keyingMetadataSha256",
+        "maskAssetId",
+        "maskSha256",
+        "maskChannel",
+        "invertMask",
+        "clip",
+        "trimmed",
+        "outputCanvasPreserved"
+      ],
+      "properties": {
+        "placement": {"$ref": "https://local.paper-collage.dev/registered-family.schema.json#/$defs/rect"},
+        "sourceRect": {
+          "oneOf": [
+            {"type": "null"},
+            {"$ref": "https://local.paper-collage.dev/registered-family.schema.json#/$defs/rect"}
+          ]
+        },
+        "sourceSurface": {
+          "oneOf": [
+            {"type": "null"},
+            {
+              "type": "object",
+              "required": [
+                "mode",
+                "keyColor",
+                "tolerance",
+                "requestedKeyColor",
+                "observedKeyColor",
+                "observationPolicyId",
+                "observationPolicyFingerprint",
+                "observationFingerprint"
+              ],
+              "properties": {
+                "mode": {"enum": ["alpha", "chroma-key", "opaque"]},
+                "keyColor": {"type": ["string", "null"], "pattern": "^#[0-9a-fA-F]{6}$"},
+                "tolerance": {"type": ["integer", "null"], "minimum": 0, "maximum": 255},
+                "requestedKeyColor": {"type": ["string", "null"], "pattern": "^#[0-9a-fA-F]{6}$"},
+                "observedKeyColor": {"type": ["string", "null"], "pattern": "^#[0-9a-fA-F]{6}$"},
+                "observationPolicyId": {"enum": ["flat-v1", null]},
+                "observationPolicyFingerprint": {
+                  "type": ["string", "null"],
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "observationFingerprint": {
+                  "type": ["string", "null"],
+                  "pattern": "^[a-f0-9]{64}$"
+                }
+              },
+              "additionalProperties": false
+            }
+          ]
+        },
+        "keying": {
+          "oneOf": [
+            {"type": "null"},
+            {"$ref": "https://local.paper-collage.dev/registered-family.schema.json#/$defs/derivation/properties/keying"}
+          ]
+        },
+        "keyingMetadataSha256": {
+          "type": ["string", "null"],
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "maskAssetId": {"type": ["string", "null"]},
+        "maskSha256": {
+          "type": ["string", "null"],
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "maskChannel": {"enum": ["alpha", "luminance", null]},
+        "invertMask": {"type": "boolean"},
+        "clip": {
+          "oneOf": [
+            {"type": "null"},
+            {"$ref": "https://local.paper-collage.dev/registered-family.schema.json#/$defs/clip"}
+          ]
+        },
+        "trimmed": {"const": false},
+        "outputCanvasPreserved": {"const": true}
+      },
+      "additionalProperties": false
+    },
+    "recoveryPolicy": {
+      "$ref": "https://local.paper-collage.dev/registered-family.schema.json#/$defs/recoveryPolicy"
+    },
+    "familyFingerprint": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "role": {"const": "support-rear"}
+        },
+        "required": ["role"]
+      },
+      "then": {
+        "properties": {
+          "slot": {"const": "support-rear"}
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "role": {"const": "subject"}
+        },
+        "required": ["role"]
+      },
+      "then": {
+        "properties": {
+          "slot": {"const": "subject"}
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "role": {"const": "support-front"}
+        },
+        "required": ["role"]
+      },
+      "then": {
+        "properties": {
+          "slot": {"const": "support-front"}
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "role": {"const": "support-rear"}
+        },
+        "required": ["role"]
+      },
+      "then": {
+        "properties": {
+          "completeness": {"const": "clean-plate"}
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "role": {"const": "subject"}
+        },
+        "required": ["role"]
+      },
+      "then": {
+        "properties": {
+          "completeness": {"const": "full-silhouette"}
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "role": {"const": "support-front"}
+        },
+        "required": ["role"]
+      },
+      "then": {
+        "properties": {
+          "completeness": {"const": "full-overlay"}
+        }
+      }
+    }
+  ],
+  "additionalProperties": false
+}

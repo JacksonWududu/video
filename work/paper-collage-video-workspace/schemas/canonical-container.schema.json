@@ -1,0 +1,178 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.paper-collage.dev/canonical-container.schema.json",
+  "title": "Canonical Container Family Derivation",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "projectSlug",
+    "sceneId",
+    "groupId",
+    "familyId",
+    "sourcePackageId",
+    "sourceStrategy",
+    "authoritativeSurfaceId",
+    "registration",
+    "assets",
+    "sheetLayout",
+    "interiorShape",
+    "alignmentPolicy",
+    "states",
+    "terminalStateId",
+    "terminalPolicy",
+    "recoveryPolicy",
+    "applyToProject"
+  ],
+  "properties": {
+    "$schema": {"type": "string"},
+    "schemaVersion": {"const": 1},
+    "projectSlug": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+    "sceneId": {"type": "string", "minLength": 1},
+    "groupId": {"type": "string", "minLength": 1},
+    "familyId": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+    "sourcePackageId": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+    "sourceStrategy": {"const": "canonical-frame-with-content-sheet"},
+    "authoritativeSurfaceId": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+    "registration": {"$ref": "composition.schema.json#/$defs/registration"},
+    "assets": {
+      "type": "object",
+      "required": [
+        "cleanPlateAssetId",
+        "canonicalFrameAssetId",
+        "contentSheetAssetId",
+        "interiorMaskAssetId",
+        "interiorMaskOutput"
+      ],
+      "properties": {
+        "cleanPlateAssetId": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+        "canonicalFrameAssetId": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+        "contentSheetAssetId": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+        "interiorMaskAssetId": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+        "interiorMaskOutput": {"type": "string", "minLength": 1}
+      },
+      "additionalProperties": false
+    },
+    "sheetLayout": {
+      "type": "object",
+      "required": ["columns", "rows"],
+      "properties": {
+        "columns": {"type": "integer", "minimum": 1, "maximum": 4},
+        "rows": {"type": "integer", "minimum": 1, "maximum": 4}
+      },
+      "additionalProperties": false
+    },
+    "interiorShape": {"$ref": "#/$defs/interiorShape"},
+    "alignmentPolicy": {
+      "type": "object",
+      "required": [
+        "mode",
+        "maximumTranslationX",
+        "maximumTranslationY",
+        "maximumCenterDrift",
+        "maximumBottomGap",
+        "maximumFillLevelDeviation",
+        "minimumInteriorRetention"
+      ],
+      "properties": {
+        "mode": {"const": "center-bottom"},
+        "maximumTranslationX": {"type": "number", "minimum": 0, "maximum": 0.25},
+        "maximumTranslationY": {"type": "number", "minimum": 0, "maximum": 0.25},
+        "maximumCenterDrift": {"type": "number", "minimum": 0, "maximum": 0.05},
+        "maximumBottomGap": {"type": "number", "minimum": 0, "maximum": 0.1},
+        "maximumFillLevelDeviation": {"type": "number", "minimum": 0, "maximum": 0.15},
+        "minimumInteriorRetention": {"type": "number", "minimum": 0.8, "maximum": 1}
+      },
+      "additionalProperties": false
+    },
+    "states": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 12,
+      "items": {"$ref": "#/$defs/state"}
+    },
+    "terminalStateId": {"type": "string", "minLength": 1},
+    "terminalPolicy": {
+      "type": "object",
+      "required": [
+        "minimumFillLevel",
+        "maximumRimGap",
+        "minimumBottomBandCoverage",
+        "bottomBandHeight"
+      ],
+      "properties": {
+        "minimumFillLevel": {"type": "number", "minimum": 0, "maximum": 1},
+        "maximumRimGap": {"type": "number", "minimum": 0, "maximum": 1},
+        "minimumBottomBandCoverage": {"type": "number", "minimum": 0, "maximum": 1},
+        "bottomBandHeight": {"type": "number", "exclusiveMinimum": 0, "maximum": 0.2}
+      },
+      "additionalProperties": false
+    },
+    "recoveryPolicy": {"$ref": "#/$defs/recoveryPolicy"},
+    "applyToProject": {"type": "boolean"}
+  },
+  "$defs": {
+    "normalizedPoint": {
+      "type": "array",
+      "prefixItems": [
+        {"type": "number", "minimum": 0, "maximum": 1},
+        {"type": "number", "minimum": 0, "maximum": 1}
+      ],
+      "items": false
+    },
+    "interiorShape": {
+      "type": "object",
+      "required": ["kind", "points"],
+      "properties": {
+        "kind": {"const": "polygon"},
+        "points": {
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 64,
+          "items": {"$ref": "#/$defs/normalizedPoint"}
+        }
+      },
+      "additionalProperties": false
+    },
+    "state": {
+      "type": "object",
+      "required": [
+        "id",
+        "row",
+        "column",
+        "at",
+        "fillLevel",
+        "outputAssetId",
+        "output"
+      ],
+      "properties": {
+        "id": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+        "row": {"type": "integer", "minimum": 0},
+        "column": {"type": "integer", "minimum": 0},
+        "at": {"type": "number", "minimum": 0, "maximum": 1},
+        "fillLevel": {"type": "number", "minimum": 0, "maximum": 1},
+        "outputAssetId": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+        "output": {"type": "string", "minLength": 1}
+      },
+      "additionalProperties": false
+    },
+    "recoveryPolicy": {
+      "type": "object",
+      "required": [
+        "strategy",
+        "localDeterministicFixFirst",
+        "isolatedStateGeneration",
+        "providerRepair",
+        "fallback"
+      ],
+      "properties": {
+        "strategy": {"const": "preserve-content-sheet-context"},
+        "localDeterministicFixFirst": {"const": true},
+        "isolatedStateGeneration": {"const": "forbidden"},
+        "providerRepair": {"const": "masked-complete-sheet-edit"},
+        "fallback": {"const": "full-content-sheet-regeneration"}
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}
