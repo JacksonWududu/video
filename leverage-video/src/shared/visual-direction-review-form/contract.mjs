@@ -13,8 +13,8 @@ import {
   validateVisualLanguageSelection,
 } from '../visual-language/contract.mjs';
 
-export const FORM_MODEL_CONTRACT_VERSION = 'visual-direction-review-form-v1';
-export const SUBMISSION_CONTRACT_VERSION = 'visual-direction-form-submission-v1';
+export const FORM_MODEL_CONTRACT_VERSION = 'visual-direction-review-form-v3';
+export const SUBMISSION_CONTRACT_VERSION = 'visual-direction-form-submission-v3';
 export const MERGE_REQUEST_CONTRACT_VERSION = 'storyboard-shot-merge-request-v1';
 export const MERGE_RENUMBER_STRATEGY = 'compact_after_merge';
 export const MERGE_VISUAL_INHERITANCE_POLICY = 'first-shot-visual-inheritance-v1';
@@ -22,12 +22,13 @@ export const MERGE_ACTION_STATE_POLICY = 'play-first-shot-action-family-once-the
 
 const SHA256 = /^[a-f0-9]{64}$/;
 const GENERATED_SHOT_ID = /^S([0-9]{2,})$/;
-const SUMMARY_HEADER = ['镜头', '画面', '白猫', '生图方式', '可见文字', '锁稿原文'];
+const SUMMARY_HEADER = ['镜头', '时长（秒）', '画面', '白猫', '分镜生成方式', '可见文字', '锁稿原文'];
 const FIXED_TREATMENTS = Object.freeze({
   'xuan-paper-diorama': 'xuan-paper-diorama',
   'ian-handdrawn-ppt': 'ian-handdrawn-technical',
   'ink-doodle-knowledge-card': 'ink-doodle-knowledge-card',
   'srt-whiteboard-animation': 'whiteboard-clean-progressive',
+  'local-video-file': 'source-video-native',
 });
 const DEFAULT_IMAGEGEN_TREATMENT = 'imagegen-watercolor-narrative';
 const ROUTE_LABELS = Object.freeze(Object.fromEntries(
@@ -170,18 +171,23 @@ export const parseStoryboardSummary = (storyboardMarkdown) => {
   let lineIndex = markerIndex + 1;
   while (lines[lineIndex] === '') lineIndex += 1;
   const header = splitSummaryRow(lines[lineIndex] ?? '');
-  if (!sameArray(header, SUMMARY_HEADER)) throw new Error('storyboard Summary must use the exact six-column header');
+  if (!sameArray(header, SUMMARY_HEADER)) throw new Error('storyboard Summary must use the exact seven-column header');
   const divider = splitSummaryRow(lines[lineIndex + 1] ?? '');
-  if (!divider || divider.length !== 6 || divider.some((cell) => !/^---+$/.test(cell))) {
+  if (!divider || divider.length !== 7 || divider.some((cell) => !/^---+$/.test(cell))) {
     throw new Error('storyboard Summary divider is invalid');
   }
   const rows = [];
   for (lineIndex += 2; lineIndex < lines.length && lines[lineIndex].startsWith('|'); lineIndex += 1) {
     const cells = splitSummaryRow(lines[lineIndex]);
-    if (!cells || cells.length !== 6) throw new Error('storyboard Summary row must contain exactly six cells');
-    const [shotId, visualDescription, whiteCat, route, visibleText, lockedNarration] = cells;
+    if (!cells || cells.length !== 7) throw new Error('storyboard Summary row must contain exactly seven cells');
+    const [shotId, durationSeconds, visualDescription, whiteCat, route, visibleText, lockedNarration] = cells;
+    if (!/^\d+(?:\.\d{3})$/.test(durationSeconds) || Number(durationSeconds) <= 0) {
+      throw new Error(`${shotId} Summary duration must be a positive value with three decimal places`);
+    }
     rows.push({
       shot_id: requireNonEmptyString(shotId, 'Summary shot ID'),
+      duration_seconds: Number(durationSeconds),
+      duration_seconds_display: durationSeconds,
       visual_description: requireNonEmptyString(visualDescription, `${shotId} Summary visual description`),
       white_cat: requireNonEmptyString(whiteCat, `${shotId} Summary white cat`),
       visual_generation_route: requireNonEmptyString(route, `${shotId} Summary route`),
@@ -237,6 +243,7 @@ export const compatibleRoutesForSelection = (row, whiteCatPresent) => {
       'ian-handdrawn-ppt',
       'ink-doodle-knowledge-card',
       'srt-whiteboard-animation',
+      'local-video-file',
     ].includes(routeId));
   }
   if (row.scene_class !== 'narrative_illustration') {
@@ -244,7 +251,7 @@ export const compatibleRoutesForSelection = (row, whiteCatPresent) => {
   }
   const allowed = whiteCatPresent
     ? ['imagegen', 'xuan-paper-diorama']
-    : ['imagegen', 'xuan-paper-diorama', 'srt-whiteboard-animation'];
+    : ['imagegen', 'xuan-paper-diorama', 'srt-whiteboard-animation', 'local-video-file'];
   return ACTIVE_ROUTE_IDS.filter((routeId) => allowed.includes(routeId));
 };
 
@@ -261,6 +268,9 @@ const presentedSelection = (row) => {
       || !sameNullable(candidate.exact_visible_text, row.exact_visible_text)
       || !sameNullable(candidate.visible_text_placement, row.visible_text_placement)) {
       throw new Error(`${row.shot_id} presented candidate visible text differs from its map projection`);
+    }
+    if (!sameNullable(candidate.local_video_source_path, row.local_video_source_path)) {
+      throw new Error(`${row.shot_id} presented candidate local video path differs from its map projection`);
     }
   }
   return {
@@ -299,6 +309,11 @@ const presentedSelection = (row) => {
       : (approved
       ? row.user_selection.visible_text_placement
       : row.visible_text_placement),
+    local_video_source_path: candidate
+      ? (candidate.local_video_source_path ?? null)
+      : (approved
+      ? (row.user_selection.local_video_source_path ?? null)
+      : (row.local_video_source_path ?? null)),
   };
 };
 
@@ -344,7 +359,8 @@ const normalizeTextForRoute = ({routeId, whiteCatPresent, visibleTextMode, exact
     visual_generation_route: routeId,
     white_cat_present: whiteCatPresent,
   });
-  if (policy.visible_text_policy === 'text-free-v1') {
+  if (['text-free-v1', 'source-video-pixels-preserved-no-added-text-v1']
+    .includes(policy.visible_text_policy)) {
     return {visible_text_mode: 'none', exact_visible_text: null, visible_text_placement: null};
   }
   return {
@@ -404,6 +420,7 @@ export const buildVisualDirectionFormModel = ({review, storyboardMarkdown, episo
       visible_text_mode: base.visible_text_mode,
       exact_visible_text: base.exact_visible_text ?? null,
       visible_text_placement: base.visible_text_placement ?? null,
+      local_video_source_path: base.local_video_source_path ?? null,
       route_options_by_white_cat: routeOptionsByWhiteCat,
       incompatible_route_reasons: reviewRow.incompatible_route_reasons,
       original_presented_selection: base,
@@ -510,7 +527,8 @@ const validateVisibleText = (row, submittedRow) => {
     visual_generation_route: submittedRow.visual_generation_route,
     white_cat_present: submittedRow.white_cat_present,
   });
-  if (policy.visible_text_policy === 'text-free-v1' && submittedRow.visible_text_mode !== 'none') {
+  if (['text-free-v1', 'source-video-pixels-preserved-no-added-text-v1']
+    .includes(policy.visible_text_policy) && submittedRow.visible_text_mode !== 'none') {
     throw new Error(`${row.shot_id} selected route and white-cat state are text-free`);
   }
 };
@@ -540,6 +558,7 @@ export const validateVisualDirectionFormSubmission = ({
     'contract_version',
     'episode_workspace',
     'presented_map_sha256',
+    'storyboard_checksum_sha256',
     'submission_scope',
     'rows',
   ], 'visual direction form submission');
@@ -548,6 +567,11 @@ export const validateVisualDirectionFormSubmission = ({
   }
   if (submission.presented_map_sha256 !== review.presented_map_sha256) {
     throw new Error('visual direction form submission is bound to a stale presented map');
+  }
+  if (!SHA256.test(submission.storyboard_checksum_sha256 ?? '')
+    || submission.storyboard_checksum_sha256 !== review.storyboard.checksum_sha256
+    || submission.storyboard_checksum_sha256 !== sha256Text(storyboardMarkdown)) {
+    throw new Error('visual direction form submission is bound to a stale storyboard checksum');
   }
   requireNonEmptyString(submission.episode_workspace, 'submission episode workspace');
   if (submission.episode_workspace !== requireNonEmptyString(episodeWorkspace, 'episode workspace')) {
@@ -571,16 +595,24 @@ export const validateVisualDirectionFormSubmission = ({
     throw new Error('full visual direction form submission must contain every generated shot in order');
   }
   const reviewById = new Map(review.rows.map((row) => [row.shot_id, row]));
+  const summaryById = new Map(parseStoryboardSummary(storyboardMarkdown)
+    .map((row) => [row.shot_id, row]));
   const normalizedRows = submission.rows.map((submittedRow) => {
     requireExactKeys(submittedRow, [
       'shot_id',
+      'visual_description',
       'white_cat_present',
       'visual_generation_route',
       'visible_text_mode',
       'exact_visible_text',
       'visible_text_placement',
+      'local_video_source_path',
     ], `${submittedRow?.shot_id ?? 'unknown'} submission row`);
     const row = reviewById.get(submittedRow.shot_id);
+    const visualDescription = requireNonEmptyString(
+      submittedRow.visual_description,
+      `${row.shot_id} visual description`,
+    );
     if (typeof submittedRow.white_cat_present !== 'boolean') {
       throw new Error(`${row.shot_id} white_cat_present must be boolean`);
     }
@@ -595,13 +627,28 @@ export const validateVisualDirectionFormSubmission = ({
       && !['imagegen', 'xuan-paper-diorama'].includes(submittedRow.visual_generation_route)) {
       throw new Error(`${row.shot_id} white cat requires ImageGen or xuan-paper-diorama`);
     }
+    const localVideoSelected = submittedRow.visual_generation_route === 'local-video-file';
+    if (localVideoSelected) {
+      requireNonEmptyString(submittedRow.local_video_source_path, `${row.shot_id} local video source path`);
+      if (!submittedRow.local_video_source_path.startsWith('/')
+        || submittedRow.local_video_source_path.includes('\0')
+        || !/\.mp4$/i.test(submittedRow.local_video_source_path)) {
+        throw new Error(`${row.shot_id} local video source path must be an absolute .mp4 path`);
+      }
+    } else if (submittedRow.local_video_source_path !== null) {
+      throw new Error(`${row.shot_id} non-local-video route requires null local_video_source_path`);
+    }
     validateVisibleText(row, submittedRow);
     const base = presentedSelection(row);
+    const visualDescriptionChanged = visualDescription
+      !== summaryById.get(row.shot_id).visual_description;
     const catChanged = submittedRow.white_cat_present !== base.white_cat_present;
     const textChanged = submittedRow.visible_text_mode !== row.visible_text_mode
       || !sameNullable(submittedRow.exact_visible_text, row.exact_visible_text)
       || !sameNullable(submittedRow.visible_text_placement, row.visible_text_placement);
     const routeChanged = submittedRow.visual_generation_route !== base.visual_generation_route;
+    const localVideoPathChanged = (submittedRow.local_video_source_path ?? null)
+      !== (base.local_video_source_path ?? null);
     const treatmentProfileId = resolveTreatmentProfile({
       row,
       routeId: submittedRow.visual_generation_route,
@@ -609,13 +656,18 @@ export const validateVisualDirectionFormSubmission = ({
       visualStructureId: base.visual_structure_id,
       whiteCatPresent: submittedRow.white_cat_present,
     });
-    const resolution = catChanged && textChanged
-      ? 'requires_semantic_rebuild_and_candidate_map_refresh'
-      : (catChanged
-        ? 'requires_semantic_rebuild_and_represent'
-        : (textChanged ? 'requires_candidate_map_refresh' : 'selection_ready'));
+    const resolution = visualDescriptionChanged
+      ? 'requires_visual_semantic_rebuild_and_represent'
+      : (catChanged && textChanged
+        ? 'requires_semantic_rebuild_and_candidate_map_refresh'
+        : (catChanged
+          ? 'requires_semantic_rebuild_and_represent'
+          : ((textChanged || localVideoPathChanged || (routeChanged && localVideoSelected))
+            ? 'requires_candidate_map_refresh'
+            : 'selection_ready')));
     return {
       shot_id: row.shot_id,
+      visual_description: visualDescription,
       white_cat_present: submittedRow.white_cat_present,
       visual_generation_route: submittedRow.visual_generation_route,
       treatment_profile_id: treatmentProfileId,
@@ -623,10 +675,13 @@ export const validateVisualDirectionFormSubmission = ({
       visible_text_mode: submittedRow.visible_text_mode,
       exact_visible_text: submittedRow.exact_visible_text ?? null,
       visible_text_placement: submittedRow.visible_text_placement ?? null,
+      local_video_source_path: submittedRow.local_video_source_path ?? null,
       changes: {
+        visual_description: visualDescriptionChanged,
         white_cat: catChanged,
         route: routeChanged,
         visible_text: textChanged,
+        local_video_source_path: localVideoPathChanged,
       },
       resolution,
     };
@@ -636,9 +691,10 @@ export const validateVisualDirectionFormSubmission = ({
     .map((row) => row.shot_id);
   const submittedIds = new Set(rowIds);
   return {
-    contract_version: 'visual-direction-form-validation-v1',
+    contract_version: 'visual-direction-form-validation-v2',
     result: 'pass',
     presented_map_sha256: review.presented_map_sha256,
+    storyboard_checksum_sha256: review.storyboard.checksum_sha256,
     submission_scope: {mode: scope.mode, shot_ids: [...rowIds]},
     normalized_rows: normalizedRows,
     selection_ready_shot_ids: normalizedRows
@@ -672,6 +728,10 @@ export const applyBulkEdit = (formRows, {shotIds, field, value}) => {
         row.visual_generation_route = options[0].route_id;
       }
     } else if (field === 'visual_generation_route') {
+      if (value === 'local-video-file') {
+        skipped.push({shot_id: row.shot_id, reason: '本地视频须逐镜填写不同的绝对文件路径，不能批量设置'});
+        return row;
+      }
       const options = row.route_options_by_white_cat[String(row.white_cat_present)] ?? [];
       if (!options.some((option) => option.route_id === value)) {
         skipped.push({shot_id: row.shot_id, reason: '该路线与当前镜头分类或白猫选择不兼容'});
@@ -731,6 +791,7 @@ export const validateApprovedDirectionSynchronization = ({
     const detail = detailedRows[index];
     if (detail?.shot_id !== row.shot_id) throw new Error(`${row.shot_id} detailed storyboard order mismatch`);
     const expected = {
+      visual_description: summaryById.get(row.shot_id).visual_description,
       white_cat_present: selection.white_cat_present,
       visual_structure_id: selection.visual_structure_id,
       treatment_profile_id: selection.treatment_profile_id,
@@ -738,6 +799,7 @@ export const validateApprovedDirectionSynchronization = ({
       visible_text_mode: selection.visible_text_mode,
       exact_visible_text: selection.exact_visible_text ?? null,
       visible_text_placement: selection.visible_text_placement ?? null,
+      local_video_source_path: selection.local_video_source_path ?? null,
     };
     for (const [field, expectedValue] of Object.entries(expected)) {
       if (!sameNullable(detail[field], expectedValue)) {

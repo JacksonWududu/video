@@ -1,4 +1,4 @@
 interface:
   display_name: "Produce Video Visuals"
   short_description: "Produce approved narrative and graphic visuals"
-  default_prompt: "Use $produce-video-visuals to validate the approved v3 white-cat, structure, treatment, route, and visible-text map; dispatch active imagegen, checksum-pinned xuan-paper-diorama or ink-doodle-knowledge-card through $generate-visual-styles, Ian, or Whiteboard exactly as selected; reject retired comic-imagegen and doodle-slides; approve required character references first; and review each exact output sequentially."
+  default_prompt: "Use $produce-video-visuals to consume the approved v3 direction and storyboard-visual-rhythm maps, generate and approve layered/stateful/hero_pose assets at their locked counts, preserve each exact intra-shot-transition-v1 entry with cut as default and watercolor only when explicitly approved, process generated/Whiteboard items before deferred local-video sources, reject retired routes, and review every exact output sequentially."

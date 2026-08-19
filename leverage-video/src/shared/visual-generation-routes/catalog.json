@@ -84,6 +84,19 @@
       "assembly_text_policy": "asset-owned-no-timeline-overlay-v1",
       "selection_policy": "explicit-optional-only",
       "recommended_by_default": false
+    },
+    {
+      "route_id": "local-video-file",
+      "label": "本地视频文件（按分镜时长变速）",
+      "compatible_scene_classes": ["narrative_illustration", "structured_graphic"],
+      "white_cat_policy": "forbidden",
+      "visible_text_policy": "source-video-pixels-preserved-no-added-text-v1",
+      "assembly_text_policy": "asset-owned-no-timeline-overlay-v1",
+      "selection_policy": "explicit-path-required-only",
+      "recommended_by_default": false,
+      "production_contract": "local-video-file-route-v1",
+      "retiming_contract": "local-video-match-v1",
+      "processing_order": "deferred-after-generated-visuals-v1"
     }
   ],
   "structured_visual_kinds": [
@@ -101,7 +114,8 @@
   ],
   "action_variant_policy": "inherit-parent-native-imagegen-family-route",
   "route_exemptions": {
-    "srt-whiteboard-animation": "whiteboard-element-sequence-replaces-action-family-v1"
+    "srt-whiteboard-animation": "whiteboard-element-sequence-replaces-action-family-v1",
+    "local-video-file": "local-video-source-replaces-image-action-family-v1"
   },
   "deferred_routes": ["baoyu-diagram"]
 }

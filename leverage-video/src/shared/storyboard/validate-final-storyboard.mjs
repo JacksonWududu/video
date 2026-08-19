@@ -63,6 +63,18 @@ const selectedVisibleText = (selection) => selection.visible_text_mode === 'none
   ? '无'
   : selection.exact_visible_text;
 
+export const validateSummaryDurationSeconds = (summaryRow, timing, fps = 30) => {
+  if (fps !== 30 || !Number.isInteger(timing.startFrame) || !Number.isInteger(timing.endFrame)
+    || timing.endFrame <= timing.startFrame) {
+    throw new Error(`${summaryRow.shot_id} Summary duration requires positive integer 30 fps timing`);
+  }
+  const expected = ((timing.endFrame - timing.startFrame) / fps).toFixed(3);
+  if (summaryRow.duration_seconds_display !== expected) {
+    throw new Error(`${summaryRow.shot_id} Summary duration does not match exact 30 fps frame timing`);
+  }
+  return expected;
+};
+
 export const validateFinalStoryboard = (episodeWorkspace, storyboardRelativePath) => {
   const workspacePath = resolveRootRelative(episodeWorkspace, 'episode workspace');
   const storyboardPath = resolveRootRelative(storyboardRelativePath, 'storyboard path');
@@ -118,7 +130,9 @@ export const validateFinalStoryboard = (episodeWorkspace, storyboardRelativePath
     const sourceText = parseSourceText(section, shotId);
     if (sourceText !== summaryRow.locked_narration) throw new Error(`${shotId} Summary/detail narration mismatch`);
     sourceTexts.push(sourceText);
-    timings.push({shotId, ...parseTiming(section, shotId)});
+    const timing = {shotId, ...parseTiming(section, shotId)};
+    validateSummaryDurationSeconds(summaryRow, timing);
+    timings.push(timing);
 
     if (shotId === 'OPEN-00') {
       if (summaryRow.white_cat !== '不适用'
@@ -139,6 +153,10 @@ export const validateFinalStoryboard = (episodeWorkspace, storyboardRelativePath
     if (!section.includes(`白猫 \`${decision.white_cat_present}\``)
       || !section.includes(decision.visual_generation_route)) {
       throw new Error(`${shotId} detail does not bind approved cat/route`);
+    }
+    if (decision.visual_generation_route === 'local-video-file'
+      && !section.includes(`本地视频源：\`${decision.local_video_source_path}\``)) {
+      throw new Error(`${shotId} detail does not bind the approved local video path`);
     }
     if (decision.visible_text_mode === 'none') {
       if (!section.includes('可见文字：`none`') && !section.includes('可见文字 `none`')) {
@@ -217,7 +235,10 @@ export const validateFinalStoryboard = (episodeWorkspace, storyboardRelativePath
     throw new Error('terminal clean hold is missing');
   }
 
-  const narrativeIds = review.rows.filter((row) => row.scene_class === 'narrative_illustration').map((row) => row.shot_id);
+  const narrativeIds = review.rows.filter((row) => (
+    row.scene_class === 'narrative_illustration'
+    && row.user_selection.visual_generation_route !== 'local-video-file'
+  )).map((row) => row.shot_id);
   for (const shotId of narrativeIds) {
     const section = sections.get(shotId);
     const timing = timings.find((entry) => entry.shotId === shotId);
@@ -271,6 +292,7 @@ export const validateFinalStoryboard = (episodeWorkspace, storyboardRelativePath
       workcard_artifacts: 'pass_storyboard_and_validated_narration_audio',
       visual_direction_selection_binding: 'pass',
       summary_table_equality: 'pass',
+      summary_duration_seconds: 'pass_exact_frames_divided_by_30_three_decimals',
       transition_selection_binding: 'pass',
       narration_coverage: 'pass_exact_body_bytes_once_in_order',
       opening_schedule: 'pass',

@@ -7,7 +7,15 @@ import {
   validateRevoiceTransitionLock,
   validateUserApprovedTransition,
 } from '../scene-transitions/contract.mjs';
-import {validateActionStateSchedule} from '../action-state-schedule/contract.mjs';
+import {
+  ACTION_STATE_SCHEDULE_V3_VERSION,
+  buildActionStatePlanSha256,
+  validateActionStateSchedule,
+} from '../action-state-schedule/contract.mjs';
+import {
+  INTRA_SHOT_TRANSITION_VERSION,
+  validateIntraShotTransitionSequence,
+} from '../intra-shot-transitions/contract.mjs';
 import {
   atomicWriteJson,
   readJson,
@@ -30,12 +38,18 @@ import {
   INTRA_SHOT_WATERCOLOR_BLOOM_SECONDS,
   getIntraShotWatercolorBloomDurationInFrames,
 } from '../watercolor-bloom/contract.mjs';
+import {
+  LOCAL_VIDEO_ROUTE_ID,
+  validateLocalVideoMatchBinding,
+} from '../local-video-match/contract.mjs';
+import {validateStoryboardVisualRhythm} from '../storyboard-visual-rhythm/contract.mjs';
 
 const SHA256 = /^[a-f0-9]{64}$/;
 const WHITEBOARD_ROUTE = 'srt-whiteboard-animation';
 const COMIC_ROUTE = 'comic-imagegen';
 const XUAN_ROUTE = XUAN_PAPER_DIORAMA_ROUTE_ID;
 const INK_DOODLE_ROUTE = INK_DOODLE_KNOWLEDGE_CARD_ROUTE_ID;
+const LOCAL_VIDEO_ROUTE = LOCAL_VIDEO_ROUTE_ID;
 const STYLE_BACKED_ROUTE_IDS = Object.freeze([XUAN_ROUTE, INK_DOODLE_ROUTE]);
 const STYLE_ROUTE_CONFIGS = new Map(STYLE_BACKED_ROUTE_IDS.map((routeId) => [
   routeId,
@@ -43,6 +57,13 @@ const STYLE_ROUTE_CONFIGS = new Map(STYLE_BACKED_ROUTE_IDS.map((routeId) => [
 ]));
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPOSITORY_ROOT = path.resolve(HERE, '../../../..');
+
+export const isActiveVisualDirectionArtifactBasename = (basename) => [
+  'per-shot-visual-direction-review-v1.json',
+  'per-shot-visual-direction-review-v2.json',
+  'per-shot-visual-direction-review-v3.json',
+].includes(basename)
+  || /^per-shot-visual-direction-review-v3-approved-v[1-9][0-9]*\.json$/.test(basename);
 
 const requireInteger = (value, label, minimum = 0) => {
   if (!Number.isInteger(value) || value < minimum) throw new Error(`${label} must be an integer >= ${minimum}`);
@@ -249,7 +270,29 @@ const validateWhiteboard = (shot, durationFrames, imageSequence) => {
   };
 };
 
-const validateAssets = (shot, durationFrames, fps, visualGenerationRoute, requireActionSchedule = false) => {
+const projectIntraShotTransition = (item) => ({
+  contract_version: item.contract_version,
+  from_asset_id: item.from_asset_id,
+  to_asset_id: item.to_asset_id,
+  at_frame: item.at_frame,
+  kind: item.kind,
+  duration_seconds: item.duration_seconds,
+  duration_in_frames: item.duration_in_frames,
+  from_image_index: item.from_image_index,
+  to_image_index: item.to_image_index,
+  renderer: item.renderer,
+  user_selection: item.user_selection ?? null,
+});
+
+const validateAssets = (
+  shot,
+  durationFrames,
+  fps,
+  visualGenerationRoute,
+  requireActionSchedule = false,
+  requireV3Contracts = false,
+  visualRhythmMapSha256 = null,
+) => {
   if (!Array.isArray(shot.assets) || shot.assets.length === 0) {
     throw new Error(`${shot.shot_id} requires at least one approved raster`);
   }
@@ -363,61 +406,120 @@ const validateAssets = (shot, durationFrames, fps, visualGenerationRoute, requir
     throw new Error(`${shot.shot_id} comic final state must hold for at least 0.5 seconds`);
   }
 
-  const transitionFrames = getIntraShotWatercolorBloomDurationInFrames(fps);
-  const intraShotTransitions = imageSequence.slice(1).map((image, index) => ({
-    contract_version: INTRA_SHOT_WATERCOLOR_BLOOM_RULE_ID,
-    from_asset_id: imageSequence[index].asset_id,
-    to_asset_id: image.asset_id,
-    at_frame: image.from,
-    duration_seconds: INTRA_SHOT_WATERCOLOR_BLOOM_SECONDS,
-    duration_in_frames: transitionFrames,
-    from_image_index: index,
-    to_image_index: index + 1,
-    kind: INTRA_SHOT_WATERCOLOR_BLOOM_KIND,
-    renderer: INTRA_SHOT_WATERCOLOR_BLOOM_RENDERER,
-  }));
+  let intraShotTransitions;
+  if (requireV3Contracts) {
+    if (!Array.isArray(shot.intra_shot_transitions)) {
+      throw new Error(`${shot.shot_id} v3 requires an explicit complete intra-shot transition map`);
+    }
+    intraShotTransitions = structuredClone(shot.intra_shot_transitions);
+    validateIntraShotTransitionSequence({
+      imageSequence,
+      transitions: intraShotTransitions,
+      fps,
+    });
+    if (intraShotTransitions.some((transition) => (
+      transition.kind === INTRA_SHOT_WATERCOLOR_BLOOM_KIND
+      && transition.user_selection.presented_map_sha256 !== visualRhythmMapSha256
+    ))) {
+      throw new Error(`${shot.shot_id} watercolor-bloom approval is not bound to the active visual rhythm map`);
+    }
+  } else {
+    const transitionFrames = getIntraShotWatercolorBloomDurationInFrames(fps);
+    intraShotTransitions = imageSequence.slice(1).map((image, index) => ({
+      contract_version: INTRA_SHOT_WATERCOLOR_BLOOM_RULE_ID,
+      from_asset_id: imageSequence[index].asset_id,
+      to_asset_id: image.asset_id,
+      at_frame: image.from,
+      duration_seconds: INTRA_SHOT_WATERCOLOR_BLOOM_SECONDS,
+      duration_in_frames: transitionFrames,
+      from_image_index: index,
+      to_image_index: index + 1,
+      kind: INTRA_SHOT_WATERCOLOR_BLOOM_KIND,
+      renderer: INTRA_SHOT_WATERCOLOR_BLOOM_RENDERER,
+    }));
+  }
   let actionStateSchedule = null;
   if (requireActionSchedule) {
     actionStateSchedule = shot.action_state_schedule;
+    if (requireV3Contracts
+      && actionStateSchedule?.contract_version !== ACTION_STATE_SCHEDULE_V3_VERSION) {
+      throw new Error(`${shot.shot_id} current character action requires action-state-schedule-v3`);
+    }
     validateActionStateSchedule(actionStateSchedule, {
       totalFrames: durationFrames,
       fps,
       revoiceLock: shot.revoice_parent_action_state_ids
-        ? {state_ids: shot.revoice_parent_action_state_ids}
+        ? {
+            state_ids: shot.revoice_parent_action_state_ids,
+            state_plan_sha256: shot.revoice_parent_action_state_plan_sha256,
+          }
         : null,
     });
     if (actionStateSchedule.occurrences.length !== imageSequence.length
       || actionStateSchedule.occurrences.some((occurrence, index) => (
         occurrence.state_id !== imageSequence[index].asset_id
-        || occurrence.start_frame !== imageSequence[index].from
+        || (requireV3Contracts ? occurrence.at_frame : occurrence.start_frame) !== imageSequence[index].from
         || occurrence.duration_in_frames !== imageSequence[index].duration_in_frames
       ))) {
       throw new Error(`${shot.shot_id} action-state schedule does not match the exact image sequence`);
     }
-    if (JSON.stringify(actionStateSchedule.intra_shot_transitions.map((item) => ({
-      contract_version: item.contract_version,
-      kind: item.kind,
-      duration_seconds: item.duration_seconds,
-      duration_in_frames: item.duration_in_frames,
-      from_image_index: item.from_image_index,
-      to_image_index: item.to_image_index,
-      renderer: item.renderer,
-    }))) !== JSON.stringify(intraShotTransitions.map((item) => ({
-      contract_version: item.contract_version,
-      kind: item.kind,
-      duration_seconds: item.duration_seconds,
-      duration_in_frames: item.duration_in_frames,
-      from_image_index: item.from_image_index,
-      to_image_index: item.to_image_index,
-      renderer: item.renderer,
-    })))) {
-      throw new Error(`${shot.shot_id} action-state schedule watercolor chain is stale`);
+    if (JSON.stringify(actionStateSchedule.intra_shot_transitions.map(projectIntraShotTransition))
+      !== JSON.stringify(intraShotTransitions.map(projectIntraShotTransition))) {
+      throw new Error(`${shot.shot_id} action-state schedule intra-shot transition map is stale`);
     }
   }
   return {imageSequence, intraShotTransitions, actionStateSchedule};
 };
 
-const buildScene = (shot, index, shots, fps, requireV3Contracts, revoiceVariant) => {
+const validateLocalVideo = (shot, durationFrames, fps) => {
+  if (shot.white_cat_present !== false) {
+    throw new Error(`${shot.shot_id} local-video-file forbids the white cat`);
+  }
+  if (Array.isArray(shot.assets) && shot.assets.length > 0) {
+    throw new Error(`${shot.shot_id} local-video-file must not carry raster image assets`);
+  }
+  if (Array.isArray(shot.intra_shot_transitions) && shot.intra_shot_transitions.length > 0) {
+    throw new Error(`${shot.shot_id} local-video-file must not carry raster intra-shot transitions`);
+  }
+  const binding = validateLocalVideoMatchBinding(shot.local_video, {
+    shotId: shot.shot_id,
+    targetDurationFrames: durationFrames,
+    fps,
+  });
+  if (binding.selected_source_path !== shot.local_video_source_path) {
+    throw new Error(`${shot.shot_id} local video binding differs from the approved source path`);
+  }
+  return binding;
+};
+
+const validateHeroPoseBackground = (shot, visualGenerationRoute) => {
+  const background = shot.hero_pose_background;
+  if (!background || typeof background !== 'object' || Array.isArray(background)
+    || typeof background.asset_id !== 'string' || background.asset_id.trim() === ''
+    || typeof background.asset !== 'string' || background.asset.trim() === ''
+    || background.visual_generation_route !== visualGenerationRoute) {
+    throw new Error(`${shot.shot_id} hero_pose requires one locked route-matched background asset`);
+  }
+  return {
+    asset_id: background.asset_id,
+    asset: background.asset,
+    checksum_sha256: requireSha256(
+      background.checksum_sha256,
+      `${shot.shot_id}.hero_pose_background.checksum_sha256`,
+    ),
+    visual_generation_route: visualGenerationRoute,
+  };
+};
+
+const buildScene = (
+  shot,
+  index,
+  shots,
+  fps,
+  requireV3Contracts,
+  revoiceVariant,
+  visualRhythmMapSha256,
+) => {
   const startFrame = requireInteger(shot.start_frame, `${shot.shot_id}.start_frame`);
   const endFrame = requireInteger(shot.end_frame, `${shot.shot_id}.end_frame`, 1);
   if (endFrame <= startFrame) throw new Error(`${shot.shot_id} must have positive duration`);
@@ -431,6 +533,7 @@ const buildScene = (shot, index, shots, fps, requireV3Contracts, revoiceVariant)
     'ian-handdrawn-ppt',
     'doodle-slides',
     WHITEBOARD_ROUTE,
+    LOCAL_VIDEO_ROUTE,
   ].includes(visualGenerationRoute)) {
     throw new Error(`${shot.shot_id} requires an explicit visual_generation_route`);
   }
@@ -442,6 +545,9 @@ const buildScene = (shot, index, shots, fps, requireV3Contracts, revoiceVariant)
       if (Object.hasOwn(shot, field)) {
         throw new Error(`${shot.shot_id} assembly must not receive a generic top-title or timeline text overlay field`);
       }
+    }
+    if (!['layered', 'stateful', 'hero_pose'].includes(shot.motion_tier)) {
+      throw new Error(`${shot.shot_id} requires a locked v3 motion_tier`);
     }
   }
   const routeTextPolicy = requireV3Contracts
@@ -462,18 +568,54 @@ const buildScene = (shot, index, shots, fps, requireV3Contracts, revoiceVariant)
     });
   }
   const requiresCharacterSchedule = requireV3Contracts
-    && ['imagegen', XUAN_ROUTE, COMIC_ROUTE].includes(visualGenerationRoute)
-    && (shot.white_cat_present === true || shot.character_state_required === true);
-  const {imageSequence, intraShotTransitions, actionStateSchedule} = validateAssets(
-    shot,
-    durationFrames,
-    fps,
-    visualGenerationRoute,
-    requiresCharacterSchedule,
-  );
+    && ['stateful', 'hero_pose'].includes(shot.motion_tier)
+    && ['imagegen', XUAN_ROUTE, 'ian-handdrawn-ppt', INK_DOODLE_ROUTE].includes(visualGenerationRoute);
+  const localVideo = visualGenerationRoute === LOCAL_VIDEO_ROUTE
+    ? validateLocalVideo(shot, durationFrames, fps)
+    : null;
+  const {
+    imageSequence,
+    intraShotTransitions,
+    actionStateSchedule,
+  } = localVideo
+    ? {imageSequence: [], intraShotTransitions: [], actionStateSchedule: null}
+    : validateAssets(
+      shot,
+      durationFrames,
+      fps,
+      visualGenerationRoute,
+      requiresCharacterSchedule,
+      requireV3Contracts,
+      visualRhythmMapSha256,
+    );
   const whiteboard = visualGenerationRoute === WHITEBOARD_ROUTE
     ? validateWhiteboard(shot, durationFrames, imageSequence)
     : null;
+  if (requireV3Contracts && !whiteboard && !localVideo) {
+    if (shot.motion_tier === 'layered' && imageSequence.length !== 1) {
+      throw new Error(`${shot.shot_id} layered requires exactly one complete master raster`);
+    }
+    if (shot.motion_tier === 'stateful' && (imageSequence.length < 2 || imageSequence.length > 4)) {
+      throw new Error(`${shot.shot_id} stateful requires 2–4 complete scene rasters`);
+    }
+    if (shot.motion_tier === 'hero_pose'
+      && (imageSequence.length < 4 || imageSequence.length > 6)) {
+      throw new Error(`${shot.shot_id} hero_pose requires 4–6 pose occurrences`);
+    }
+  }
+  const heroPoseBackground = requireV3Contracts && shot.motion_tier === 'hero_pose'
+    ? validateHeroPoseBackground(shot, visualGenerationRoute)
+    : null;
+  if (shot.motion_tier === 'hero_pose'
+    && !['imagegen', XUAN_ROUTE].includes(visualGenerationRoute)) {
+    throw new Error(`${shot.shot_id} hero_pose requires an active narrative image route`);
+  }
+  if (shot.motion_tier !== 'hero_pose' && shot.hero_pose_background !== undefined) {
+    throw new Error(`${shot.shot_id} non-hero shot must not carry a hero_pose_background`);
+  }
+  if (actionStateSchedule && actionStateSchedule.motion_tier !== shot.motion_tier) {
+    throw new Error(`${shot.shot_id} action-state motion tier differs from the approved shot tier`);
+  }
   const sceneType = {
     imagegen: 'narrative',
     [XUAN_ROUTE]: 'narrative',
@@ -482,6 +624,7 @@ const buildScene = (shot, index, shots, fps, requireV3Contracts, revoiceVariant)
     [INK_DOODLE_ROUTE]: 'graphic',
     'doodle-slides': 'doodle',
     [WHITEBOARD_ROUTE]: 'whiteboard',
+    [LOCAL_VIDEO_ROUTE]: 'local-video',
   }[visualGenerationRoute];
   const isTerminal = index === shots.length - 1;
   if (isTerminal && shot.transition !== null) {
@@ -529,6 +672,7 @@ const buildScene = (shot, index, shots, fps, requireV3Contracts, revoiceVariant)
     comic_plan: visualGenerationRoute === COMIC_ROUTE ? shot.comic_plan : null,
     white_cat_present: shot.white_cat_present,
     visual_generation_route: visualGenerationRoute,
+    motion_tier: requireV3Contracts ? shot.motion_tier : null,
     ...(requireV3Contracts ? {
       visible_text_mode: shot.visible_text_mode,
       exact_visible_text: shot.exact_visible_text ?? null,
@@ -538,9 +682,17 @@ const buildScene = (shot, index, shots, fps, requireV3Contracts, revoiceVariant)
       timeline_text_overlays: [],
     } : {}),
     image_sequence: imageSequence,
+    intra_shot_transition_contract: requireV3Contracts
+      ? INTRA_SHOT_TRANSITION_VERSION
+      : INTRA_SHOT_WATERCOLOR_BLOOM_RULE_ID,
     intra_shot_transitions: whiteboard ? [] : intraShotTransitions,
     action_state_schedule: actionStateSchedule,
+    action_state_plan_sha256: actionStateSchedule?.contract_version === ACTION_STATE_SCHEDULE_V3_VERSION
+      ? buildActionStatePlanSha256(actionStateSchedule)
+      : null,
+    hero_pose_background: heroPoseBackground,
     whiteboard,
+    local_video: localVideo,
     transition_intent: transition?.source_intent ?? 'clean hold',
     transition,
     ...(revoiceVariant ? {revoice_parent_transition: shot.revoice_parent_transition} : {}),
@@ -585,12 +737,7 @@ const verifyVisualDirectionReviewEvidence = (input) => {
   const artifactPath = path.resolve(REPOSITORY_ROOT, evidence.path);
   const relativeToSchema = path.relative(schemaRoot, artifactPath);
   if (relativeToSchema.startsWith('..') || path.isAbsolute(relativeToSchema)
-    || ![
-      'per-shot-visual-direction-review-v1.json',
-      'per-shot-visual-direction-review-v2.json',
-      'per-shot-visual-direction-review-v3.json',
-    ]
-      .includes(path.basename(artifactPath))) {
+    || !isActiveVisualDirectionArtifactBasename(path.basename(artifactPath))) {
     throw new Error('visual direction review artifact must be the active episode schema artifact');
   }
   let checksum;
@@ -605,6 +752,37 @@ const verifyVisualDirectionReviewEvidence = (input) => {
     throw new Error('visual direction review artifact checksum mismatch');
   }
   return {review, path: evidence.path, checksum_sha256: checksum};
+};
+
+const verifyStoryboardVisualRhythmEvidence = (input) => {
+  const evidence = input.storyboardVisualRhythm;
+  if (typeof input.episodeWorkspace !== 'string' || input.episodeWorkspace === '') {
+    throw new Error('episodeWorkspace is required for storyboard visual rhythm verification');
+  }
+  const expectedPath = `${input.episodeWorkspace}/schema/storyboard-visual-rhythm-v1.json`;
+  if (evidence?.path !== expectedPath || !SHA256.test(evidence?.checksum_sha256 ?? '')) {
+    throw new Error('storyboard visual rhythm artifact path and checksum are required');
+  }
+  const artifactPath = path.resolve(REPOSITORY_ROOT, evidence.path);
+  let checksum;
+  let artifact;
+  try {
+    checksum = sha256File(artifactPath);
+    artifact = readJson(artifactPath);
+  } catch (error) {
+    throw new Error(`storyboard visual rhythm artifact is unreadable: ${error.message}`);
+  }
+  if (checksum !== evidence.checksum_sha256) {
+    throw new Error('storyboard visual rhythm artifact checksum mismatch');
+  }
+  return {
+    artifact,
+    path: evidence.path,
+    checksum_sha256: checksum,
+    validation: validateStoryboardVisualRhythm(artifact, {
+      shotIds: input.shots.map(({shot_id: shotId}) => shotId),
+    }),
+  };
 };
 
 export const buildKnowledgeVideoAssemblyPlan = (input, options = {}) => {
@@ -671,6 +849,25 @@ export const buildKnowledgeVideoAssemblyPlan = (input, options = {}) => {
     throw new Error('shots must end at narrationFrames');
   }
   const requireV3Contracts = visualDirectionReview.contract_version === 'per-shot-visual-direction-review-v3';
+  const visualRhythmEvidence = requireV3Contracts
+    ? (options.verifyStoryboardVisualRhythmEvidence ?? verifyStoryboardVisualRhythmEvidence)(input)
+    : null;
+  if (requireV3Contracts) {
+    if (visualRhythmEvidence?.validation?.result !== 'pass'
+      || visualRhythmEvidence.artifact?.visual_direction_review?.path !== visualDirectionEvidence.path
+      || visualRhythmEvidence.artifact?.visual_direction_review?.checksum_sha256
+        !== visualDirectionEvidence.checksum_sha256
+      || visualRhythmEvidence.artifact?.storyboard?.path !== visualDirectionReview.storyboard?.path
+      || visualRhythmEvidence.artifact?.storyboard?.checksum_sha256
+        !== visualDirectionReview.storyboard?.checksum_sha256) {
+      throw new Error('approved storyboard visual rhythm evidence is missing or stale');
+    }
+    input.shots.forEach((shot, index) => {
+      if (visualRhythmEvidence.artifact.shots[index]?.motion_tier !== shot.motion_tier) {
+        throw new Error(`${shot.shot_id} motion tier differs from the approved visual rhythm map`);
+      }
+    });
+  }
   const transitionContract = requireV3Contracts ? 'scene-transition-v3' : 'scene-transition-v2';
   const transitionCatalog = requireV3Contracts ? 'scene-transition-catalog-v3' : 'scene-transition-catalog-v2';
   const scenes = input.shots.map((shot, index) => buildScene(
@@ -680,7 +877,33 @@ export const buildKnowledgeVideoAssemblyPlan = (input, options = {}) => {
     fps,
     requireV3Contracts,
     revoiceVariant,
+    visualRhythmEvidence?.artifact?.presented_map_sha256 ?? null,
   ));
+  if (requireV3Contracts) {
+    scenes.forEach((scene, index) => {
+      const rhythmShot = visualRhythmEvidence.artifact.shots[index];
+      const expectedAssetCount = scene.motion_tier === 'hero_pose'
+        ? rhythmShot.asset_plan.pose_count
+        : rhythmShot.asset_plan.main_image_count;
+      const actualTransitionPlan = scene.intra_shot_transitions.map((transition) => ({
+        from_asset_id: transition.from_asset_id,
+        to_asset_id: transition.to_asset_id,
+        kind: transition.kind,
+      }));
+      const approvedTransitionPlan = rhythmShot.intra_shot_transition_plan.map((transition) => ({
+        from_asset_id: transition.from_asset_id,
+        to_asset_id: transition.to_asset_id,
+        kind: transition.kind,
+      }));
+      if (!['srt-whiteboard-animation', LOCAL_VIDEO_ROUTE].includes(scene.visual_generation_route)
+        && scene.image_sequence.length !== expectedAssetCount) {
+        throw new Error(`${scene.shot_id} asset count differs from the approved visual rhythm map`);
+      }
+      if (JSON.stringify(actualTransitionPlan) !== JSON.stringify(approvedTransitionPlan)) {
+        throw new Error(`${scene.shot_id} intra-shot effects differ from the approved visual rhythm map`);
+      }
+    });
+  }
   const transitionSelectionReview = input.transitionSelectionReview;
   if (transitionSelectionReview?.status !== 'approved'
     || transitionSelectionReview?.catalog_version !== transitionCatalog
@@ -748,9 +971,18 @@ export const buildKnowledgeVideoAssemblyPlan = (input, options = {}) => {
       visual_direction_artifact_policy: visualDirectionArtifactPolicy,
       scene_transition_contract: transitionContract,
       transition_selection_review: transitionSelectionReview,
-      intra_shot_transition_contract: INTRA_SHOT_WATERCOLOR_BLOOM_RULE_ID,
+      storyboard_visual_rhythm: visualRhythmEvidence === null ? null : {
+        path: visualRhythmEvidence.path,
+        checksum_sha256: visualRhythmEvidence.checksum_sha256,
+        ...visualRhythmEvidence.validation,
+      },
+      intra_shot_transition_contract: requireV3Contracts
+        ? INTRA_SHOT_TRANSITION_VERSION
+        : INTRA_SHOT_WATERCOLOR_BLOOM_RULE_ID,
       whiteboard_scene_contract: 'whiteboard-scene-v1',
       whiteboard_action_family_exemption: 'whiteboard-element-sequence-replaces-action-family-v1',
+      local_video_scene_contract: 'local-video-match-v1',
+      local_video_action_family_exemption: 'local-video-source-replaces-image-action-family-v1',
       comic_scene_contract: 'comic-scene-v1',
       revoice_transition_lock: revoiceVariant ? 'strict-parent-transition-v1' : null,
       ordinary_boundaries_with_transition_decisions: Math.max(0, scenes.length - 1),

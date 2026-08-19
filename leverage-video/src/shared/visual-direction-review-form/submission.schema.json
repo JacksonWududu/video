@@ -1,20 +1,22 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "visual-direction-form-submission-v1",
-  "title": "Visual Direction Form Submission v1",
+  "$id": "visual-direction-form-submission-v3",
+  "title": "Visual Direction Form Submission v3",
   "type": "object",
   "additionalProperties": false,
   "required": [
     "contract_version",
     "episode_workspace",
     "presented_map_sha256",
+    "storyboard_checksum_sha256",
     "submission_scope",
     "rows"
   ],
   "properties": {
-    "contract_version": {"const": "visual-direction-form-submission-v1"},
+    "contract_version": {"const": "visual-direction-form-submission-v3"},
     "episode_workspace": {"type": "string", "minLength": 1},
     "presented_map_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "storyboard_checksum_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
     "submission_scope": {
       "type": "object",
       "additionalProperties": false,
@@ -37,14 +39,17 @@
         "additionalProperties": false,
         "required": [
           "shot_id",
+          "visual_description",
           "white_cat_present",
           "visual_generation_route",
           "visible_text_mode",
           "exact_visible_text",
-          "visible_text_placement"
+          "visible_text_placement",
+          "local_video_source_path"
         ],
         "properties": {
           "shot_id": {"type": "string", "pattern": "^S[0-9]{2,}$"},
+          "visual_description": {"type": "string", "minLength": 1},
           "white_cat_present": {"type": "boolean"},
           "visual_generation_route": {
             "enum": [
@@ -52,12 +57,14 @@
               "xuan-paper-diorama",
               "ian-handdrawn-ppt",
               "ink-doodle-knowledge-card",
-              "srt-whiteboard-animation"
+              "srt-whiteboard-animation",
+              "local-video-file"
             ]
           },
           "visible_text_mode": {"enum": ["none", "required"]},
           "exact_visible_text": {"type": ["string", "null"]},
-          "visible_text_placement": {"type": ["string", "null"]}
+          "visible_text_placement": {"type": ["string", "null"]},
+          "local_video_source_path": {"type": ["string", "null"]}
         }
       }
     }

@@ -5,8 +5,10 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 
 import {
+  FORM_MODEL_CONTRACT_VERSION,
   MERGE_ACTION_STATE_POLICY,
   MERGE_VISUAL_INHERITANCE_POLICY,
+  SUBMISSION_CONTRACT_VERSION,
   buildVisualDirectionFormModel,
 } from './contract.mjs';
 import {validateEpisodeMergeRequestFile} from './validate-merge-request.mjs';
@@ -38,6 +40,7 @@ const pendingSelection = () => ({
   visible_text_mode: null,
   exact_visible_text: null,
   visible_text_placement: null,
+  local_video_source_path: null,
   exact_message: null,
   decided_at: null,
   presented_map_sha256: null,
@@ -103,6 +106,7 @@ const visualProjection = (row) => ({
   visible_text_mode: row.visible_text_mode,
   exact_visible_text: row.exact_visible_text ?? null,
   visible_text_placement: row.visible_text_placement ?? null,
+  local_video_source_path: row.local_video_source_path ?? null,
   presented_candidate_selection: row.presented_candidate_selection ?? null,
   compatible_routes: row.compatible_routes,
   incompatible_routes: row.incompatible_routes,
@@ -111,17 +115,23 @@ const visualProjection = (row) => ({
   recommendation_reason: row.recommendation_reason,
 });
 
-const replaceSummaryTable = ({markdown, reviewShotIds, validation, mergedSourceText}) => {
+const replaceSummaryTable = ({
+  markdown,
+  reviewShotIds,
+  validation,
+  mergedSourceText,
+  mergedDurationSeconds,
+}) => {
   const lines = markdown.split('\n');
-  const headerIndex = lines.indexOf('| 镜头 | 画面 | 白猫 | 生图方式 | 可见文字 | 锁稿原文 |');
-  if (headerIndex < 0 || lines[headerIndex + 1] !== '|---|---|---|---|---|---|') {
+  const headerIndex = lines.indexOf('| 镜头 | 时长（秒） | 画面 | 白猫 | 分镜生成方式 | 可见文字 | 锁稿原文 |');
+  if (headerIndex < 0 || lines[headerIndex + 1] !== '|---|---|---|---|---|---|---|') {
     throw new Error('storyboard Summary header is invalid');
   }
   let endIndex = headerIndex + 2;
   while (lines[endIndex]?.startsWith('| ')) endIndex += 1;
   const rows = lines.slice(headerIndex + 2, endIndex).map((line) => {
     const cells = line.slice(1, -1).split('|').map((cell) => cell.trim());
-    if (cells.length !== 6) throw new Error('storyboard Summary row is invalid');
+    if (cells.length !== 7) throw new Error('storyboard Summary row is invalid');
     return {shot_id: cells[0], cells};
   });
   const byId = new Map(rows.map((row) => [row.shot_id, row]));
@@ -135,7 +145,10 @@ const replaceSummaryTable = ({markdown, reviewShotIds, validation, mergedSourceT
     const sourceRow = byId.get(oldShotId);
     const cells = [...sourceRow.cells];
     cells[0] = entry.new_shot_id;
-    if (entry.disposition === 'merged_survivor') cells[5] = summaryCell(mergedSourceText);
+    if (entry.disposition === 'merged_survivor') {
+      cells[1] = mergedDurationSeconds;
+      cells[6] = summaryCell(mergedSourceText);
+    }
     outputRows.push({shot_id: cells[0], cells});
   }
   const replacement = [
@@ -156,7 +169,7 @@ const transformSurvivorSection = ({section, firstTime, lastTime, mergedSourceTex
   transformed = `${transformed.slice(0, source.start)}${mergedSourceText}${transformed.slice(source.end)}`;
 
   const ignored = validation.ignored_member_visual_contract_shot_ids.map((shotId) => `\`${shotId}\``).join('、');
-  const inheritanceLine = `- 合并视觉继承：\`${MERGE_VISUAL_INHERITANCE_POLICY}\`；视觉源 \`${validation.surviving_shot_id}\`；忽略 ${ignored} 的画面、类型、白猫、生图路线与可见文字。原首镜动作族仅在 \`[${firstTime.start_frame}, ${firstTime.end_frame})\` 播放一次，最终视觉态在 \`[${firstTime.end_frame}, ${lastTime.end_frame})\` 保持 ${holdFrames} 帧。`;
+  const inheritanceLine = `- 合并视觉继承：\`${MERGE_VISUAL_INHERITANCE_POLICY}\`；视觉源 \`${validation.surviving_shot_id}\`；忽略 ${ignored} 的画面、类型、白猫、分镜生成方式与可见文字。原首镜动作族仅在 \`[${firstTime.start_frame}, ${firstTime.end_frame})\` 播放一次，最终视觉态在 \`[${firstTime.end_frame}, ${lastTime.end_frame})\` 保持 ${holdFrames} 帧。`;
   const outgoing = transformed.match(/^- 出场转场：.*$/m);
   if (outgoing) {
     transformed = transformed.replace(outgoing[0], `${inheritanceLine}\n- 出场转场：终端干净保持，无出场转场。`);
@@ -204,6 +217,7 @@ const transformStoryboard = ({markdown, review, validation}) => {
     reviewShotIds: review.rows.map((row) => row.shot_id),
     validation,
     mergedSourceText,
+    mergedDurationSeconds: ((memberTimes.at(-1).end_frame - memberTimes[0].start_frame) / 30).toFixed(3),
   });
   newPreamble = newPreamble.replace(/^(# .*分镜草案) v1$/m, '$1 v2');
   return {
@@ -324,7 +338,7 @@ const buildArtifacts = ({episodeWorkspace, requestPath, processedAt}) => {
   const newStoryboardBytes = Buffer.from(transformed.markdown);
 
   const oldPresentation = review.presentation;
-  const presentationMessage = `已按 ${MERGE_VISUAL_INHERITANCE_POLICY} 合并 S18、S19、S20：保留 S18 完整视觉契约，S19、S20 仅并入原文与时间；通过完整 19 行六列表单重新呈现。`;
+  const presentationMessage = `已按 ${MERGE_VISUAL_INHERITANCE_POLICY} 合并 S18、S19、S20：保留 S18 完整视觉契约，S19、S20 仅并入原文与时间；通过完整 19 行七列表单重新呈现。`;
   const nextReview = structuredClone(review);
   nextReview.status = 'partially_approved';
   nextReview.storyboard = {
@@ -339,8 +353,8 @@ const buildArtifacts = ({episodeWorkspace, requestPath, processedAt}) => {
   nextReview.presentation = {
     presented_at: processedAt,
     exact_message: presentationMessage,
-    surface_contract_version: 'visual-direction-review-form-v1',
-    submission_contract_version: 'visual-direction-form-submission-v1',
+    surface_contract_version: FORM_MODEL_CONTRACT_VERSION,
+    submission_contract_version: SUBMISSION_CONTRACT_VERSION,
     submission_modes: ['all', 'selected'],
     form_writes_episode_files: false,
   };

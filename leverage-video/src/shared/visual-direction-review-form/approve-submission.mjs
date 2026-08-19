@@ -40,6 +40,10 @@ const parseDetailedProjection = ({storyboardMarkdown, normalizedRows}) => {
   return normalizedRows.map((row) => {
     const section = sections.get(row.shot_id);
     if (!section) throw new Error(`${row.shot_id} detailed storyboard section is missing`);
+    const visualDescription = section.match(/^- 画面：(.+)$/m)?.[1];
+    if (visualDescription !== row.visual_description) {
+      throw new Error(`${row.shot_id} detailed storyboard visual description is stale`);
+    }
     for (const token of [row.visual_structure_id, row.treatment_profile_id, row.visual_generation_route]) {
       if (!section.includes(token)) throw new Error(`${row.shot_id} detailed storyboard lacks ${token}`);
     }
@@ -55,8 +59,14 @@ const parseDetailedProjection = ({storyboardMarkdown, normalizedRows}) => {
         if (!section.includes(token)) throw new Error(`${row.shot_id} detailed storyboard visible-text projection is stale`);
       }
     }
+    if (row.visual_generation_route === 'local-video-file') {
+      if (!row.local_video_source_path || !section.includes(row.local_video_source_path)) {
+        throw new Error(`${row.shot_id} detailed storyboard lacks the exact local video source path`);
+      }
+    }
     return {
       shot_id: row.shot_id,
+      visual_description: visualDescription,
       white_cat_present: row.white_cat_present,
       visual_structure_id: row.visual_structure_id,
       treatment_profile_id: row.treatment_profile_id,
@@ -64,6 +74,7 @@ const parseDetailedProjection = ({storyboardMarkdown, normalizedRows}) => {
       visible_text_mode: row.visible_text_mode,
       exact_visible_text: row.exact_visible_text,
       visible_text_placement: row.visible_text_placement,
+      local_video_source_path: row.local_video_source_path,
     };
   });
 };
@@ -125,6 +136,7 @@ const buildArtifacts = ({episodeWorkspace, submissionPath, processedAt}) => {
       visible_text_mode: normalized.visible_text_mode,
       exact_visible_text: normalized.exact_visible_text,
       visible_text_placement: normalized.visible_text_placement,
+      local_video_source_path: normalized.local_video_source_path,
       exact_message: JSON.stringify(submittedById.get(row.shot_id)),
       decided_at: processedAt,
       presented_map_sha256: review.presented_map_sha256,
@@ -153,8 +165,8 @@ const buildArtifacts = ({episodeWorkspace, submissionPath, processedAt}) => {
   };
 
   const stamp = processedAt.replaceAll('-', '').replaceAll(':', '');
-  const submissionRelative = `${episodeWorkspace}/schema/visual-direction-form-submission-${stamp}-v2.json`;
-  const validationRelative = `${episodeWorkspace}/schema/visual-direction-form-validation-${stamp}-v2.json`;
+  const submissionRelative = `${episodeWorkspace}/schema/visual-direction-form-submission-${stamp}-v3.json`;
+  const validationRelative = `${episodeWorkspace}/schema/visual-direction-form-validation-${stamp}-v3.json`;
   const reviewRelative = `${episodeWorkspace}/schema/per-shot-visual-direction-review-v3-approved-v1.json`;
   const processingValidation = {
     ...validation,

@@ -6,6 +6,7 @@ import {EpisodeOpening} from './EpisodeOpening';
 import {GraphicScene} from './GraphicScene';
 import {NarrationTrack} from './NarrationTrack';
 import {NarrativeScene} from './NarrativeScene';
+import {LocalVideoScene} from './LocalVideoScene';
 import {WhiteboardScene} from './WhiteboardScene';
 import type {KnowledgeVideoAssemblyPlan} from './types';
 
@@ -33,7 +34,13 @@ export const KnowledgeVideo: React.FC<{
           zIndex={plan.scenes.length - sceneIndex}
           name={scene.shot_id}
         >
-          {scene.scene_type === 'whiteboard' ? (
+          {scene.scene_type === 'local-video' ? (
+            <LocalVideoScene
+              localVideo={scene.local_video!}
+              durationInFrames={scene.duration_frames}
+              visualGenerationRoute={scene.visual_generation_route}
+            />
+          ) : scene.scene_type === 'whiteboard' ? (
             <WhiteboardScene
               whiteboard={scene.whiteboard!}
               durationInFrames={scene.duration_frames}
@@ -42,17 +49,27 @@ export const KnowledgeVideo: React.FC<{
           ) : scene.scene_type === 'graphic' ? (
             <GraphicScene
               imageSequence={scene.image_sequence}
+              intraShotTransitionContract={scene.intra_shot_transition_contract ?? 'intra-shot-watercolor-bloom-v1'}
+              intraShotTransitions={scene.intra_shot_transitions}
               durationInFrames={scene.duration_frames}
               visualGenerationRoute={scene.visual_generation_route}
             />
           ) : scene.scene_type === 'doodle' ? (
             <DoodleScene
               imageSequence={scene.image_sequence}
+              intraShotTransitionContract={scene.intra_shot_transition_contract ?? 'intra-shot-watercolor-bloom-v1'}
+              intraShotTransitions={scene.intra_shot_transitions}
               durationInFrames={scene.duration_frames}
               visualGenerationRoute={scene.visual_generation_route}
             />
           ) : (
-            <NarrativeScene imageSequence={scene.image_sequence} shotId={scene.shot_id} />
+            <NarrativeScene
+              imageSequence={scene.image_sequence}
+              intraShotTransitionContract={scene.intra_shot_transition_contract ?? 'intra-shot-watercolor-bloom-v1'}
+              intraShotTransitions={scene.intra_shot_transitions}
+              heroPoseBackground={'hero_pose_background' in scene ? scene.hero_pose_background?.asset : null}
+              shotId={scene.shot_id}
+            />
           )}
         </TransitionedScene>
       ))}

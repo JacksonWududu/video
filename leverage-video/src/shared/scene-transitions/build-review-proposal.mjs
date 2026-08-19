@@ -29,6 +29,8 @@ const canonicalize = (value) => {
   return value;
 };
 const sha256Canonical = (value) => sha256(Buffer.from(JSON.stringify(canonicalize(value))));
+const sameCanonical = (left, right) =>
+  JSON.stringify(canonicalize(left)) === JSON.stringify(canonicalize(right));
 
 const resolveRootRelative = (rootRelativePath, label) => {
   if (typeof rootRelativePath !== 'string' || rootRelativePath === '' || path.isAbsolute(rootRelativePath)) {
@@ -53,6 +55,7 @@ const presentedProjection = (proposal) => ({
   visual_direction_review: proposal.visual_direction_review,
   fps: proposal.fps,
   diversity_policy: proposal.diversity_policy,
+  ...(proposal.refresh_lineage ? {refresh_lineage: proposal.refresh_lineage} : {}),
   user_requested_transition_overrides: proposal.user_requested_transition_overrides ?? null,
   fixed_exemptions: proposal.fixed_exemptions,
   rows: proposal.rows.map((row) => ({
@@ -81,11 +84,67 @@ const presentedProjection = (proposal) => ({
 export const buildTransitionReviewPresentedMapSha256 = (proposal) =>
   sha256Canonical(presentedProjection(proposal));
 
+export const rebindUnaffectedTransitionApprovals = ({
+  rows,
+  priorRows,
+  affectedBoundaryIds,
+  priorPresentedMapSha256,
+  nextPresentedMapSha256,
+  reboundAt,
+}) => {
+  const affectedBoundarySet = new Set(affectedBoundaryIds);
+  const priorRowByBoundary = new Map(priorRows.map((row) => [
+    `${row.source_shot_id}->${row.next_shot_id}`,
+    row,
+  ]));
+  return structuredClone(rows).map((row) => {
+    const boundaryId = `${row.source_shot_id}->${row.next_shot_id}`;
+    const priorRow = priorRowByBoundary.get(boundaryId);
+    if (!priorRow) throw new Error(`prior transition row is missing: ${boundaryId}`);
+    if (affectedBoundarySet.has(boundaryId)) {
+      row.prior_user_selection = priorRow.user_selection;
+      return row;
+    }
+    const unchangedContext = {
+      source_visual_generation_route: row.source_visual_generation_route,
+      next_visual_generation_route: row.next_visual_generation_route,
+      source_white_cat_present: row.source_white_cat_present,
+      next_white_cat_present: row.next_white_cat_present,
+      boundary_change_class: row.boundary_change_class,
+      source_intent: row.source_intent,
+    };
+    const priorContext = Object.fromEntries(Object.keys(unchangedContext).map((key) => [key, priorRow[key]]));
+    const unchangedSelection = {
+      kind: row.kind,
+      options: row.options,
+      duration_seconds: row.duration_seconds,
+      duration_in_frames: row.duration_in_frames,
+    };
+    const priorSelection = Object.fromEntries(Object.keys(unchangedSelection).map((key) => [key, priorRow[key]]));
+    if (!sameCanonical(unchangedContext, priorContext)
+      || !sameCanonical(unchangedSelection, priorSelection)
+      || priorRow.user_selection?.status !== 'approved'
+      || priorRow.user_selection.presented_map_sha256 !== priorPresentedMapSha256) {
+      throw new Error(`unaffected transition approval cannot be preserved: ${boundaryId}`);
+    }
+    row.user_selection = {
+      ...priorRow.user_selection,
+      presented_map_sha256: nextPresentedMapSha256,
+      prior_presented_map_sha256: priorRow.user_selection.presented_map_sha256,
+      binding_basis: 'mechanically_rebound_after_visual_direction_change_with_unchanged_boundary_selection',
+      rebound_at: reboundAt,
+    };
+    return row;
+  });
+};
+
 const buildArtifacts = ({episodeWorkspace, classificationPath, presentedAt, overridePath = null}) => {
   const workspacePath = resolveRootRelative(episodeWorkspace, 'episode workspace');
   const statePath = path.join(workspacePath, 'schema/episode-state.json');
   const state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
   const replacingPendingProposal = state.current_phase === 'awaiting_transition_review';
+  const refreshingAffectedProposal = state.current_phase === 'visual_direction_review_approved'
+    && state.transition_review?.status === 'reopen_required_after_visual_direction_review';
   if (state.workspace_path !== episodeWorkspace
     || !['visual_direction_review_approved', 'awaiting_transition_review'].includes(state.current_phase)) {
     throw new Error('episode is not ready to build or replace a pending transition proposal');
@@ -116,27 +175,49 @@ const buildArtifacts = ({episodeWorkspace, classificationPath, presentedAt, over
   const classificationInput = JSON.parse(classificationBytes);
   let priorTransitionReview = null;
   let classification = classificationInput;
-  if (replacingPendingProposal) {
-    const currentTransitionPath = resolveRootRelative(state.transition_review?.path, 'current transition review path');
+  if (replacingPendingProposal || refreshingAffectedProposal) {
+    const priorBinding = refreshingAffectedProposal
+      ? state.transition_review?.prior_approval
+      : state.transition_review;
+    const currentTransitionPath = resolveRootRelative(
+      priorBinding?.path,
+      refreshingAffectedProposal ? 'prior approved transition review path' : 'current transition review path',
+    );
     const currentTransitionBytes = fs.readFileSync(currentTransitionPath);
-    if (state.transition_review?.status !== 'awaiting_user_selection'
-      || sha256(currentTransitionBytes) !== state.transition_review.checksum_sha256) {
-      throw new Error('current pending transition review checksum or status is stale');
+    const expectedPriorStatus = refreshingAffectedProposal ? 'approved' : 'awaiting_user_selection';
+    if ((!refreshingAffectedProposal && state.transition_review?.status !== expectedPriorStatus)
+      || sha256(currentTransitionBytes) !== priorBinding.checksum_sha256) {
+      throw new Error('prior transition review checksum or status is stale');
     }
     priorTransitionReview = JSON.parse(currentTransitionBytes);
-    if (priorTransitionReview.rows.some((row) => row.user_selection?.status !== 'pending')) {
+    if (priorTransitionReview.status !== expectedPriorStatus
+      || priorTransitionReview.presented_map_sha256 !== priorBinding.presented_map_sha256) {
+      throw new Error('prior transition review authority is stale');
+    }
+    if (!refreshingAffectedProposal
+      && priorTransitionReview.rows.some((row) => row.user_selection?.status !== 'pending')) {
       throw new Error('cannot globally rebuild a transition proposal after any boundary was decided');
     }
+    if (refreshingAffectedProposal
+      && priorTransitionReview.rows.some((row) => row.user_selection?.status !== 'approved')) {
+      throw new Error('affected-boundary refresh requires one fully approved prior transition review');
+    }
     if (path.resolve(classificationPath) !== currentTransitionPath
-      || sha256(classificationBytes) !== state.transition_review.checksum_sha256) {
-      throw new Error('pending transition proposal replacement must use the checksum-current proposal');
+      || sha256(classificationBytes) !== priorBinding.checksum_sha256) {
+      throw new Error('transition proposal rebuild must use the checksum-current prior review');
     }
     classification = {
       contract_version: 'scene-transition-boundary-classification-v1',
       episode_workspace: episodeWorkspace,
-      storyboard_checksum_sha256: priorTransitionReview.storyboard.checksum_sha256,
-      visual_direction_review_checksum_sha256: priorTransitionReview.visual_direction_review.checksum_sha256,
-      visual_direction_presented_map_sha256: priorTransitionReview.visual_direction_review.presented_map_sha256,
+      storyboard_checksum_sha256: refreshingAffectedProposal
+        ? review.storyboard.checksum_sha256
+        : priorTransitionReview.storyboard.checksum_sha256,
+      visual_direction_review_checksum_sha256: refreshingAffectedProposal
+        ? state.visual_direction_review.checksum_sha256
+        : priorTransitionReview.visual_direction_review.checksum_sha256,
+      visual_direction_presented_map_sha256: refreshingAffectedProposal
+        ? review.presented_map_sha256
+        : priorTransitionReview.visual_direction_review.presented_map_sha256,
       rows: priorTransitionReview.rows.map((row) => ({
         source_shot_id: row.source_shot_id,
         next_shot_id: row.next_shot_id,
@@ -163,11 +244,18 @@ const buildArtifacts = ({episodeWorkspace, classificationPath, presentedAt, over
   }
   let overrideArtifact = null;
   let overrideBinding = null;
-  if (overridePath !== null) {
-    if (!replacingPendingProposal) {
+  const inheritedOverrideBinding = refreshingAffectedProposal
+    ? priorTransitionReview.user_requested_transition_overrides ?? null
+    : null;
+  if (overridePath !== null || inheritedOverrideBinding !== null) {
+    if (!replacingPendingProposal && !refreshingAffectedProposal) {
       throw new Error('transition user-request override requires a checksum-current pending proposal');
     }
-    const overrideAbsolute = resolveRootRelative(overridePath, 'transition user-request override path');
+    if (refreshingAffectedProposal && overridePath !== null) {
+      throw new Error('affected-boundary refresh must preserve the prior user-request override binding');
+    }
+    const effectiveOverridePath = inheritedOverrideBinding?.path ?? overridePath;
+    const overrideAbsolute = resolveRootRelative(effectiveOverridePath, 'transition user-request override path');
     const overrideBytes = fs.readFileSync(overrideAbsolute);
     overrideArtifact = JSON.parse(overrideBytes);
     requireExactKeys(overrideArtifact, [
@@ -178,18 +266,26 @@ const buildArtifacts = ({episodeWorkspace, classificationPath, presentedAt, over
       'requested_at',
       'rows',
     ], 'transition user-request override');
+    const expectedOverrideBaseMap = inheritedOverrideBinding?.based_on_presented_map_sha256
+      ?? state.transition_review.presented_map_sha256;
     if (overrideArtifact.contract_version !== 'transition-review-user-request-v1'
       || overrideArtifact.episode_workspace !== episodeWorkspace
-      || overrideArtifact.based_on_presented_map_sha256 !== state.transition_review.presented_map_sha256
+      || overrideArtifact.based_on_presented_map_sha256 !== expectedOverrideBaseMap
       || typeof overrideArtifact.exact_message !== 'string' || overrideArtifact.exact_message.trim() === ''
       || typeof overrideArtifact.requested_at !== 'string'
       || Number.isNaN(Date.parse(overrideArtifact.requested_at))
       || !Array.isArray(overrideArtifact.rows) || overrideArtifact.rows.length === 0) {
       throw new Error('transition user-request override is stale or invalid');
     }
+    if (inheritedOverrideBinding !== null
+      && (sha256(overrideBytes) !== inheritedOverrideBinding.checksum_sha256
+        || overrideArtifact.rows.length !== inheritedOverrideBinding.row_count
+        || inheritedOverrideBinding.contract_version !== overrideArtifact.contract_version)) {
+      throw new Error('inherited transition user-request override binding is stale');
+    }
     overrideBinding = {
       contract_version: overrideArtifact.contract_version,
-      path: overridePath,
+      path: effectiveOverridePath,
       checksum_sha256: sha256(overrideBytes),
       based_on_presented_map_sha256: overrideArtifact.based_on_presented_map_sha256,
       row_count: overrideArtifact.rows.length,
@@ -199,7 +295,20 @@ const buildArtifacts = ({episodeWorkspace, classificationPath, presentedAt, over
   if (!Array.isArray(classification.rows) || classification.rows.length !== expectedPairs.length) {
     throw new Error('transition classification does not cover every ordinary boundary');
   }
-
+  const expectedBoundaryIds = expectedPairs.map(([source, next]) => `${source}->${next}`);
+  const affectedBoundaryIds = refreshingAffectedProposal
+    ? state.transition_review.affected_boundary_ids
+    : [];
+  if (refreshingAffectedProposal) {
+    const reopenedFromDirectionReview = (state.visual_direction_review.reopened_transition_boundaries ?? [])
+      .map(({source_shot_id: source, next_shot_id: next}) => `${source}->${next}`);
+    if (!Array.isArray(affectedBoundaryIds) || affectedBoundaryIds.length === 0
+      || new Set(affectedBoundaryIds).size !== affectedBoundaryIds.length
+      || affectedBoundaryIds.some((boundaryId) => !expectedBoundaryIds.includes(boundaryId))
+      || !sameCanonical(affectedBoundaryIds, reopenedFromDirectionReview)) {
+      throw new Error('affected transition boundary set is missing, stale, or inconsistent with visual direction review');
+    }
+  }
   const overrideByBoundary = new Map();
   for (const [index, row] of (overrideArtifact?.rows ?? []).entries()) {
     requireExactKeys(row, ['source_shot_id', 'next_shot_id', 'kind', 'options'], `transition override ${index + 1}`);
@@ -286,8 +395,11 @@ const buildArtifacts = ({episodeWorkspace, classificationPath, presentedAt, over
     };
   });
 
-  const currentProposalVersion = replacingPendingProposal
-    ? Number(state.transition_review.path.match(/per-boundary-transition-review-v(\d+)\.json$/)?.[1])
+  const versionSourcePath = refreshingAffectedProposal
+    ? state.transition_review.prior_approval.path
+    : state.transition_review?.path;
+  const currentProposalVersion = (replacingPendingProposal || refreshingAffectedProposal)
+    ? Number(versionSourcePath.match(/per-boundary-transition-review-v(\d+)\.json$/)?.[1])
     : 0;
   if (!Number.isInteger(currentProposalVersion) || currentProposalVersion < 0) {
     throw new Error('current transition review path is not versioned');
@@ -310,6 +422,15 @@ const buildArtifacts = ({episodeWorkspace, classificationPath, presentedAt, over
     },
     ordinary_boundary_count: rows.length,
     diversity_policy: diversified.policy,
+    ...(refreshingAffectedProposal ? {
+      refresh_lineage: {
+        contract_version: 'affected-boundary-transition-refresh-v1',
+        reason: state.transition_review.reason,
+        affected_boundary_ids: affectedBoundaryIds,
+        preserved_approved_boundary_count: rows.length - affectedBoundaryIds.length,
+        prior_approval: state.transition_review.prior_approval,
+      },
+    } : {}),
     ...(overrideBinding ? {user_requested_transition_overrides: overrideBinding} : {}),
     fixed_exemptions: {
       opening: {
@@ -332,11 +453,23 @@ const buildArtifacts = ({episodeWorkspace, classificationPath, presentedAt, over
     rows,
     presentation: {
       presented_at: presentedAt,
-      exact_message: `已按 ${diversified.policy.rule_id} 呈现完整 ${rows.length} 条普通边界的 scene-transition-v3 推荐映射及全部注册目录项；白猫 ImageGen 边界优先 watercolor-bloom；同种可见动画连续不超过 ${diversified.policy.max_consecutive_identical_visible_kind_uses} 次，整期不超过 ${diversified.policy.max_identical_visible_kind_absolute_uses} 次且占可见转场不超过 ${Math.round(diversified.policy.max_identical_visible_kind_share * 100)}%；等待用户逐条选择或明确确认全部推荐。`,
+      exact_message: refreshingAffectedProposal
+        ? `已按 ${diversified.policy.rule_id} 重建 ${affectedBoundaryIds.length} 条受视觉路线变化影响的 scene-transition-v3 边界；其余 ${rows.length - affectedBoundaryIds.length} 条批准选择在边界视觉上下文与选择均未变化且整期多样性复验通过后机械重绑；等待用户明确批准受影响边界。`
+        : `已按 ${diversified.policy.rule_id} 呈现完整 ${rows.length} 条普通边界的 scene-transition-v3 推荐映射及全部注册目录项；白猫 ImageGen 边界优先 watercolor-bloom；同种可见动画连续不超过 ${diversified.policy.max_consecutive_identical_visible_kind_uses} 次，整期不超过 ${diversified.policy.max_identical_visible_kind_absolute_uses} 次且占可见转场不超过 ${Math.round(diversified.policy.max_identical_visible_kind_share * 100)}%；等待用户逐条选择或明确确认全部推荐。`,
       approval_phrase_after_complete_presentation: '确认全部推荐',
     },
   };
   proposal.presented_map_sha256 = buildTransitionReviewPresentedMapSha256(proposal);
+  if (refreshingAffectedProposal) {
+    proposal.rows = rebindUnaffectedTransitionApprovals({
+      rows: proposal.rows,
+      priorRows: priorTransitionReview.rows,
+      affectedBoundaryIds,
+      priorPresentedMapSha256: priorTransitionReview.presented_map_sha256,
+      nextPresentedMapSha256: proposal.presented_map_sha256,
+      reboundAt: presentedAt,
+    });
+  }
   const proposalBytes = jsonBytes(proposal);
 
   const nextState = structuredClone(state);
@@ -346,18 +479,27 @@ const buildArtifacts = ({episodeWorkspace, classificationPath, presentedAt, over
     ordinary_transition_status: 'awaiting_explicit_per_boundary_review',
   };
   if (priorTransitionReview) {
+    const priorBinding = refreshingAffectedProposal
+      ? state.transition_review.prior_approval
+      : state.transition_review;
     nextState.superseded_artifacts = [
       ...(nextState.superseded_artifacts ?? []),
       {
         record_type: 'superseded_transition_review_presentation',
-        reason: 'transition_recommendation_policy_recomputed',
+        reason: refreshingAffectedProposal
+          ? 'affected_boundaries_reopened_after_visual_direction_change'
+          : 'transition_recommendation_policy_recomputed',
         superseded_at: presentedAt,
-        prior_artifact_path: state.transition_review.path,
-        prior_artifact_checksum_sha256: state.transition_review.checksum_sha256,
-        prior_presented_map_sha256: state.transition_review.presented_map_sha256,
-        prior_status: state.transition_review.status,
+        prior_artifact_path: priorBinding.path,
+        prior_artifact_checksum_sha256: priorBinding.checksum_sha256,
+        prior_presented_map_sha256: priorBinding.presented_map_sha256,
+        prior_status: priorTransitionReview.status,
         replacement_artifact_path: proposalRelative,
         replacement_presented_map_sha256: proposal.presented_map_sha256,
+        ...(refreshingAffectedProposal ? {
+          affected_boundary_ids: affectedBoundaryIds,
+          preserved_approved_boundary_count: rows.length - affectedBoundaryIds.length,
+        } : {}),
       },
     ];
   }
@@ -369,6 +511,13 @@ const buildArtifacts = ({episodeWorkspace, classificationPath, presentedAt, over
     checksum_sha256: sha256(proposalBytes),
     presented_map_sha256: proposal.presented_map_sha256,
     ordinary_boundary_count: rows.length,
+    pending_boundary_ids: refreshingAffectedProposal ? affectedBoundaryIds : expectedBoundaryIds,
+    pending_boundary_count: refreshingAffectedProposal ? affectedBoundaryIds.length : rows.length,
+    approved_boundary_count: refreshingAffectedProposal ? rows.length - affectedBoundaryIds.length : 0,
+    ...(refreshingAffectedProposal ? {
+      refresh_lineage: proposal.refresh_lineage,
+      unaffected_boundary_evidence_preserved: true,
+    } : {}),
     diversity_policy: diversified.policy,
     presented_at: presentedAt,
     exact_presentation_message: proposal.presentation.exact_message,

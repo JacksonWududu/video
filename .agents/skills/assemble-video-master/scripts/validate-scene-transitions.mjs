@@ -9,6 +9,14 @@ import {
   validateUserApprovedTransition,
 } from '../../../../leverage-video/src/shared/scene-transitions/contract.mjs';
 import {validateIntraShotWatercolorTransition} from '../../../../leverage-video/src/shared/watercolor-bloom/contract.mjs';
+import {
+  INTRA_SHOT_TRANSITION_VERSION,
+  validateIntraShotTransitionSequence,
+} from '../../../../leverage-video/src/shared/intra-shot-transitions/contract.mjs';
+import {
+  ACTION_STATE_SCHEDULE_V3_VERSION,
+  validateActionStateSchedule,
+} from '../../../../leverage-video/src/shared/action-state-schedule/contract.mjs';
 import {resolveRouteVisibleTextPolicy} from '../../../../leverage-video/src/shared/visual-generation-routes/contract.mjs';
 
 const LEGACY_ALLOWED_KINDS = new Set(TRANSITION_KINDS);
@@ -24,9 +32,11 @@ const expandSharedRendererSource = (source) => {
     fs.readFileSync(path.join(REPOSITORY_ROOT, 'leverage-video/src/shared/video-scenes/KnowledgeVideo.tsx'), 'utf8'),
     fs.readFileSync(path.join(REPOSITORY_ROOT, 'leverage-video/src/shared/video-scenes/EpisodeOpening.tsx'), 'utf8'),
     fs.readFileSync(path.join(REPOSITORY_ROOT, 'leverage-video/src/shared/video-scenes/ComicScene.tsx'), 'utf8'),
+    fs.readFileSync(path.join(REPOSITORY_ROOT, 'leverage-video/src/shared/video-scenes/NarrativeScene.tsx'), 'utf8'),
     fs.readFileSync(path.join(REPOSITORY_ROOT, 'leverage-video/src/shared/video-scenes/GraphicScene.tsx'), 'utf8'),
     fs.readFileSync(path.join(REPOSITORY_ROOT, 'leverage-video/src/shared/video-scenes/DoodleScene.tsx'), 'utf8'),
     fs.readFileSync(path.join(REPOSITORY_ROOT, 'leverage-video/src/shared/video-scenes/WhiteboardScene.tsx'), 'utf8'),
+    fs.readFileSync(path.join(REPOSITORY_ROOT, 'leverage-video/src/shared/video-scenes/LocalVideoScene.tsx'), 'utf8'),
   ].join('\n');
 };
 
@@ -166,6 +176,15 @@ export const validateSceneTransitions = ({plan, source}) => {
       || visualDirectionArtifactPolicy?.contract_version !== 'per-shot-visual-direction-review-v3') {
       throw new Error('new or modified assembly requires current_v3 visual direction evidence');
     }
+    if (plan?.qa_contract?.storyboard_visual_rhythm?.result !== 'pass'
+      || plan.qa_contract.storyboard_visual_rhythm?.contract_version
+        !== 'storyboard-visual-rhythm-v1') {
+      throw new Error('v3 assembly lacks approved storyboard visual rhythm evidence');
+    }
+    if (plan?.qa_contract?.intra_shot_transition_contract !== INTRA_SHOT_TRANSITION_VERSION
+      || !/IntraShotImageSequence/.test(source)) {
+      throw new Error('v3 assembly is not bound to the generic intra-shot transition renderer');
+    }
   } else if (visualDirectionArtifactPolicy?.result !== 'pass'
     || visualDirectionArtifactPolicy?.artifact_mode !== 'legacy_read_only'
     || visualDirectionArtifactPolicy?.contract_version !== expectedDirectionContract
@@ -185,7 +204,8 @@ export const validateSceneTransitions = ({plan, source}) => {
     const isXuan = scene.visual_generation_route === 'xuan-paper-diorama';
     const isComic = scene.visual_generation_route === 'comic-imagegen';
     const isWhiteboard = scene.visual_generation_route === 'srt-whiteboard-animation';
-    if (![isIan, isInk, isDoodle, isImagegen, isXuan, isComic, isWhiteboard].some(Boolean)) {
+    const isLocalVideo = scene.visual_generation_route === 'local-video-file';
+    if (![isIan, isInk, isDoodle, isImagegen, isXuan, isComic, isWhiteboard, isLocalVideo].some(Boolean)) {
       throw new Error(`unknown visual generation route: ${scene.shot_id}`);
     }
     if (isComic || isDoodle) {
@@ -223,12 +243,81 @@ export const validateSceneTransitions = ({plan, source}) => {
         || scene.timeline_text_overlays.length !== 0) {
         throw new Error(`scene text policy is stale or permits a timeline overlay: ${scene.shot_id}`);
       }
+      if (scene.intra_shot_transition_contract !== INTRA_SHOT_TRANSITION_VERSION) {
+        throw new Error(`scene lacks the active v3 intra-shot transition contract: ${scene.shot_id}`);
+      }
+      const images = scene.image_sequence ?? [];
+      const transitions = scene.intra_shot_transitions ?? [];
+      if (!Array.isArray(images) || !Array.isArray(transitions)) {
+        throw new Error(`scene image sequence or intra-shot transition map is invalid: ${scene.shot_id}`);
+      }
+      if (images.length === 0) {
+        if (!isWhiteboard && !isLocalVideo) {
+          throw new Error(`raster scene has no approved image occurrence: ${scene.shot_id}`);
+        }
+        if (transitions.length !== 0) {
+          throw new Error(`non-raster scene carries intra-shot transitions: ${scene.shot_id}`);
+        }
+      } else {
+        validateIntraShotTransitionSequence({imageSequence: images, transitions, fps});
+      }
+      if (!['layered', 'stateful', 'hero_pose'].includes(scene.motion_tier)) {
+        throw new Error(`scene lacks a locked v3 motion tier: ${scene.shot_id}`);
+      }
+      if (!isWhiteboard && !isLocalVideo && scene.motion_tier === 'layered' && images.length !== 1) {
+        throw new Error(`layered scene must carry one master raster: ${scene.shot_id}`);
+      }
+      if (scene.motion_tier === 'stateful' && (images.length < 2 || images.length > 4)) {
+        throw new Error(`stateful scene must carry 2–4 complete rasters: ${scene.shot_id}`);
+      }
+      if (scene.motion_tier === 'hero_pose') {
+        if (images.length < 4 || images.length > 6
+          || !scene.hero_pose_background?.asset
+          || !SHA256.test(scene.hero_pose_background?.checksum_sha256 ?? '')
+          || !/backgroundSrc/.test(source)) {
+          throw new Error(`hero_pose scene lacks its locked background and 4–6 poses: ${scene.shot_id}`);
+        }
+      }
+      if (['stateful', 'hero_pose'].includes(scene.motion_tier)) {
+        if (scene.action_state_schedule?.contract_version !== ACTION_STATE_SCHEDULE_V3_VERSION) {
+          throw new Error(`stateful or hero scene lacks action-state-schedule-v3: ${scene.shot_id}`);
+        }
+        validateActionStateSchedule(scene.action_state_schedule, {
+          totalFrames: scene.duration_frames,
+          fps,
+        });
+        if (scene.action_state_schedule.occurrences.length !== images.length
+          || scene.action_state_schedule.occurrences.some((occurrence, index) => (
+            occurrence.state_id !== images[index].asset_id
+            || occurrence.at_frame !== images[index].from
+            || occurrence.duration_in_frames !== images[index].duration_in_frames
+          ))
+          || JSON.stringify(scene.action_state_schedule.intra_shot_transitions)
+            !== JSON.stringify(transitions)) {
+          throw new Error(`action-state schedule differs from rendered assets or effects: ${scene.shot_id}`);
+        }
+      }
     }
     if (isWhiteboard && (scene.white_cat_present || scene.scene_type !== 'whiteboard')) {
       throw new Error(`whiteboard route requires a no-cat whiteboard scene: ${scene.shot_id}`);
     }
     if (scene.scene_type === 'whiteboard' && !isWhiteboard) {
       throw new Error(`whiteboard scene lacks the whiteboard generation marker: ${scene.shot_id}`);
+    }
+    if (isLocalVideo) {
+      const localVideo = scene.local_video;
+      if (scene.white_cat_present || scene.scene_type !== 'local-video'
+        || localVideo?.contract_version !== 'local-video-match-v1'
+        || localVideo?.match_status !== 'matched'
+        || localVideo?.target_duration_frames !== scene.duration_frames
+        || localVideo?.media?.width !== 1920 || localVideo?.media?.height !== 1080
+        || localVideo?.media?.codec !== 'h264'
+        || localVideo?.media?.probe_result !== 'pass'
+        || localVideo?.media?.full_decode_result !== 'pass') {
+        throw new Error(`local-video scene lacks approved exact-frame media evidence: ${scene.shot_id}`);
+      }
+    } else if (scene.scene_type === 'local-video') {
+      throw new Error(`local-video scene lacks the local-video-file marker: ${scene.shot_id}`);
     }
     if (isWhiteboard) {
       const whiteboard = scene.whiteboard;

@@ -1,17 +1,18 @@
 # Visual Asset Review v2
 
-Apply `visual-asset-review-v2` to every generated episode visual asset. New and modified work defaults to `mode: hybrid_batch_v1` and `batch_size: 4`. `sequential_per_image` and `batch_final_review` remain readable for legacy episodes only; do not migrate them automatically. The exact shared `cover.png` governed by `cover-only-v1` does not enter the queue.
+Apply `visual-asset-review-v2` to every generated episode visual asset and every selected `local-video-file` source consumed by the episode. New and modified work defaults to `mode: hybrid_batch_v1` and `batch_size: 4`. `sequential_per_image` and `batch_final_review` remain readable for legacy episodes only; do not migrate them automatically. The exact shared `cover.png` governed by `cover-only-v1` does not enter the queue.
 
 ## Ordered generation and strict barriers
 
 - Maintain one ordered `visual_asset_review.queue` in `schema/episode-state.json`. Queue order follows storyboard and real dependency order; batching never changes generation order.
 - Queue order follows storyboard/dependency order. A character family always queues its master before its action variants.
+- Partition active items without disturbing those dependencies: every non-`local-video-file` item first, then every local-video item in storyboard order. A non-local item after the first local-video item is invalid. Do not read or process a local-video source while any non-local item remains unapproved.
 - Never regroup or prioritize the queue by recurring-character appearance, character identity, asset type, or production convenience. Preserve the actual storyboard order; within one storyboard shot, keep `master → action-01 → action-02 → ...`.
 - Generate and technically QA only the current item. Non-strict QA may unlock the next item; never batch an image-generation call.
-- Strict per-item review applies to recurring-character and white-cat masters, every master with downstream action variants, all Whiteboard stages, user-marked strict items, and every revision after a change request. A strict barrier first closes and presents any pending normal batch, then blocks later work until its exact bytes are approved.
+- Strict per-item review applies to recurring-character and white-cat masters, every master with downstream action variants, all Whiteboard stages, every deferred local-video item, user-marked strict items, and every revision after a change request. A strict barrier first closes and presents any pending normal batch, then blocks later work until its exact bytes are approved.
 - Normal items pause for user review after four QA-passing items, before a strict barrier, or at queue end.
 - Allowed statuses include `pending_generation`, `awaiting_batch_qa`, `qa_passed_pending_batch_review`, `awaiting_user_approval`, `approved`, `changes_requested`, `rejected`, and `superseded`.
-- Before generation, call `require_generation_allowed` from `scripts/validate_visual_approval_state.py`. A normal item with `qa_passed_pending_batch_review` may unlock the next normal item in the same batch; an unresolved strict item, missing dependency, pause boundary, or non-QA-passing current item blocks later generation.
+- Before generation, call `require_generation_allowed` from `scripts/validate_visual_approval_state.py`. A normal item with `qa_passed_pending_batch_review` may unlock the next normal item in the same batch; an unresolved strict item, missing dependency, pause boundary, or non-QA-passing current item blocks later generation. This function rejects `local-video-file`; use the deferred import path only after the queue reaches its final local-video partition.
 
 ## Present exact bytes and stop
 
@@ -23,6 +24,13 @@ Apply `visual-asset-review-v2` to every generated episode visual asset. New and 
 6. At each batch boundary, write `visual-asset-batch-manifest-v1` with ordered asset IDs and checksum map, compute `manifest_sha256`, present every exact image with its evidence and complete narration, then stop. A contact sheet is optional QA only.
 7. The user may approve the whole batch or named members. At decision time call `record_hybrid_batch_approval` with the repository root; it must resolve each selected repository-relative path without symlinks, reread the file, recompute SHA-256 and PNG dimensions, rebuild the active manifest, and require disk/current/presented/QA/manifest evidence to agree before binding the exact message/time. Apply the same repository-root disk check to hybrid strict `record_approval` and every Whiteboard stage approval. Standalone shorthand `1` remains explicit approval.
 8. A named change calls `record_hybrid_changes_requested`. It invalidates that asset, its real dependents, and the batch manifest; already individually approved unchanged bytes remain approved. The revision becomes strict and never inherits approval.
+
+## Deferred local-video items
+
+- After every non-local item is explicitly approved and no active batch remains, resolve the next local-video item's exact approved absolute `.mp4` path. Process local-video items one at a time in storyboard order; never treat their earlier queue deferral as approval or omission.
+- Require one unrotated native 1920×1080 H.264 video stream, a successful probe and full decode, a regular non-symlink source, exact archived checksum equality, and the exact shot target frame count at 30 fps. Source audio is muted and ignored.
+- Bind `local-video-match-v1` with `playback_rate = source_duration_seconds / (target_duration_frames / 30)` and `match_status: matched`. Map the complete source interval to the exact shot frame count; trimming, looping, padding, interpolation, crop, stretch, redraw, or added text is forbidden.
+- Present a matched preview plus exact source/archive checksum, media evidence, target seconds/frames, and playback rate. Approve it through the strict `record_approval` path; the validator rechecks current disk bytes and media evidence. Any changed source byte, path, target frames, or playback rate invalidates approval and downstream assembly.
 
 If a file changed after presentation, stale approval fails. Freshly QA and rebuild its evidence/package before approval. When the user's exact post-edit message explicitly approves the current file, that same message may be bound after the current bytes pass fresh QA and disk verification; a general or pre-edit approval may not be reused.
 

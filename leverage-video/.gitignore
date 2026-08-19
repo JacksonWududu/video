@@ -3,3 +3,4 @@ out/
 .DS_Store
 src/topic*/
 src/shared/gen-think/assets/
+src/shared/visual-assets/__pycache__/

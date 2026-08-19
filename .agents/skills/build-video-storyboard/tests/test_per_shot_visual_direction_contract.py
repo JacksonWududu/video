@@ -18,6 +18,9 @@ class PerShotVisualDirectionContractTest(unittest.TestCase):
         self.assert_file_contains(
             ".agents/skills/build-video-storyboard/SKILL.md",
             "per-shot-visual-direction-review-v3",
+            "visual-direction-review-form-v3",
+            "editable non-empty 画面",
+            "visual-direction-form-submission-v3",
             "storyboard_construction → awaiting_visual_direction_review → visual_direction_review_approved → awaiting_transition_review → transition_review_approved → storyboard_qa_passed → awaiting_storyboard_review",
             "before Per-Boundary Transition Review",
             "`确认全部推荐`",
@@ -33,19 +36,22 @@ class PerShotVisualDirectionContractTest(unittest.TestCase):
             "`imagegen`",
             "`xuan-paper-diorama` as an explicit, non-default narrative alternative",
             "`ian-handdrawn-ppt` as the structured default",
-            "Never recommend Whiteboard by default",
+            "Never recommend Whiteboard or local video by default",
             "Do not enter Transition Review, Storyboard Review, or visual production",
         )
 
-    def test_summary_requires_approved_six_column_direction_fields(self) -> None:
+    def test_summary_requires_approved_seven_column_direction_fields(self) -> None:
         self.assert_file_contains(
             ".agents/skills/build-video-storyboard/references/storyboard-contract.md",
-            "| 镜头 | 画面 | 白猫 | 生图方式 | 可见文字 | 锁稿原文 |",
+            "| 镜头 | 时长（秒） | 画面 | 白猫 | 分镜生成方式 | 可见文字 | 锁稿原文 |",
+            "(end_frame - start_frame) / 30",
+            "local-video-file",
             "`不适用`",
             "`固定封面（cover-only-v1）`",
             "must never be `待确认`, pending, incompatible, or checksum-stale",
             "per-shot-visual-direction-review-v3",
             "all current active rows",
+            "visual-description edit also reopens semantic/classification",
             "storyboard-shot-merge-request-v1",
             "compact_after_merge",
         )

@@ -52,10 +52,16 @@ const completeLegacyDecision = (workspace, scriptInventory) => ({
   },
 });
 
-test('registers action scheduling, visual language, Comic routing, and specialized video scenes', () => {
+test('registers v3 action, visual rhythm, generic intra-shot transitions, routing, and specialized scenes', () => {
   const actionSchedule = registry.modules.find((module) => module.module_id === 'action-state-schedule');
   assert.equal(actionSchedule?.path, 'leverage-video/src/shared/action-state-schedule');
-  assert.match(actionSchedule?.use_when ?? '', /duration-driven.*state counts.*revoice/i);
+  assert.match(actionSchedule?.use_when ?? '', /v3 semantic action states.*revoice/i);
+  const intraShotTransitions = registry.modules.find((module) => module.module_id === 'intra-shot-transitions');
+  assert.equal(intraShotTransitions?.path, 'leverage-video/src/shared/intra-shot-transitions');
+  assert.match(intraShotTransitions?.use_when ?? '', /explicit cut.*user-approved watercolor-bloom/i);
+  const visualRhythm = registry.modules.find((module) => module.module_id === 'storyboard-visual-rhythm');
+  assert.equal(visualRhythm?.path, 'leverage-video/src/shared/storyboard-visual-rhythm');
+  assert.match(visualRhythm?.use_when ?? '', /motion tiers.*meaningful visual changes.*QA warnings/i);
   const routeCatalog = registry.modules.find((module) => module.module_id === 'visual-generation-routes');
   assert.equal(routeCatalog?.path, 'leverage-video/src/shared/visual-generation-routes');
   assert.match(routeCatalog?.use_when ?? '', /per-shot.*white-cat.*route/i);
@@ -63,15 +69,19 @@ test('registers action scheduling, visual language, Comic routing, and specializ
   assert.match(videoScenes?.use_when ?? '', /Ink/);
   assert.match(videoScenes?.use_when ?? '', /DoodleScene.*historical read-only/);
   assert.match(videoScenes?.use_when ?? '', /WhiteboardScene/);
+  assert.match(videoScenes?.use_when ?? '', /LocalVideoScene/);
   assert.match(videoScenes?.use_when ?? '', /ComicScene/);
   assert.match(routeCatalog?.use_when ?? '', /comic-imagegen/);
-  assert.match(routeCatalog?.use_when ?? '', /optional whiteboard/i);
+  assert.match(routeCatalog?.use_when ?? '', /optional Whiteboard or local-video-file/i);
   const visualLanguage = registry.modules.find((module) => module.module_id === 'visual-language');
   assert.equal(visualLanguage?.path, 'leverage-video/src/shared/visual-language');
   assert.match(visualLanguage?.use_when ?? '', /visual_structure_id.*treatment_profile_id.*Comic/i);
   const reviewForm = registry.modules.find((module) => module.module_id === 'visual-direction-review-form');
   assert.equal(reviewForm?.path, 'leverage-video/src/shared/visual-direction-review-form');
-  assert.match(reviewForm?.use_when ?? '', /six-column.*partial structured submissions.*route treatments/i);
+  assert.match(reviewForm?.use_when ?? '', /seven-column.*partial structured submissions.*route treatments/i);
+  const localVideo = registry.modules.find((module) => module.module_id === 'local-video-match');
+  assert.equal(localVideo?.path, 'leverage-video/src/shared/local-video-match');
+  assert.match(localVideo?.use_when ?? '', /Deferring.*exact source bytes.*exact shot frames/i);
 });
 
 test('requires one explicit decision for every registered shared module', () => {

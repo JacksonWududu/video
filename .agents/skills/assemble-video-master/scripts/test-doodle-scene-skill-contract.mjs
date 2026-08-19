@@ -26,7 +26,7 @@ test('Ink Doodle uses GraphicScene PNGs without Ian mask sweep', () => {
   assert.match(source, /PNG/);
   assert.match(source, /must not redraw or relabel/i);
   assert.match(source, /must not.*FullFrameMaskSweep/i);
-  assert.match(source, /0\.6-second.*watercolor/i);
+  assert.match(source, /normally zero-frame cuts.*watercolor only when explicitly approved/i);
 });
 
 test('ComicScene is retained only for completed unchanged legacy evidence', () => {

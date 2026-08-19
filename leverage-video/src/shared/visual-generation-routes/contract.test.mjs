@@ -481,7 +481,7 @@ const buildV3Review = ({
   if (eligible && whiteCatPresent) item.comic_plan_candidate.character_reference_review = pendingReference;
   item.compatible_routes = whiteCatPresent
     ? ['imagegen', 'xuan-paper-diorama']
-    : ['imagegen', 'xuan-paper-diorama', 'srt-whiteboard-animation'];
+    : ['imagegen', 'xuan-paper-diorama', 'srt-whiteboard-animation', 'local-video-file'];
   item.incompatible_routes = ACTIVE_ROUTES_FOR_TEST.filter(
     (candidate) => !item.compatible_routes.includes(candidate),
   );
@@ -496,7 +496,11 @@ const buildV3Review = ({
     visible_text_mode: item.visible_text_mode,
     exact_visible_text: item.exact_visible_text,
     visible_text_placement: item.visible_text_placement,
+    local_video_source_path: route === 'local-video-file'
+      ? '/Users/jackson/Videos/locked-shot.mp4'
+      : null,
   });
+  item.local_video_source_path = item.user_selection.local_video_source_path;
   const review = buildV2Review([item]);
   review.contract_version = 'per-shot-visual-direction-review-v3';
   review.presentation.exact_message = '请确认完整逐镜视觉方向表 v3。';
@@ -510,7 +514,72 @@ const matchingV3Shots = (review) => matchingV2Shots(review).map((shot, index) =>
   visible_text_mode: review.rows[index].user_selection.visible_text_mode,
   exact_visible_text: review.rows[index].user_selection.exact_visible_text,
   visible_text_placement: review.rows[index].user_selection.visible_text_placement,
+  local_video_source_path: review.rows[index].user_selection.local_video_source_path ?? null,
 }));
+
+const legacyV3PresentedMapSha256 = (review) => {
+  const canonicalize = (value) => {
+    if (Array.isArray(value)) return value.map(canonicalize);
+    if (value && typeof value === 'object') {
+      return Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonicalize(value[key])]));
+    }
+    return value;
+  };
+  const rows = review.rows.map((item) => ({
+    shot_id: item.shot_id,
+    scene_class: item.scene_class,
+    structured_visual_kind: item.structured_visual_kind ?? null,
+    factual_identity: item.factual_identity,
+    white_cat_recommendation: item.white_cat_recommendation,
+    cat_removal_revision: item.cat_removal_revision ?? null,
+    cat_addition_review: item.cat_addition_review ?? null,
+    visual_language_recommendation: item.visual_language_recommendation,
+    comic_eligibility: item.comic_eligibility,
+    comic_plan_candidate: item.comic_plan_candidate ?? null,
+    visible_text_mode: item.visible_text_mode,
+    exact_visible_text: item.exact_visible_text ?? null,
+    visible_text_placement: item.visible_text_placement ?? null,
+    ...(item.merge_visual_inheritance ? {merge_visual_inheritance: item.merge_visual_inheritance} : {}),
+    ...(item.presented_candidate_selection
+      ? {presented_candidate_selection: item.presented_candidate_selection}
+      : {}),
+    compatible_routes: item.compatible_routes,
+    incompatible_routes: item.incompatible_routes,
+    incompatible_route_reasons: item.incompatible_route_reasons,
+    recommended_route: item.recommended_route,
+    recommendation_reason: item.recommendation_reason,
+  }));
+  return crypto.createHash('sha256').update(JSON.stringify(canonicalize({
+    contract_version: review.contract_version,
+    catalog_version: review.catalog_version,
+    catalog_checksum_sha256: review.catalog_checksum_sha256,
+    visual_language_catalog_version: review.visual_language_catalog_version,
+    visual_language_catalog_checksum_sha256: review.visual_language_catalog_checksum_sha256,
+    storyboard: review.storyboard,
+    rows,
+  }))).digest('hex');
+};
+
+test('keeps exact pre-local-video v3 approvals readable without broadening their route set', () => {
+  const review = buildV3Review({
+    eligible: false,
+    route: 'imagegen',
+    visibleTextMode: 'none',
+    whiteCatPresent: false,
+  });
+  review.catalog_checksum_sha256 = '037380ed89c72cbda8bfa336a93989366b913e31ded160a497c80488f7b5077b';
+  review.visual_language_catalog_checksum_sha256 = '702a473066a3097df41e0ae6a92709c42951c8b50b37259ba0de56abd98834df';
+  review.rows[0].compatible_routes = ['imagegen', 'xuan-paper-diorama', 'srt-whiteboard-animation'];
+  review.rows[0].incompatible_routes = ['ian-handdrawn-ppt', 'ink-doodle-knowledge-card'];
+  review.rows[0].incompatible_route_reasons = Object.fromEntries(
+    review.rows[0].incompatible_routes.map((route) => [route, `${route} 不兼容当前分类。`]),
+  );
+  delete review.rows[0].local_video_source_path;
+  delete review.rows[0].user_selection.local_video_source_path;
+  review.presented_map_sha256 = legacyV3PresentedMapSha256(review);
+  review.rows[0].user_selection.presented_map_sha256 = review.presented_map_sha256;
+  assert.equal(validateVisualDirectionReview(review, {shots: matchingV3Shots(review)}).result, 'pass');
+});
 
 const ACTIVE_ROUTES_FOR_TEST = [
   'imagegen',
@@ -518,6 +587,7 @@ const ACTIVE_ROUTES_FOR_TEST = [
   'ian-handdrawn-ppt',
   'ink-doodle-knowledge-card',
   'srt-whiteboard-animation',
+  'local-video-file',
 ];
 
 test('v3 adds Ink Doodle Knowledge Card and retires Comic plus Doodle Slides', () => {
@@ -619,6 +689,19 @@ test('v3 accepts text-free xuan-paper-diorama for narrative shots with or withou
   }
 });
 
+test('v3 accepts an explicitly selected no-cat local video with an exact presented absolute path', () => {
+  const review = buildV3Review({
+    eligible: false,
+    route: 'local-video-file',
+    visibleTextMode: 'none',
+    whiteCatPresent: false,
+  });
+  review.rows[0].user_selection.treatment_profile_id = 'source-video-native';
+  review.presented_map_sha256 = buildPresentedMapSha256(review);
+  review.rows[0].user_selection.presented_map_sha256 = review.presented_map_sha256;
+  assert.equal(validateVisualDirectionReview(review, {shots: matchingV3Shots(review)}).result, 'pass');
+});
+
 test('v3 xuan-paper-diorama is text-free', () => {
   const review = buildV3Review({
     eligible: false,
@@ -674,4 +757,12 @@ test('route catalog keeps non-white-cat routes on their independent visible-text
     visual_generation_route: 'srt-whiteboard-animation',
     white_cat_present: false,
   }).visible_text_policy, 'whiteboard-annotation-v2');
+  assert.equal(resolveRouteVisibleTextPolicy({
+    visual_generation_route: 'local-video-file',
+    white_cat_present: false,
+  }).visible_text_policy, 'source-video-pixels-preserved-no-added-text-v1');
+  assert.equal(
+    CATALOG.routes.find((route) => route.route_id === 'local-video-file').processing_order,
+    'deferred-after-generated-visuals-v1',
+  );
 });

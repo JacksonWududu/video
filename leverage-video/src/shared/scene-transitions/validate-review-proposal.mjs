@@ -76,6 +76,44 @@ export const validateEpisodeTransitionReviewProposal = (episodeWorkspace) => {
     || state.transition_review.ordinary_boundary_count !== proposal.rows.length) {
     throw new Error('transition review proposal authority or coverage is invalid');
   }
+  const refreshLineage = proposal.refresh_lineage ?? null;
+  let priorApprovedReview = null;
+  let affectedBoundarySet = new Set();
+  if (refreshLineage !== null) {
+    requireExactKeys(refreshLineage, [
+      'contract_version',
+      'reason',
+      'affected_boundary_ids',
+      'preserved_approved_boundary_count',
+      'prior_approval',
+    ], 'affected-boundary transition refresh lineage');
+    requireExactKeys(refreshLineage.prior_approval, [
+      'path',
+      'checksum_sha256',
+      'presented_map_sha256',
+    ], 'affected-boundary prior approval');
+    affectedBoundarySet = new Set(refreshLineage.affected_boundary_ids);
+    if (refreshLineage.contract_version !== 'affected-boundary-transition-refresh-v1'
+      || !Array.isArray(refreshLineage.affected_boundary_ids)
+      || refreshLineage.affected_boundary_ids.length === 0
+      || affectedBoundarySet.size !== refreshLineage.affected_boundary_ids.length
+      || refreshLineage.preserved_approved_boundary_count
+        !== proposal.rows.length - refreshLineage.affected_boundary_ids.length) {
+      throw new Error('affected-boundary transition refresh lineage is invalid');
+    }
+    const priorApprovalPath = resolveRootRelative(
+      refreshLineage.prior_approval.path,
+      'affected-boundary prior approval path',
+    );
+    const priorApprovalBytes = fs.readFileSync(priorApprovalPath);
+    priorApprovedReview = JSON.parse(priorApprovalBytes);
+    if (sha256(priorApprovalBytes) !== refreshLineage.prior_approval.checksum_sha256
+      || priorApprovedReview.status !== 'approved'
+      || priorApprovedReview.presented_map_sha256 !== refreshLineage.prior_approval.presented_map_sha256
+      || priorApprovedReview.rows?.length !== proposal.rows.length) {
+      throw new Error('affected-boundary prior approval is stale or incomplete');
+    }
+  }
   const storyboardPath = resolveRootRelative(proposal.storyboard.path, 'storyboard path');
   if (sha256(fs.readFileSync(storyboardPath)) !== proposal.storyboard.checksum_sha256) {
     throw new Error('transition review storyboard checksum is stale');
@@ -155,8 +193,11 @@ export const validateEpisodeTransitionReviewProposal = (episodeWorkspace) => {
       || !sameCanonical(row.recommendation_source, expectedRecommendation.recommendation_source)) {
       throw new Error(`transition base recommendation is stale: ${row.source_shot_id}`);
     }
+    const rowSelectionStatus = row.user_selection?.status;
     if (row.renderer !== RENDERER
-      || row.user_selection?.status !== (approved ? 'approved' : 'pending')) {
+      || !['pending', 'approved'].includes(rowSelectionStatus)
+      || (approved && rowSelectionStatus !== 'approved')
+      || (!approved && refreshLineage === null && rowSelectionStatus !== 'pending')) {
       throw new Error(`transition proposal row status or renderer is invalid: ${row.source_shot_id}`);
     }
     const expectedUserRequest = overrideByBoundary.get(`${sourceShotId}\u0000${nextShotId}`);
@@ -195,8 +236,11 @@ export const validateEpisodeTransitionReviewProposal = (episodeWorkspace) => {
     || state.transition_review.presented_map_sha256 !== presentedMapSha256) {
     throw new Error('transition review presented map is stale');
   }
-  if (approved) {
-    proposal.rows.forEach((row) => {
+  const pendingBoundaryIds = [];
+  const approvedBoundaryIds = [];
+  proposal.rows.forEach((row, index) => {
+    const boundaryId = `${row.source_shot_id}->${row.next_shot_id}`;
+    if (row.user_selection.status === 'approved') {
       validateUserApprovedTransition(row, {
         fps: proposal.fps,
         sourceShotId: row.source_shot_id,
@@ -205,7 +249,56 @@ export const validateEpisodeTransitionReviewProposal = (episodeWorkspace) => {
       if (row.user_selection.presented_map_sha256 !== presentedMapSha256) {
         throw new Error(`transition approval references another presented map: ${row.source_shot_id}`);
       }
-    });
+      approvedBoundaryIds.push(boundaryId);
+      if (!approved && refreshLineage !== null) {
+        if (affectedBoundarySet.has(boundaryId)
+          || row.user_selection.binding_basis
+            !== 'mechanically_rebound_after_visual_direction_change_with_unchanged_boundary_selection'
+          || row.user_selection.rebound_at !== proposal.presentation.presented_at) {
+          throw new Error(`preserved transition approval binding is invalid: ${row.source_shot_id}`);
+        }
+        const priorRow = priorApprovedReview.rows[index];
+        const unchangedContext = {
+          source_shot_id: row.source_shot_id,
+          next_shot_id: row.next_shot_id,
+          boundary_change_class: row.boundary_change_class,
+          source_visual_generation_route: row.source_visual_generation_route,
+          next_visual_generation_route: row.next_visual_generation_route,
+          source_white_cat_present: row.source_white_cat_present,
+          next_white_cat_present: row.next_white_cat_present,
+          source_intent: row.source_intent,
+          kind: row.kind,
+          options: row.options,
+          duration_seconds: row.duration_seconds,
+          duration_in_frames: row.duration_in_frames,
+        };
+        const priorContext = Object.fromEntries(Object.keys(unchangedContext).map((key) => [key, priorRow[key]]));
+        if (!sameCanonical(unchangedContext, priorContext)
+          || row.user_selection.prior_presented_map_sha256
+            !== refreshLineage.prior_approval.presented_map_sha256
+          || row.user_selection.exact_message !== priorRow.user_selection.exact_message
+          || row.user_selection.decided_at !== priorRow.user_selection.decided_at) {
+          throw new Error(`preserved transition approval changed: ${row.source_shot_id}`);
+        }
+      }
+    } else {
+      pendingBoundaryIds.push(boundaryId);
+      if (approved
+        || refreshLineage !== null && !affectedBoundarySet.has(boundaryId)
+        || row.user_selection.exact_message !== null
+        || row.user_selection.decided_at !== null
+        || row.user_selection.presented_map_sha256 !== null) {
+        throw new Error(`pending transition selection is invalid: ${row.source_shot_id}`);
+      }
+    }
+  });
+  if (!approved && refreshLineage !== null) {
+    if (!sameCanonical(pendingBoundaryIds, refreshLineage.affected_boundary_ids)
+      || state.transition_review.pending_boundary_count !== pendingBoundaryIds.length
+      || state.transition_review.approved_boundary_count !== approvedBoundaryIds.length
+      || !sameCanonical(state.transition_review.pending_boundary_ids, pendingBoundaryIds)) {
+      throw new Error('affected-boundary transition refresh status counts are stale');
+    }
   }
   const visibleKindCounts = Object.fromEntries([...proposal.rows
     .filter((row) => row.kind !== 'cut')
@@ -215,8 +308,9 @@ export const validateEpisodeTransitionReviewProposal = (episodeWorkspace) => {
     contract_version: 'per-boundary-transition-review-validation-v1',
     result: 'pass',
     ordinary_boundary_count: proposal.rows.length,
-    pending_boundary_count: approved ? 0 : proposal.rows.length,
-    approved_boundary_count: approved ? proposal.rows.length : 0,
+    pending_boundary_count: pendingBoundaryIds.length,
+    approved_boundary_count: approvedBoundaryIds.length,
+    pending_boundary_ids: pendingBoundaryIds,
     presented_map_sha256: presentedMapSha256,
     diversity_policy: proposal.diversity_policy,
     visible_kind_counts: visibleKindCounts,

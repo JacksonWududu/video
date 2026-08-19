@@ -3,6 +3,12 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
 import {
+  buildTransitionReviewPresentedMapSha256,
+  rebindUnaffectedTransitionApprovals,
+} from './build-review-proposal.mjs';
+import {approvePendingTransitionRows} from './approve-review-proposal.mjs';
+
+import {
   SCENE_TRANSITION_CATALOG_VERSION,
   RETIRED_TRANSITION_KINDS_V3,
   TRANSITION_CATALOG,
@@ -348,5 +354,88 @@ const rendererSource = fs.readFileSync(
 );
 assert.match(rendererSource, /transition\.kind !== 'cut'/);
 assert.match(rendererSource, /transition\?\.kind === 'cut' \? 0/);
+
+const priorPresentedMapSha256 = 'd'.repeat(64);
+const nextPresentedMapSha256 = 'e'.repeat(64);
+const priorRefreshRows = [
+  {
+    ...structuredClone(visible),
+    user_selection: {
+      ...visible.user_selection,
+      presented_map_sha256: priorPresentedMapSha256,
+    },
+  },
+  {
+    ...structuredClone(visible),
+    source_shot_id: 'S02',
+    next_shot_id: 'S03',
+    user_selection: {
+      ...visible.user_selection,
+      presented_map_sha256: priorPresentedMapSha256,
+    },
+  },
+];
+const pendingRefreshRows = priorRefreshRows.map((row) => ({
+  ...structuredClone(row),
+  user_selection: {
+    status: 'pending',
+    exact_message: null,
+    decided_at: null,
+    presented_map_sha256: null,
+  },
+}));
+const reboundRefreshRows = rebindUnaffectedTransitionApprovals({
+  rows: pendingRefreshRows,
+  priorRows: priorRefreshRows,
+  affectedBoundaryIds: ['S02->S03'],
+  priorPresentedMapSha256,
+  nextPresentedMapSha256,
+  reboundAt: '2026-08-17T21:10:19+08:00',
+});
+assert.equal(reboundRefreshRows[0].user_selection.status, 'approved');
+assert.equal(reboundRefreshRows[0].user_selection.presented_map_sha256, nextPresentedMapSha256);
+assert.equal(reboundRefreshRows[0].user_selection.prior_presented_map_sha256, priorPresentedMapSha256);
+assert.equal(reboundRefreshRows[1].user_selection.status, 'pending');
+assert.equal(reboundRefreshRows[1].prior_user_selection.status, 'approved');
+assert.throws(() => rebindUnaffectedTransitionApprovals({
+  rows: [{...pendingRefreshRows[0], kind: 'fade'}],
+  priorRows: [priorRefreshRows[0]],
+  affectedBoundaryIds: [],
+  priorPresentedMapSha256,
+  nextPresentedMapSha256,
+  reboundAt: '2026-08-17T21:10:19+08:00',
+}), /cannot be preserved/);
+
+const pendingApprovalProposal = {
+  contract_version: 'per-boundary-transition-review-v1',
+  status: 'awaiting_user_selection',
+  catalog_version: 'scene-transition-catalog-v3',
+  storyboard: {path: 'storyboard.md', checksum_sha256: '1'.repeat(64)},
+  visual_direction_review: {
+    path: 'visual-direction.json',
+    checksum_sha256: '2'.repeat(64),
+    presented_map_sha256: '3'.repeat(64),
+  },
+  fps: 30,
+  diversity_policy: {rule_id: TRANSITION_RECOMMENDATION_DIVERSITY_RULE_ID},
+  fixed_exemptions: {},
+  rows: pendingRefreshRows,
+};
+pendingApprovalProposal.presented_map_sha256 = buildTransitionReviewPresentedMapSha256(
+  pendingApprovalProposal,
+);
+const approvedPending = approvePendingTransitionRows({
+  proposal: pendingApprovalProposal,
+  exactMessage: '批准这三条转场',
+  decidedAt: '2026-08-17T21:20:00+08:00',
+});
+assert.equal(approvedPending.proposal.status, 'approved');
+assert.ok(approvedPending.proposal.rows.every((row) => row.user_selection.status === 'approved'));
+assert.deepEqual(approvedPending.pendingBoundaryIds, ['S01->S02', 'S02->S03']);
+assert.throws(() => approvePendingTransitionRows({
+  proposal: {...pendingApprovalProposal, presented_map_sha256: 'f'.repeat(64)},
+  exactMessage: '批准这三条转场',
+  decidedAt: '2026-08-17T21:20:00+08:00',
+}), /presented map is stale/);
 
 console.log('scene_transition_selection_v3=pass');

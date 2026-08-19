@@ -1,4 +1,14 @@
 import type {SceneTransitionContract} from '../scene-transitions';
+import type {IntraShotTransitionV1} from '../intra-shot-transitions';
+import type {IntraShotWatercolorTransition} from '../watercolor-bloom/contract.mjs';
+
+export type MotionTier = 'layered' | 'stateful' | 'hero_pose';
+
+export type LegacyIntraShotWatercolorTransition = IntraShotWatercolorTransition & {
+  readonly from_asset_id: string;
+  readonly to_asset_id: string;
+  readonly at_frame: number;
+};
 
 export type VisualGenerationRoute =
   | 'imagegen'
@@ -7,7 +17,8 @@ export type VisualGenerationRoute =
   | 'ian-handdrawn-ppt'
   | 'ink-doodle-knowledge-card'
   | 'doodle-slides'
-  | 'srt-whiteboard-animation';
+  | 'srt-whiteboard-animation'
+  | 'local-video-file';
 
 export type ImageOccurrence = {
   readonly asset_id: string;
@@ -100,6 +111,40 @@ export type WhiteboardSceneBinding = {
   };
 };
 
+export type LocalVideoSceneBinding = {
+  readonly contract_version: 'local-video-match-v1';
+  readonly visual_generation_route: 'local-video-file';
+  readonly shot_id: string;
+  readonly selected_source_path: string;
+  readonly asset: string;
+  readonly checksum_sha256: string;
+  readonly media: {
+    readonly video_streams: 1;
+    readonly audio_streams: number;
+    readonly width: 1920;
+    readonly height: 1080;
+    readonly codec: 'h264';
+    readonly rotation_degrees: 0;
+    readonly source_duration_seconds: number;
+    readonly source_fps: number;
+    readonly probe_result: 'pass';
+    readonly full_decode_result: 'pass';
+  };
+  readonly target_duration_frames: number;
+  readonly target_duration_seconds: number;
+  readonly playback_rate: number;
+  readonly match_status: 'matched';
+  readonly frame_mapping_policy: 'complete-source-to-exact-shot-frames-v1';
+  readonly fit_policy: 'native-1920x1080-no-resize-crop-or-pad-v1';
+  readonly audio_policy: 'mute-source-audio-v1';
+  readonly approval: {
+    readonly status: 'approved';
+    readonly approved_checksum_sha256: string;
+    readonly exact_message: string;
+    readonly decided_at: string;
+  };
+};
+
 export type LegacyNarrativeImageOccurrence = Omit<ImageOccurrence, 'visual_generation_route'> & {
   readonly visual_generation_route: null;
 };
@@ -111,7 +156,7 @@ export type CurrentKnowledgeVideoScene = {
   readonly start_frame: number;
   readonly end_frame: number;
   readonly duration_frames: number;
-  readonly scene_type: 'narrative' | 'comic' | 'graphic' | 'doodle' | 'whiteboard';
+  readonly scene_type: 'narrative' | 'comic' | 'graphic' | 'doodle' | 'whiteboard' | 'local-video';
   readonly scene_class: 'narrative_illustration' | 'structured_graphic';
   readonly structured_visual_kind: string | null;
   readonly visual_structure_id: string | null;
@@ -119,8 +164,23 @@ export type CurrentKnowledgeVideoScene = {
   readonly comic_plan: ComicShotPlan | null;
   readonly white_cat_present: boolean;
   readonly visual_generation_route: VisualGenerationRoute;
+  readonly motion_tier?: MotionTier | null;
   readonly image_sequence: readonly ImageOccurrence[];
+  readonly hero_pose_background?: null | {
+    readonly asset_id: string;
+    readonly asset: string;
+    readonly checksum_sha256: string;
+    readonly visual_generation_route: VisualGenerationRoute;
+  };
+  readonly intra_shot_transition_contract?:
+    | 'intra-shot-transition-v1'
+    | 'intra-shot-watercolor-bloom-v1';
+  readonly intra_shot_transitions: readonly (
+    | IntraShotTransitionV1
+    | LegacyIntraShotWatercolorTransition
+  )[];
   readonly whiteboard: WhiteboardSceneBinding | null;
+  readonly local_video: LocalVideoSceneBinding | null;
   readonly transition: SceneTransitionContract | null;
 };
 
@@ -132,6 +192,8 @@ export type LegacyNarrativeScene = {
   readonly scene_type: 'narrative';
   readonly visual_generation_route: null;
   readonly image_sequence: readonly LegacyNarrativeImageOccurrence[];
+  readonly intra_shot_transition_contract?: 'intra-shot-watercolor-bloom-v1';
+  readonly intra_shot_transitions: readonly LegacyIntraShotWatercolorTransition[];
   readonly transition: SceneTransitionContract | null;
 };
 

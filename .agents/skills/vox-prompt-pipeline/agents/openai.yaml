@@ -1,0 +1,4 @@
+interface:
+  display_name: "Vox 提示词流水线"
+  short_description: "把脚本转成含时长、镜头、动作与悬念音频的 Vox 提示词"
+  default_prompt: "使用 $vox-prompt-pipeline 将这段脚本合并成视觉片段，并为每段输出原文、字数、建议时长以及严格配对的镜头、动作与音频提示词。"

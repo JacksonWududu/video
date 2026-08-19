@@ -70,7 +70,7 @@ class TransitionRevoiceComicResolutionContractTest(unittest.TestCase):
         catalog = ROOT / "leverage-video/src/shared/visual-generation-routes/catalog.json"
         self.assertEqual(
             hashlib.sha256(catalog.read_bytes()).hexdigest(),
-            "037380ed89c72cbda8bfa336a93989366b913e31ded160a497c80488f7b5077b",
+            "5214aa035c6a9ff7dcbd39e682ba899c4a3d3af3ba46804b0a96e3ae175d5d4e",
         )
         self.assert_contains(
             "leverage-video/src/shared/visual-generation-routes/contract.mjs",

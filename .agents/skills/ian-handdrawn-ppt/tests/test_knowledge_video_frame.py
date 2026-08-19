@@ -6,6 +6,8 @@ import hashlib
 import importlib.util
 import json
 import struct
+import subprocess
+import sys
 import tempfile
 from pathlib import Path
 import unittest
@@ -118,6 +120,27 @@ class IanKnowledgeVideoFrameTests(unittest.TestCase):
             changed["visual_direction_review"]["sha256"] = "b" * 64
             with self.assertRaisesRegex(ValueError, "checksum is stale"):
                 self.validate(root, changed)
+
+    def test_cli_accepts_root_relative_manifest_path(self):
+        temporary, root, manifest = self.fixture()
+        with temporary:
+            manifest_path = root / "schema" / "frame.json"
+            manifest_path.write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(SKILL / "scripts" / "validate_knowledge_video_frame.py"),
+                    "--episode-workspace",
+                    root.relative_to(REPO).as_posix(),
+                    manifest_path.relative_to(REPO).as_posix(),
+                ],
+                cwd=REPO,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(json.loads(result.stdout)["result"], "pass")
 
 
 if __name__ == "__main__":

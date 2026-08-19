@@ -12,6 +12,7 @@ import {
   applyBulkEdit,
   buildCompactShotMergePlan,
   buildVisualDirectionFormModel,
+  parseStoryboardSummary,
   validateApprovedDirectionSynchronization,
   validateStoryboardShotMergeRequest,
   validateVisualDirectionFormSubmission,
@@ -40,6 +41,7 @@ const pendingSelection = () => ({
   visible_text_mode: null,
   exact_visible_text: null,
   visible_text_placement: null,
+  local_video_source_path: null,
   exact_message: null,
   decided_at: null,
   presented_map_sha256: null,
@@ -52,13 +54,24 @@ const summaryCell = (value) => String(value)
   .replaceAll('\n', '<br>');
 const normalizeSummaryToRecommendations = (storyboardMarkdown, review) => {
   const rows = new Map(review.rows.map((row) => [row.shot_id, row]));
-  return storyboardMarkdown.split(/\r?\n/).map((line) => {
-    if (!/^\| S\d+ \|/.test(line)) return line;
-    const cells = line.slice(1, -1).split('|').map((cell) => cell.trim());
+  const durations = new Map([...storyboardMarkdown.matchAll(
+    /^## (OPEN-00|S\d+)\n[\s\S]*?^- 时间 \/ 帧：[0-9.]+–[0-9.]+ 秒；旁白与合成 `\[(\d+), (\d+)\)`/gm,
+  )].map((match) => [match[1], ((Number(match[3]) - Number(match[2])) / 30).toFixed(3)]));
+  return storyboardMarkdown
+    .replace(
+      '| 镜头 | 画面 | 白猫 | 生图方式 | 可见文字 | 锁稿原文 |',
+      '| 镜头 | 时长（秒） | 画面 | 白猫 | 分镜生成方式 | 可见文字 | 锁稿原文 |',
+    )
+    .replace('|---|---|---|---|---|---|', '|---|---|---|---|---|---|---|')
+    .split(/\r?\n/).map((line) => {
+    if (!/^\| (?:OPEN-00|S\d+) \|/.test(line)) return line;
+    let cells = line.slice(1, -1).split('|').map((cell) => cell.trim());
+    if (cells.length === 6) cells = [cells[0], durations.get(cells[0]), ...cells.slice(1)];
+    if (cells[0] === 'OPEN-00') return `| ${cells.join(' | ')} |`;
     const row = rows.get(cells[0]);
-    if (!row || cells.length !== 6) return line;
+    if (!row || cells.length !== 7) return line;
     const visibleText = row.visible_text_mode === 'none' ? '无' : row.exact_visible_text;
-    return `| ${cells[0]} | ${cells[1]} | ${row.white_cat_recommendation.recommended} | ${row.recommended_route} | ${summaryCell(visibleText)} | ${cells[5]} |`;
+    return `| ${cells[0]} | ${cells[1]} | ${cells[2]} | ${row.white_cat_recommendation.recommended} | ${row.recommended_route} | ${summaryCell(visibleText)} | ${cells[6]} |`;
   }).join('\n');
 };
 const readFixture = () => {
@@ -95,11 +108,13 @@ const buildFixtureModel = () => {
 
 const submittedRowFromModel = (row, overrides = {}) => ({
   shot_id: row.shot_id,
+  visual_description: row.visual_description,
   white_cat_present: row.white_cat_present,
   visual_generation_route: row.visual_generation_route,
   visible_text_mode: row.visible_text_mode,
   exact_visible_text: row.exact_visible_text,
   visible_text_placement: row.visible_text_placement,
+  local_video_source_path: row.local_video_source_path,
   ...overrides,
 });
 
@@ -107,6 +122,7 @@ const submissionFor = (model, rows, mode = 'selected') => ({
   contract_version: SUBMISSION_CONTRACT_VERSION,
   episode_workspace: EPISODE_WORKSPACE,
   presented_map_sha256: model.presented_map_sha256,
+  storyboard_checksum_sha256: model.storyboard.checksum_sha256,
   submission_scope: {mode, shot_ids: rows.map((row) => row.shot_id)},
   rows,
 });
@@ -137,9 +153,10 @@ const validateMerge = (request, fixture = readFixture()) => validateStoryboardSh
   },
 });
 
-test('builds every active row in the six-column model with a read-only OPEN-00', () => {
+test('builds every active row in the seven-column model with duration and a read-only OPEN-00', () => {
   const model = buildFixtureModel();
-  assert.deepEqual(model.columns, ['镜头', '画面', '白猫', '生图方式', '可见文字', '锁稿原文']);
+  assert.deepEqual(model.columns, ['镜头', '时长（秒）', '画面', '白猫', '分镜生成方式', '可见文字', '锁稿原文']);
+  assert.match(model.rows[0].duration_seconds_display, /^\d+\.\d{3}$/);
   assert.equal(model.row_count, model.editable_row_count + 1);
   assert.equal(model.editable_row_count, readFixture().review.rows.length);
   assert.equal(model.rows[0].shot_id, 'OPEN-00');
@@ -182,14 +199,45 @@ test('binds every selectable route to its required treatment profile', () => {
     [s01, 'ian-handdrawn-ppt', 'ian-handdrawn-technical'],
     [s01, 'ink-doodle-knowledge-card', 'ink-doodle-knowledge-card'],
     [s01, 'srt-whiteboard-animation', 'whiteboard-clean-progressive'],
+    [s01, 'local-video-file', 'source-video-native'],
     [s02, 'imagegen', 'imagegen-watercolor-narrative'],
   ];
   for (const [row, route, treatment] of cases) {
     const result = validate(submissionFor(model, [submittedRowFromModel(row, {
       visual_generation_route: route,
+      visible_text_mode: route === 'local-video-file' ? 'none' : row.visible_text_mode,
+      exact_visible_text: route === 'local-video-file' ? null : row.exact_visible_text,
+      visible_text_placement: route === 'local-video-file' ? null : row.visible_text_placement,
+      local_video_source_path: route === 'local-video-file' ? '/Users/jackson/Videos/s01.mp4' : null,
     })]));
     assert.equal(result.normalized_rows[0].treatment_profile_id, treatment);
   }
+});
+
+test('local video requires an absolute per-shot path and re-presentation before approval', () => {
+  const model = buildFixtureModel();
+  const s01 = model.rows.find((row) => row.shot_id === 'S01');
+  const base = {
+    visual_generation_route: 'local-video-file',
+    visible_text_mode: 'none',
+    exact_visible_text: null,
+    visible_text_placement: null,
+  };
+  assert.throws(() => validate(submissionFor(model, [submittedRowFromModel(s01, {
+    ...base,
+    local_video_source_path: 'relative.mp4',
+  })])), /absolute \.mp4 path/);
+  assert.throws(() => validate(submissionFor(model, [submittedRowFromModel(s01, {
+    ...base,
+    local_video_source_path: '/Users/jackson/Videos/s01.mov',
+  })])), /absolute \.mp4 path/);
+  const result = validate(submissionFor(model, [submittedRowFromModel(s01, {
+    ...base,
+    local_video_source_path: '/Users/jackson/Videos/s01.mp4',
+  })]));
+  assert.equal(result.normalized_rows[0].treatment_profile_id, 'source-video-native');
+  assert.equal(result.normalized_rows[0].resolution, 'requires_candidate_map_refresh');
+  assert.deepEqual(result.reopened_shot_ids, ['S01']);
 });
 
 test('forces xuan and white-cat ImageGen rows to be text-free', () => {
@@ -239,6 +287,25 @@ test('cat removal and visible-text edits reopen only affected shots and adjacent
   })]));
   assert.equal(textEdit.normalized_rows[0].resolution, 'requires_candidate_map_refresh');
   assert.equal(textEdit.requires_represented_map_refresh, true);
+});
+
+test('visual-description edits require semantic rebuild, re-presentation, and adjacent transition review', () => {
+  const model = buildFixtureModel();
+  const s08 = model.rows.find((row) => row.shot_id === 'S08');
+  const result = validate(submissionFor(model, [submittedRowFromModel(s08, {
+    visual_description: '白猫闻到气味后先停步，再后仰遮鼻并主动离开。',
+  })]));
+  assert.equal(result.normalized_rows[0].changes.visual_description, true);
+  assert.equal(
+    result.normalized_rows[0].resolution,
+    'requires_visual_semantic_rebuild_and_represent',
+  );
+  assert.deepEqual(result.reopened_shot_ids, ['S08']);
+  assert.deepEqual(result.reopened_transition_boundaries, [
+    {source_shot_id: 'S07', next_shot_id: 'S08'},
+    {source_shot_id: 'S08', next_shot_id: 'S09'},
+  ]);
+  assert.equal(result.requires_represented_map_refresh, true);
 });
 
 test('compatible route-only edits are immediately selection-ready', () => {
@@ -292,6 +359,10 @@ test('rejects stale forms, unknown or duplicate rows, retired and incompatible r
   stale.presented_map_sha256 = '0'.repeat(64);
   assert.throws(() => validate(stale), /stale presented map/);
 
+  const staleStoryboard = submissionFor(model, [base]);
+  staleStoryboard.storyboard_checksum_sha256 = '0'.repeat(64);
+  assert.throws(() => validate(staleStoryboard), /stale storyboard checksum/);
+
   const unknown = submissionFor(model, [{...base, shot_id: 'S99'}]);
   assert.throws(() => validate(unknown), /unknown shots/);
 
@@ -344,7 +415,7 @@ test('preserves approved evidence outside a partial submission', () => {
 test('renders every fixture row, visible native checks, batch actions, and structured follow-ups', () => {
   const html = renderVisualDirectionReviewForm(buildFixtureModel());
   assert.equal((html.match(/data-shot-id=/g) ?? []).length, 21);
-  assert.equal((html.match(/<th scope="col">/g) ?? []).length, 6);
+  assert.equal((html.match(/<th scope="col">/g) ?? []).length, 7);
   assert.match(html, /data-shot-id="OPEN-00" data-read-only="true"/);
   assert.match(html, /id="select-all"/);
   assert.match(html, /id="apply-bulk"/);
@@ -352,10 +423,10 @@ test('renders every fixture row, visible native checks, batch actions, and struc
   assert.match(html, /id="submit-all"/);
   assert.match(html, /id="merge-selected"/);
   assert.match(html, /sendFollowUpMessage/);
-  assert.match(html, /visual-direction-form-submission-v1/);
+  assert.match(html, /visual-direction-form-submission-v3/);
   assert.match(html, /storyboard-shot-merge-request-v1/);
   assert.match(html, /compact_after_merge/);
-  assert.match(html, /合并时仅沿用首镜画面/);
+  assert.match(html, /视觉继承：仅沿用首镜/);
   assert.match(html, /其余被合并镜头只并入原文与时间/);
   assert.match(html, /dirtyShotIds/);
   assert.match(html, /请先提交字段修改/);
@@ -363,6 +434,7 @@ test('renders every fixture row, visible native checks, batch actions, and struc
   const firstEditableMarkup = html.match(/<tr data-shot-id="S01"[\s\S]*?<\/tr>/)?.[0] ?? '';
   assert.match(firstEditableMarkup, /<div class="form-check[^\"]*">[\s\S]*?class="form-check-input vdr-row-select"/);
   assert.match(firstEditableMarkup, /class="form-check-label font-monospace"/);
+  assert.match(firstEditableMarkup, /class="form-control form-control-sm vdr-visual-description"/);
   const openingMarkup = html.match(/<tr class="bg-secondary-subtle"[\s\S]*?<\/tr>/)?.[0] ?? '';
   assert.doesNotMatch(openingMarkup, /<input|<select|<textarea/);
 });
@@ -491,6 +563,9 @@ test('final Summary, detailed projection, and approved review must match field b
     };
     return {
       shot_id: row.shot_id,
+      visual_description: new Map(
+        parseStoryboardSummary(fixture.storyboardMarkdown).map((summary) => [summary.shot_id, summary]),
+      ).get(row.shot_id).visual_description,
       white_cat_present: row.user_selection.white_cat_present,
       visual_structure_id: row.user_selection.visual_structure_id,
       treatment_profile_id: row.user_selection.treatment_profile_id,

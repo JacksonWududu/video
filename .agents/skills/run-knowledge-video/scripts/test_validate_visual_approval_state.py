@@ -490,6 +490,35 @@ class VisualApprovalGateTests(unittest.TestCase):
                 repository_root=self.repository_root,
             )
 
+    def test_hybrid_current_strict_revision_can_be_approved_past_earlier_batch_items(self):
+        state = self._hybrid_state(2)
+        review = state["visual_asset_review"]
+        earlier, strict = review["queue"]
+        earlier["status"] = "awaiting_batch_qa"
+        relative_path = "assets/image/S02-strict-revision-v01.png"
+        asset_path = self._write_png(relative_path, marker=b"strict-revision")
+        checksum = self._sha256(asset_path)
+        strict.update(
+            strict_review=True,
+            is_revision=True,
+            status="awaiting_user_approval",
+            path=relative_path,
+            checksum_sha256=checksum,
+            presented_checksum_sha256=checksum,
+            measured_dimensions=[1672, 941],
+            technical_qa={"result": "pass"},
+        )
+        review.update(
+            queue_generation_allowed=False,
+            current_asset_id=strict["asset_id"],
+        )
+        approved = self.gate.record_approval(
+            state, strict["asset_id"], "批准该分镜", "2026-08-15T00:01:00Z",
+            repository_root=self.repository_root,
+        )
+        self.assertEqual(approved["status"], "approved")
+        self.assertEqual(earlier["status"], "awaiting_batch_qa")
+
     def test_visual_asset_lock_rechecks_approved_bytes_on_disk(self):
         state = self._hybrid_state(4)
         for index in range(1, 5):
@@ -506,6 +535,92 @@ class VisualApprovalGateTests(unittest.TestCase):
         self._write_png(changed_path, marker=b"changed-after-approval")
         with self.assertRaisesRegex(ValueError, "changed on disk|checksum mismatch"):
             self.gate.validate_visual_assets_locked(state, self.repository_root)
+
+    def _local_video_state(self):
+        state = self._hybrid_state(1)
+        generated = state["visual_asset_review"]["queue"][0]
+        generated_path = self._write_png("assets/image/S01-graphic-v01.png")
+        generated_checksum = self._sha256(generated_path)
+        generated.update(
+            status="approved",
+            path="assets/image/S01-graphic-v01.png",
+            checksum_sha256=generated_checksum,
+            presented_checksum_sha256=generated_checksum,
+            approved_checksum_sha256=generated_checksum,
+            measured_dimensions=[1672, 941],
+            approval_disk_checksum_sha256=generated_checksum,
+            approval_disk_measured_dimensions=[1672, 941],
+        )
+        relative_path = "assets/video/user-source/s02-local-source-v01.mp4"
+        source = self.repository_root / relative_path
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_bytes(b"exact-local-video-bytes")
+        checksum = self._sha256(source)
+        media = {
+            "video_streams": 1,
+            "audio_streams": 1,
+            "width": 1920,
+            "height": 1080,
+            "codec": "h264",
+            "rotation_degrees": 0,
+            "source_duration_seconds": 8.0,
+            "source_fps": 30.0,
+            "probe_result": "pass",
+            "full_decode_result": "pass",
+        }
+        state["visual_asset_review"]["queue"].append({
+            "asset_id": "S02-local-video-v01",
+            "shot_id": "S02",
+            "visual_generation_route": "local-video-file",
+            "role": "local-video-source",
+            "strict_review": True,
+            "depends_on": [],
+            "status": "awaiting_user_approval",
+            "path": relative_path,
+            "checksum_sha256": checksum,
+            "presented_checksum_sha256": checksum,
+            "media": media,
+            "local_video_match": {
+                "contract_version": "local-video-match-v1",
+                "target_duration_frames": 120,
+                "playback_rate": 2.0,
+                "match_status": "matched",
+            },
+            "technical_qa": {"result": "pass"},
+        })
+        self.gate._probe_video_evidence = lambda _: {
+            key: value for key, value in media.items() if key != "full_decode_result"
+        }
+        return state
+
+    def test_local_video_items_must_be_deferred_until_after_generated_visuals(self):
+        state = self._local_video_state()
+        state["visual_asset_review"]["queue"].reverse()
+        with self.assertRaisesRegex(ValueError, "ordered after every generated visual"):
+            self.gate.validate_visual_assets_locked(state, self.repository_root)
+
+    def test_local_video_uses_strict_exact_byte_matched_approval_and_lock(self):
+        state = self._local_video_state()
+        item = self.gate.record_approval(
+            state,
+            "S02-local-video-v01",
+            "批准本地视频匹配预览",
+            "2026-08-18T10:00:00+08:00",
+            repository_root=self.repository_root,
+        )
+        self.assertEqual(item["status"], "approved")
+        self.assertEqual(item["approval_disk_media"]["width"], 1920)
+        self.assertEqual(
+            self.gate.validate_visual_assets_locked(state, self.repository_root)["result"],
+            "pass",
+        )
+
+    def test_local_video_cannot_enter_the_image_generation_call(self):
+        state = self._local_video_state()
+        local = state["visual_asset_review"]["queue"][1]
+        local["status"] = "pending_generation"
+        with self.assertRaisesRegex(ValueError, "must be imported"):
+            self.gate.require_generation_allowed(state, local["asset_id"])
 
 
 if __name__ == "__main__":

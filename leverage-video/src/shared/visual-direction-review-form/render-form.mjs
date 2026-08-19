@@ -63,6 +63,7 @@ const optionMarkup = (row) => {
 const fixedOpeningMarkup = (row) => `
   <tr class="bg-secondary-subtle" data-shot-id="OPEN-00" data-read-only="true">
     <th scope="row"><span class="font-monospace">OPEN-00</span><div class="text-secondary small mt-1">固定封面 · 只读</div></th>
+    <td><span class="font-monospace">${escapeHtml(row.duration_seconds_display)}</span></td>
     <td><div class="vdr-readonly">${paragraphText(row.visual_description)}</div></td>
     <td><span class="text-secondary">${escapeHtml(row.white_cat)}</span></td>
     <td><span class="text-secondary">${escapeHtml(row.visual_generation_route)}</span></td>
@@ -73,6 +74,7 @@ const fixedOpeningMarkup = (row) => `
 const editableRowMarkup = (row) => {
   const textRequired = row.visible_text_mode === 'required';
   const textFree = row.visual_generation_route === 'xuan-paper-diorama'
+    || row.visual_generation_route === 'local-video-file'
     || (row.visual_generation_route === 'imagegen' && row.white_cat_present);
   const selectionChecked = row.selected ? ' checked' : '';
   const catTrueSelected = row.white_cat_present ? ' selected' : '';
@@ -92,7 +94,12 @@ const editableRowMarkup = (row) => {
       <div class="text-secondary small mt-1">${approvalLabel}</div>
       <div class="text-danger small mt-1 vdr-row-error" role="status"></div>
     </th>
-    <td><div class="vdr-readonly">${paragraphText(row.visual_description)}</div></td>
+    <td><span class="font-monospace">${escapeHtml(row.duration_seconds_display)}</span></td>
+    <td>
+      <label class="visually-hidden" for="visual-${escapeHtml(row.shot_id)}">${escapeHtml(row.shot_id)} 画面</label>
+      <textarea class="form-control form-control-sm vdr-visual-description" id="visual-${escapeHtml(row.shot_id)}" rows="5">${escapeHtml(row.visual_description)}</textarea>
+      <div class="form-text">修改后须重建本镜语义、分类、兼容路线及相邻转场，并重新呈现。</div>
+    </td>
     <td>
       <label class="visually-hidden" for="cat-${escapeHtml(row.shot_id)}">${escapeHtml(row.shot_id)} 白猫</label>
       <select class="form-select form-select-sm vdr-cat" id="cat-${escapeHtml(row.shot_id)}">
@@ -101,9 +108,14 @@ const editableRowMarkup = (row) => {
       </select>
     </td>
     <td>
-      <label class="visually-hidden" for="route-${escapeHtml(row.shot_id)}">${escapeHtml(row.shot_id)} 生图方式</label>
+      <label class="visually-hidden" for="route-${escapeHtml(row.shot_id)}">${escapeHtml(row.shot_id)} 分镜生成方式</label>
       <select class="form-select form-select-sm vdr-route" id="route-${escapeHtml(row.shot_id)}">${optionMarkup(row)}</select>
       <div class="text-secondary small mt-1 vdr-treatment">处理：${escapeHtml(row.treatment_profile_id)}</div>
+      <div class="vdr-local-video mt-2"${row.visual_generation_route === 'local-video-file' ? '' : ' hidden'}>
+        <label class="form-label small" for="local-video-${escapeHtml(row.shot_id)}">本地视频绝对路径</label>
+        <input class="form-control form-control-sm vdr-local-video-path" id="local-video-${escapeHtml(row.shot_id)}" value="${escapeHtml(row.local_video_source_path ?? '')}" placeholder="/绝对路径/clip.mp4">
+        <div class="form-text">完整源视频静音使用，并按本镜精确帧数变速到 matched；此表单阶段不读取文件。</div>
+      </div>
     </td>
     <td>
       <label class="visually-hidden" for="text-mode-${escapeHtml(row.shot_id)}">${escapeHtml(row.shot_id)} 可见文字</label>
@@ -133,13 +145,14 @@ export const renderVisualDirectionReviewForm = (model) => {
   return `<section id="${rootId}" class="p-3 p-md-4" aria-labelledby="${rootId}-title">
   <style>
     .vdr-shell { max-width: 1800px; margin: 0 auto; }
-    .vdr-table { min-width: 1320px; table-layout: fixed; }
+    .vdr-table { min-width: 1480px; table-layout: fixed; }
     .vdr-table th:nth-child(1) { width: 105px; }
-    .vdr-table th:nth-child(2) { width: 315px; }
-    .vdr-table th:nth-child(3) { width: 105px; }
-    .vdr-table th:nth-child(4) { width: 245px; }
-    .vdr-table th:nth-child(5) { width: 245px; }
-    .vdr-table th:nth-child(6) { width: 315px; }
+    .vdr-table th:nth-child(2) { width: 110px; }
+    .vdr-table th:nth-child(3) { width: 315px; }
+    .vdr-table th:nth-child(4) { width: 105px; }
+    .vdr-table th:nth-child(5) { width: 300px; }
+    .vdr-table th:nth-child(6) { width: 245px; }
+    .vdr-table th:nth-child(7) { width: 300px; }
     .vdr-readonly { max-height: 11rem; overflow: auto; line-height: 1.55; }
     .vdr-toolbar { position: sticky; top: 0; z-index: 5; }
     .vdr-bulk-grid { display: grid; grid-template-columns: repeat(3, minmax(150px, 1fr)); gap: .75rem; }
@@ -152,7 +165,7 @@ export const renderVisualDirectionReviewForm = (model) => {
   <div class="vdr-shell">
     <header class="mb-3">
       <h1 id="${rootId}-title" class="h4 mb-2">分镜 Summary 交互审核</h1>
-      <p class="text-secondary mb-1">可改白猫、生图方式、可见文字；画面、锁稿原文与 OPEN-00 只读。合并时仅沿用首镜画面，其余镜头只并入原文与时间。</p>
+      <p class="text-secondary mb-1">每镜时长以秒显示并只读；可改画面、白猫、分镜生成方式、可见文字。本地视频须逐镜填写绝对路径，源音轨不使用，播放速度按精确帧数匹配。仅锁稿原文与 OPEN-00 只读。</p>
       <p class="text-secondary small mb-0">映射：<code>${escapeHtml(model.presented_map_sha256)}</code></p>
     </header>
 
@@ -173,10 +186,10 @@ export const renderVisualDirectionReviewForm = (model) => {
             </select>
           </div>
           <div>
-            <label class="form-label" for="bulk-route">批量生图方式</label>
+            <label class="form-label" for="bulk-route">批量分镜生成方式</label>
             <select class="form-select form-select-sm" id="bulk-route">
               <option value="">不修改</option>
-              ${Object.entries(model.route_labels).map(([routeId, label]) => `<option value="${escapeHtml(routeId)}">${escapeHtml(label)}</option>`).join('')}
+              ${Object.entries(model.route_labels).filter(([routeId]) => routeId !== 'local-video-file').map(([routeId, label]) => `<option value="${escapeHtml(routeId)}">${escapeHtml(label)}</option>`).join('')}
             </select>
           </div>
           <div>
@@ -202,7 +215,7 @@ export const renderVisualDirectionReviewForm = (model) => {
 
     <div class="table-responsive border rounded mb-3">
       <table class="table table-sm align-middle mb-0 vdr-table">
-        <thead><tr><th scope="col">镜头</th><th scope="col">画面</th><th scope="col">白猫</th><th scope="col">生图方式</th><th scope="col">可见文字</th><th scope="col">锁稿原文</th></tr></thead>
+        <thead><tr><th scope="col">镜头</th><th scope="col">时长（秒）</th><th scope="col">画面</th><th scope="col">白猫</th><th scope="col">分镜生成方式</th><th scope="col">可见文字</th><th scope="col">锁稿原文</th></tr></thead>
         <tbody>${rows}
         </tbody>
       </table>
@@ -232,9 +245,12 @@ export const renderVisualDirectionReviewForm = (model) => {
 
     const controls = (row) => ({
       select: row.querySelector('.vdr-row-select'),
+      visualDescription: row.querySelector('.vdr-visual-description'),
       cat: row.querySelector('.vdr-cat'),
       route: row.querySelector('.vdr-route'),
       treatment: row.querySelector('.vdr-treatment'),
+      localVideo: row.querySelector('.vdr-local-video'),
+      localVideoPath: row.querySelector('.vdr-local-video-path'),
       textMode: row.querySelector('.vdr-text-mode'),
       textFields: row.querySelector('.vdr-text-fields'),
       textCopy: row.querySelector('.vdr-text-copy'),
@@ -242,7 +258,9 @@ export const renderVisualDirectionReviewForm = (model) => {
       error: row.querySelector('.vdr-row-error'),
     });
 
-    const isTextFree = (route, cat) => route === 'xuan-paper-diorama' || (route === 'imagegen' && cat);
+    const isTextFree = (route, cat) => route === 'xuan-paper-diorama'
+      || route === 'local-video-file'
+      || (route === 'imagegen' && cat);
     const routeCompatible = (option, cat) => option.dataset['compatible' + (cat ? 'True' : 'False')] === 'true';
     const treatmentFor = (row, route) => {
       const modelRow = modelRows.get(row.dataset.shotId);
@@ -282,6 +300,9 @@ export const renderVisualDirectionReviewForm = (model) => {
       c.textFields.hidden = !required;
       c.textCopy.disabled = !required;
       c.textPlacement.disabled = !required;
+      const localVideoSelected = route === 'local-video-file';
+      c.localVideo.hidden = !localVideoSelected;
+      c.localVideoPath.disabled = !localVideoSelected;
       if (textFree) {
         c.textCopy.value = '';
         c.textPlacement.value = '';
@@ -295,11 +316,15 @@ export const renderVisualDirectionReviewForm = (model) => {
       const c = controls(row);
       const textMode = c.textMode.value;
       return {
+        visual_description: c.visualDescription.value.trim(),
         white_cat_present: c.cat.value === 'true',
         visual_generation_route: c.route.value,
         visible_text_mode: textMode,
         exact_visible_text: textMode === 'required' ? c.textCopy.value.trim() : null,
         visible_text_placement: textMode === 'required' ? c.textPlacement.value.trim() : null,
+        local_video_source_path: c.route.value === 'local-video-file'
+          ? c.localVideoPath.value.trim()
+          : null,
       };
     };
     rows.forEach((row) => updateRow(row, {autoRoute: false}));
@@ -358,6 +383,7 @@ export const renderVisualDirectionReviewForm = (model) => {
         updateSelectedCount();
         updateMergeAction();
       });
+      c.visualDescription.addEventListener('input', updateMergeAction);
       c.cat.addEventListener('change', () => {
         updateRow(row);
         updateMergeAction();
@@ -372,6 +398,7 @@ export const renderVisualDirectionReviewForm = (model) => {
       });
       c.textCopy.addEventListener('input', updateMergeAction);
       c.textPlacement.addEventListener('input', updateMergeAction);
+      c.localVideoPath.addEventListener('input', updateMergeAction);
     });
     updateSelectedCount();
     updateMergeAction();
@@ -424,7 +451,7 @@ export const renderVisualDirectionReviewForm = (model) => {
         if (routeValue !== '') {
           const option = [...c.route.options].find((item) => item.value === routeValue);
           if (!option || option.disabled) {
-            skipped.push(row.dataset.shotId + '（所选生图方式不兼容）');
+            skipped.push(row.dataset.shotId + '（所选分镜生成方式不兼容）');
             continue;
           }
           c.route.value = routeValue;
@@ -460,25 +487,37 @@ export const renderVisualDirectionReviewForm = (model) => {
       const payloadRows = targets.map((row) => {
         const c = controls(row);
         if (!updateRow(row, {autoRoute: false})) throw new Error(row.dataset.shotId + ' 没有兼容路线。');
+        const visualDescription = c.visualDescription.value.trim();
+        if (!visualDescription) throw new Error(row.dataset.shotId + ' 的画面不能为空。');
         const textMode = c.textMode.value;
         const exactText = textMode === 'required' ? c.textCopy.value.trim() : null;
         const placement = textMode === 'required' ? c.textPlacement.value.trim() : null;
         if (textMode === 'required' && (!exactText || !placement)) {
           throw new Error(row.dataset.shotId + ' 的精确文字与位置都必须填写。');
         }
+        const localVideoPath = c.route.value === 'local-video-file'
+          ? c.localVideoPath.value.trim()
+          : null;
+        if (c.route.value === 'local-video-file'
+          && (!localVideoPath.startsWith('/') || !/\.mp4$/i.test(localVideoPath))) {
+          throw new Error(row.dataset.shotId + ' 的本地视频必须填写绝对 .mp4 路径。');
+        }
         return {
           shot_id: row.dataset.shotId,
+          visual_description: visualDescription,
           white_cat_present: c.cat.value === 'true',
           visual_generation_route: c.route.value,
           visible_text_mode: textMode,
           exact_visible_text: exactText,
           visible_text_placement: placement,
+          local_video_source_path: localVideoPath,
         };
       });
       return {
         contract_version: MODEL.submission_contract_version,
         episode_workspace: MODEL.episode_workspace,
         presented_map_sha256: MODEL.presented_map_sha256,
+        storyboard_checksum_sha256: MODEL.storyboard.checksum_sha256,
         submission_scope: {mode: scopeMode, shot_ids: payloadRows.map((row) => row.shot_id)},
         rows: payloadRows,
       };
@@ -490,7 +529,7 @@ export const renderVisualDirectionReviewForm = (model) => {
         if (!window.openai?.sendFollowUpMessage) throw new Error('当前宿主不支持跟进消息提交。');
         await window.openai.sendFollowUpMessage({
           title: scopeMode === 'all' ? '提交整表视觉方向审核' : '提交所选镜头视觉方向审核',
-          prompt: '请按当前知识视频工作流校验并处理以下 visual-direction-form-submission-v1。表单只收集选择；请拒绝失效或不兼容输入，需重呈现的镜头不得直接视为批准。\\n\`\`\`json\\n' + JSON.stringify(payload, null, 2) + '\\n\`\`\`',
+          prompt: '请按当前知识视频工作流校验并处理以下 ' + MODEL.submission_contract_version + '。表单只收集修改与选择；请拒绝失效或不兼容输入，画面或其他需重呈现的修改不得直接视为批准。\\n\`\`\`json\\n' + JSON.stringify(payload, null, 2) + '\\n\`\`\`',
         });
         status.className = 'alert alert-success small';
         status.textContent = '结构化选择已发送；项目文件尚未由表单直接修改。';

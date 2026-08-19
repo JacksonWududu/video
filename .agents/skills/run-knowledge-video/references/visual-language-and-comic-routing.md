@@ -62,6 +62,14 @@ Ian remains the default structured recommendation. `doodle-slides` is retired
 from new or modified knowledge-video work and remains readable only in
 unchanged historical evidence.
 
+`local-video-file` is an explicit, never-default no-cat route for either scene
+class. It requires treatment `source-video-native`, no added visible text, and
+one checksum-bound absolute `.mp4` source path per shot. A route or path change
+requires a refreshed presented map. It follows
+`leverage-video/src/shared/visual-generation-routes/local-video-file-route-v1.md`;
+its source pixels replace generated image/action states rather than defining a
+new visual-language structure.
+
 Resolve each structure's catalog-owned `composition_layout_id` through the
 XHS-derived `treatment_layout_compatibility` matrix. The matrix classifies a
 treatment/layout pair as `recommended`, `supported`, or `avoid`; an `avoid`
@@ -97,11 +105,18 @@ Resolve visible text by the selected route. Ordinary `imagegen` with
 `white_cat_present: true` and every `xuan-paper-diorama` shot are always
 `visible_text_mode: none`, with null exact copy/placement and no top title.
 No-cat ordinary `imagegen`, Ian, Ink Doodle Knowledge Card,
-and Whiteboard follow their own raster or annotation text contracts. These
+and Whiteboard follow their own raster or annotation text contracts. Local
+video preserves source pixels and permits no added route-owned text. These
 route decisions are final at v3 approval; visual production cannot add a
 second text approval, and assembly cannot create or remove a generic title.
 
 ## Historical asset and assembly compatibility
+
+Every new/replanned multi-image v3 shot uses `intra-shot-transition-v1`: exactly
+`N - 1` entries, zero-frame `cut` by default, and `watercolor-bloom` only with
+explicit approval bound to the active `storyboard-visual-rhythm-v1` map. This
+rule is independent of visual treatment; a watercolor-rendered image does not
+imply a watercolor transition.
 
 Completed unchanged v1/v2 episodes may retain whole approved Comic PNGs,
 `ComicScene`, character-reference evidence, and exactly `N - 1`

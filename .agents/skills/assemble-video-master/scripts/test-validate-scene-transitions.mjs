@@ -86,6 +86,7 @@ const openingContractVersion = 'cover-only-v1';
 <GraphicScene visualGenerationRoute={scene.visual_generation_route ?? ''} />;
 <DoodleScene visualGenerationRoute={scene.visual_generation_route} />;
 <ComicScene visualGenerationRoute={scene.visual_generation_route} comicPlan={scene.comic_plan!} />;
+<IntraShotImageSequence occurrences={scene.image_sequence} transitions={scene.intra_shot_transitions} />;
 `;
 const sharedWrapperSource = `
 import {KnowledgeVideo} from '../../../shared/video-scenes';
@@ -120,10 +121,25 @@ v3Plan.qa_contract.visual_direction_artifact_policy = {
   contract_version: 'per-shot-visual-direction-review-v3',
   modified_shot_ids: ['S01', 'S02'],
 };
+v3Plan.qa_contract.storyboard_visual_rhythm = {
+  result: 'pass',
+  contract_version: 'storyboard-visual-rhythm-v1',
+};
+v3Plan.qa_contract.intra_shot_transition_contract = 'intra-shot-transition-v1';
 v3Plan.qa_contract.ordinary_boundaries_with_transition_decisions = 1;
 v3Plan.qa_contract.ordinary_boundaries_with_animated_transitions = 0;
 v3Plan.qa_contract.ordinary_boundaries_with_cuts = 1;
 v3Plan.scenes.forEach((scene) => Object.assign(scene, {
+  duration_frames: scene.end_frame - scene.start_frame,
+  motion_tier: 'layered',
+  intra_shot_transition_contract: 'intra-shot-transition-v1',
+  image_sequence: [{
+    asset_id: `${scene.shot_id}-master`,
+    asset: `${scene.shot_id}.png`,
+    from: 0,
+    duration_in_frames: scene.end_frame - scene.start_frame,
+  }],
+  intra_shot_transitions: [],
   visible_text_mode: 'none',
   exact_visible_text: null,
   visible_text_placement: null,

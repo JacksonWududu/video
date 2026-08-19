@@ -1,4 +1,4 @@
 interface:
   display_name: "Build Video Storyboard"
   short_description: "Build storyboards with v3 visual and semantic transitions"
-  default_prompt: "Use $build-video-storyboard to build an audio-timed storyboard, expose optional checksum-pinned xuan-paper-diorama for compatible narrative shots and ink-doodle-knowledge-card for compatible structured shots, obtain explicit per-shot white-cat, visual-structure, treatment, active generation-route, and visible-text approval before route-first boundary transitions, reject retired comic-imagegen and doodle-slides, or retime a fully locked visual sequence while preserving exact parent transitions."
+  default_prompt: "Use $build-video-storyboard to build an audio-timed storyboard, lock storyboard-visual-rhythm-v1 motion tiers, plan stateful 2–4 complete states or hero_pose 4–6 poses from real narration semantics, default every v3 adjacent image transition to cut and require explicit approval for watercolor-bloom, collect route/text choices through the seven-column v3 form, reject retired routes, or retime a locked sequence without changing states, assets, or effects."

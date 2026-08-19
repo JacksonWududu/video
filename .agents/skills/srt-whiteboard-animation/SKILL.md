@@ -24,7 +24,7 @@ description: "Use only when a knowledge-video shot has the explicitly approved v
 
 三者皆批准后，队列项总体状态方可为 `approved`，下一素材方可解锁。修改某步时，只回滚该步及其后续派生物。批量审批不得绕过此顺序。
 
-表演型人物或动物采用 `whiteboard-element-sequence-replaces-action-family-v1`：只生成一张已批准全景图，再按元素顺序绘制；仅此路线豁免 `action-state-schedule-v2` 的多图状态族及 `intra-shot-watercolor-bloom-v1`。普通镜间边界仍须执行已批准的 `scene-transition-v3` 决定。
+表演型人物或动物采用 `whiteboard-element-sequence-replaces-action-family-v1`：只生成一张已批准全景图，再按元素顺序绘制；此路线使用自身 MP4 元素序列契约，不伪造 `action-state-schedule-v3` 或栅格 `intra-shot-transition-v1` 状态族。普通镜间边界仍须执行已批准的 `scene-transition-v3` 决定；未修改 v2 历史项目保持原行为。
 
 ## 标注与渲染
 

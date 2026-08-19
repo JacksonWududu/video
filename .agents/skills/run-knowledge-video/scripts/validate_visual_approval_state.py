@@ -8,6 +8,7 @@ import hashlib
 import json
 import re
 import struct
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +18,7 @@ APPROVAL_WORDS = ("批准", "通过", "符合预期", "approve", "approved")
 REVIEW_MODES = {"sequential_per_image", "batch_final_review", "hybrid_batch_v1"}
 GENERATION_UNLOCKING_STATUSES = {"approved", "qa_passed_pending_batch_review"}
 WHITEBOARD_ROUTE = "srt-whiteboard-animation"
+LOCAL_VIDEO_ROUTE = "local-video-file"
 WHITEBOARD_STAGES = ("source_image_review", "annotation_review", "clip_review")
 
 
@@ -74,8 +76,72 @@ def _png_dimensions(path: Path) -> tuple[int, int]:
     return struct.unpack(">II", header[16:24])
 
 
-def _disk_evidence(repository_root: str | Path, path_value: Any) -> dict[str, Any]:
+def _parse_rate(value: Any) -> float:
+    parts = str(value or "").split("/")
+    try:
+        rate = float(parts[0]) / float(parts[1]) if len(parts) == 2 else float(parts[0])
+    except (ValueError, ZeroDivisionError):
+        rate = 0
+    if rate <= 0:
+        raise ValueError("local video frame rate is invalid")
+    return rate
+
+
+def _probe_video_evidence(path: Path) -> dict[str, Any]:
+    try:
+        result = subprocess.run(
+            [
+                "ffprobe", "-v", "error", "-show_streams", "-show_format",
+                "-of", "json", str(path),
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except FileNotFoundError as error:
+        raise ValueError("ffprobe is required to verify an approved local video") from error
+    except subprocess.CalledProcessError as error:
+        raise ValueError(f"approved local video probe failed: {error.stderr.strip()}") from error
+    probe = json.loads(result.stdout)
+    streams = probe.get("streams", [])
+    videos = [stream for stream in streams if stream.get("codec_type") == "video"]
+    audios = [stream for stream in streams if stream.get("codec_type") == "audio"]
+    video = videos[0] if videos else {}
+    rotations = [
+        entry.get("rotation") for entry in video.get("side_data_list", [])
+        if entry.get("rotation") is not None
+    ]
+    rotation = rotations[0] if rotations else video.get("tags", {}).get("rotate", 0)
+    duration = float(video.get("duration") or probe.get("format", {}).get("duration") or 0)
+    if duration <= 0:
+        raise ValueError("approved local video duration is invalid")
+    return {
+        "video_streams": len(videos),
+        "audio_streams": len(audios),
+        "width": int(video.get("width") or 0),
+        "height": int(video.get("height") or 0),
+        "codec": video.get("codec_name"),
+        "rotation_degrees": int(float(rotation or 0)),
+        "source_duration_seconds": duration,
+        "source_fps": _parse_rate(video.get("avg_frame_rate") or video.get("r_frame_rate")),
+        "probe_result": "pass",
+    }
+
+
+def _is_local_video(item: dict[str, Any]) -> bool:
+    return item.get("visual_generation_route") == LOCAL_VIDEO_ROUTE
+
+
+def _disk_evidence(
+    repository_root: str | Path, path_value: Any, item: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     path = _resolve_regular_file(repository_root, path_value)
+    if item is not None and _is_local_video(item):
+        return {
+            "path": path,
+            "checksum_sha256": _sha256_file(path),
+            "media": _probe_video_evidence(path),
+        }
     return {
         "path": path,
         "checksum_sha256": _sha256_file(path),
@@ -94,12 +160,19 @@ def _review(state: dict[str, Any]) -> dict[str, Any]:
 
 
 def _queue(state: dict[str, Any]) -> list[dict[str, Any]]:
-    return [
+    queue = [
         item
         for item in _review(state)["queue"]
         if item.get("active_for_current_storyboard") is not False
         and item.get("status") != "superseded"
     ]
+    local_video_seen = False
+    for item in queue:
+        if _is_local_video(item):
+            local_video_seen = True
+        elif local_video_seen:
+            raise ValueError("local-video-file queue items must be ordered after every generated visual")
+    return queue
 
 
 def _find(queue: list[dict[str, Any]], asset_id: str) -> dict[str, Any] | None:
@@ -111,7 +184,7 @@ def _is_whiteboard(item: dict[str, Any]) -> bool:
 
 
 def _is_strict(item: dict[str, Any], queue: list[dict[str, Any]]) -> bool:
-    if _is_whiteboard(item):
+    if _is_whiteboard(item) or _is_local_video(item):
         return True
     if item.get("strict_review") is True or item.get("user_marked_strict") is True:
         return True
@@ -161,6 +234,8 @@ def require_generation_allowed(state: dict[str, Any], asset_id: str) -> dict[str
 
     if current.get("status") not in {"pending_generation", "changes_requested"}:
         raise ValueError(f"current asset is not available for generation: {asset_id}")
+    if _is_local_video(current):
+        raise ValueError("local-video-file must be imported only after generated visuals, not generated")
     if _is_whiteboard(current):
         review = _whiteboard_review(current)
         if review["current_stage"] != "source_image_review":
@@ -201,7 +276,14 @@ def _require_decision_target(state: dict[str, Any], asset_id: str) -> dict[str, 
     queue = _queue(state)
     item = _find(queue, asset_id)
     current = _next_unapproved(queue)
-    if item is None or current is None or item is not current:
+    review = _review(state)
+    is_current_strict_hybrid_target = bool(
+        item
+        and review.get("mode") == "hybrid_batch_v1"
+        and review.get("current_asset_id") == asset_id
+        and _is_strict(item, queue)
+    )
+    if item is None or (not is_current_strict_hybrid_target and (current is None or item is not current)):
         raise ValueError(f"asset is not the current approval target: {asset_id}")
     if item.get("status") != "awaiting_user_approval":
         raise ValueError(f"asset is not awaiting user approval: {asset_id}")
@@ -224,9 +306,26 @@ def _require_exact_presented_bytes(
         raise ValueError("checksum mismatch between current and presented asset")
     if not require_disk:
         return None
-    evidence = _disk_evidence(repository_root, item["path"])
+    evidence = _disk_evidence(repository_root, item["path"], item)
     if evidence["checksum_sha256"] != current:
         raise ValueError(f"approved asset changed on disk: {item.get('asset_id')}")
+    if _is_local_video(item):
+        expected_media = item.get("media")
+        actual_media = evidence["media"]
+        for field in (
+            "video_streams", "audio_streams", "width", "height", "codec",
+            "rotation_degrees", "source_duration_seconds", "source_fps", "probe_result",
+        ):
+            expected = expected_media.get(field) if isinstance(expected_media, dict) else None
+            actual = actual_media[field]
+            if isinstance(actual, float):
+                if not isinstance(expected, (int, float)) or abs(expected - actual) > 1e-6:
+                    raise ValueError(f"approved local video media evidence changed: {field}")
+            elif expected != actual:
+                raise ValueError(f"approved local video media evidence changed: {field}")
+        if not isinstance(expected_media, dict) or expected_media.get("full_decode_result") != "pass":
+            raise ValueError("approved local video lacks passing full-decode evidence")
+        return evidence
     if evidence["measured_dimensions"] != item.get("measured_dimensions"):
         raise ValueError(f"approved asset dimensions changed on disk: {item.get('asset_id')}")
     return evidence
@@ -240,6 +339,37 @@ def _require_generation_aspect_ratio(state: dict[str, Any], item: dict[str, Any]
         raise ValueError("visual review generation_aspect_ratio must be 16:9")
     if not isinstance(tolerance, (int, float)) or not 0 <= tolerance <= 0.05:
         raise ValueError("visual review aspect-ratio tolerance is invalid")
+    if _is_local_video(item):
+        media = item.get("media")
+        match = item.get("local_video_match")
+        if (
+            not isinstance(media, dict)
+            or media.get("video_streams") != 1
+            or media.get("width") != 1920
+            or media.get("height") != 1080
+            or media.get("codec") != "h264"
+            or media.get("rotation_degrees") != 0
+            or media.get("probe_result") != "pass"
+            or media.get("full_decode_result") != "pass"
+        ):
+            raise ValueError("local video must be an unrotated 1920x1080 H.264 source")
+        if (
+            not isinstance(match, dict)
+            or match.get("contract_version") != "local-video-match-v1"
+            or match.get("match_status") != "matched"
+            or not isinstance(match.get("target_duration_frames"), int)
+            or match["target_duration_frames"] < 1
+            or not isinstance(match.get("playback_rate"), (int, float))
+            or match["playback_rate"] <= 0
+        ):
+            raise ValueError("local video exact-duration match evidence is invalid")
+        expected_rate = media.get("source_duration_seconds") / (
+            match["target_duration_frames"] / 30
+        )
+        if abs(expected_rate - match["playback_rate"]) > 1e-9:
+            raise ValueError("local video playback rate is stale")
+        item["measured_aspect_ratio_relative_error"] = 0
+        return
     dimensions = item.get("measured_dimensions")
     if (
         not isinstance(dimensions, list)
@@ -280,7 +410,10 @@ def record_approval(
     item["decision_time"] = decision_time
     if evidence is not None:
         item["approval_disk_checksum_sha256"] = evidence["checksum_sha256"]
-        item["approval_disk_measured_dimensions"] = evidence["measured_dimensions"]
+        if _is_local_video(item):
+            item["approval_disk_media"] = evidence["media"]
+        else:
+            item["approval_disk_measured_dimensions"] = evidence["measured_dimensions"]
         item["approval_disk_verified_at"] = decision_time
     return item
 
@@ -727,7 +860,14 @@ def validate_visual_assets_locked(
             raise ValueError(f"approved checksum does not match disk: {asset_id}")
         if review.get("mode") == "hybrid_batch_v1" and (
             item.get("approval_disk_checksum_sha256") != evidence["checksum_sha256"]
-            or item.get("approval_disk_measured_dimensions") != evidence["measured_dimensions"]
+            or (
+                _is_local_video(item)
+                and item.get("approval_disk_media") != evidence["media"]
+            )
+            or (
+                not _is_local_video(item)
+                and item.get("approval_disk_measured_dimensions") != evidence["measured_dimensions"]
+            )
         ):
             raise ValueError(f"approval-time disk evidence is missing or stale: {asset_id}")
         checksum_map[asset_id] = evidence["checksum_sha256"]

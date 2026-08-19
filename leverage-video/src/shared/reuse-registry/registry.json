@@ -4,13 +4,13 @@
     {
       "module_id": "action-state-schedule",
       "path": "leverage-video/src/shared/action-state-schedule",
-      "use_when": "Computing or validating duration-driven character state counts, frame occurrences, and revoice hold constraints.",
+      "use_when": "Computing or validating legacy v2 duration-driven states or v3 semantic action states, exact narration byte ranges, frame occurrences, and revoice locks.",
       "required_for_new_episode_script": false
     },
     {
       "module_id": "assembly-plan",
       "path": "leverage-video/src/shared/assembly-plan",
-      "use_when": "Building a knowledge-video assembly plan from locked timing, active approved rasters, and approved whiteboard clips while rejecting retired Comic routes.",
+      "use_when": "Building a knowledge-video assembly plan from locked timing, active approved rasters, approved whiteboard clips, and exact-frame matched local videos while rejecting retired Comic routes.",
       "required_for_new_episode_script": true
     },
     {
@@ -38,6 +38,18 @@
       "required_for_new_episode_script": false
     },
     {
+      "module_id": "local-video-match",
+      "path": "leverage-video/src/shared/local-video-match",
+      "use_when": "Deferring approved local-video shots until generated visuals finish, importing exact source bytes, validating media, and matching complete source duration to exact shot frames.",
+      "required_for_new_episode_script": false
+    },
+    {
+      "module_id": "intra-shot-transitions",
+      "path": "leverage-video/src/shared/intra-shot-transitions",
+      "use_when": "Validating and rendering v3 multi-image shot sequences with explicit cut or user-approved watercolor-bloom transitions and no implicit fallback.",
+      "required_for_new_episode_script": false
+    },
+    {
       "module_id": "render-qa",
       "path": "leverage-video/src/shared/render-qa",
       "use_when": "Probing and fully decoding still, preview, master, or delivery media.",
@@ -56,9 +68,21 @@
       "required_for_new_episode_script": false
     },
     {
+      "module_id": "storyboard",
+      "path": "leverage-video/src/shared/storyboard",
+      "use_when": "Finalizing or validating the exact seven-column duration-bearing storyboard against approved visual-direction and transition evidence.",
+      "required_for_new_episode_script": false
+    },
+    {
+      "module_id": "storyboard-visual-rhythm",
+      "path": "leverage-video/src/shared/storyboard-visual-rhythm",
+      "use_when": "Locking v3 motion tiers, asset counts, action performance, continuity ledgers, meaningful visual changes, and medium_high_v1 QA warnings.",
+      "required_for_new_episode_script": false
+    },
+    {
       "module_id": "video-scenes",
       "path": "leverage-video/src/shared/video-scenes",
-      "use_when": "Composing cover, narration, active imagegen/Ian/Ink GraphicScene/WhiteboardScene output, with DoodleScene and ComicScene retained only for historical read-only parsing.",
+      "use_when": "Composing cover, narration, active imagegen/Ian/Ink GraphicScene/WhiteboardScene/LocalVideoScene output, with DoodleScene and ComicScene retained only for historical read-only parsing.",
       "required_for_new_episode_script": true
     },
     {
@@ -70,19 +94,25 @@
     {
       "module_id": "visual-generation-routes",
       "path": "leverage-video/src/shared/visual-generation-routes",
-      "use_when": "Validating per-shot white-cat constraints, active imagegen, Ian, Ink Doodle Knowledge Card, or optional Whiteboard routes, retired comic-imagegen/doodle-slides exclusions, and route-specific transition recommendations before review or production.",
+      "use_when": "Validating per-shot white-cat constraints, active imagegen, Ian, Ink Doodle Knowledge Card, optional Whiteboard or local-video-file routes, retired comic-imagegen/doodle-slides exclusions, and route-specific transition recommendations before review or production.",
       "required_for_new_episode_script": false
     },
     {
       "module_id": "visual-direction-review-form",
       "path": "leverage-video/src/shared/visual-direction-review-form",
-      "use_when": "Presenting the six-column per-shot visual-direction review form, validating full or partial structured submissions, deriving route treatments, and identifying rows or adjacent transitions that require re-presentation.",
+      "use_when": "Presenting the seven-column duration-bearing per-shot visual-direction review form, validating full or partial structured submissions and local-video paths, deriving route treatments, and identifying rows or adjacent transitions that require re-presentation.",
+      "required_for_new_episode_script": false
+    },
+    {
+      "module_id": "visual-assets",
+      "path": "leverage-video/src/shared/visual-assets",
+      "use_when": "Reconciling approved storyboard changes or recording exact-byte visual asset QA and approvals.",
       "required_for_new_episode_script": false
     },
     {
       "module_id": "watercolor-bloom",
       "path": "leverage-video/src/shared/watercolor-bloom",
-      "use_when": "Rendering every adjacent image change inside a shot.",
+      "use_when": "Rendering legacy v2 adjacent image changes or an explicitly user-approved watercolor-bloom entry inside a v3 intra-shot transition map.",
       "required_for_new_episode_script": false
     }
   ]

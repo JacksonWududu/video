@@ -15,28 +15,25 @@ const files = {
 };
 
 for (const [name, source] of Object.entries(files)) {
-  assert.match(source, /intra-shot-watercolor-bloom-v1/, `${name} lacks the mandatory rule ID`);
+  assert.match(source, /intra-shot-transition-v1|raster transition map|intra-shot transitions/i, `${name} lacks the v3 transition rule`);
 }
 
 assert.match(files.storyboardContract, /image_sequence/);
 assert.match(files.storyboardContract, /intra_shot_transitions/);
 assert.match(files.assetLock, /exactly N - 1/);
-assert.match(files.renderContract, /leverage-video\/src\/shared\/watercolor-bloom/);
-assert.match(files.renderContract, /0\.6 seconds/);
-assert.match(files.renderContract, /18 frames at 30 fps/);
-assert.match(files.renderContract, /one impact core/);
-assert.match(files.renderContract, /eight irregular color-ink lobes/);
-assert.match(files.renderContract, /five paper-fiber tendrils/);
-assert.match(files.renderContract, /twelve satellite drops/);
-assert.match(files.renderContract, /no luminous white halo/);
-assert.match(files.renderContract, /every adjacent image pair/);
-assert.match(files.renderContract, /validate-intra-shot-watercolor-transitions\.mjs/);
+assert.match(files.renderContract, /IntraShotImageSequence/);
+assert.match(files.renderContract, /default.*cut|normally zero-frame cuts/i);
+assert.match(files.renderContract, /watercolor.*explicit/i);
+assert.match(files.renderContract, /validate-intra-shot-transitions\.mjs/);
 assert.doesNotMatch(files.storyboard, /use hard swaps without interpolation/);
 assert.match(files.whiteboard, /scene-transition-v3/);
 assert.doesNotMatch(files.whiteboard, /2[–-]4 张动作状态图|scene-transition-v2/);
-assert.match(files.actionFamily, /action-state-schedule-v2/);
+assert.match(files.actionFamily, /action-state-schedule-v3/);
+assert.match(files.actionFamily, /stateful.*2[–-]4/);
+assert.match(files.actionFamily, /hero_pose.*4[–-]6/);
+assert.doesNotMatch(files.visuals, /each locked to `intra-shot-watercolor-bloom-v1`/);
 assert.doesNotMatch(files.actionFamily, /two-to-four action variants/);
 assert.match(files.visualLanguage, /Use v3 and an active route for every new shot/);
 assert.doesNotMatch(files.visualLanguage, /Use v2 for every new shot/);
 
-console.log('intra_shot_watercolor_skill_contract=pass');
+console.log('intra_shot_transition_skill_contract=pass');

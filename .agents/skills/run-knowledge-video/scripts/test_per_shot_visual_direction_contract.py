@@ -35,16 +35,18 @@ class PerShotVisualDirectionContractTest(unittest.TestCase):
             "`ian-handdrawn-ppt`",
             "`ink-doodle-knowledge-card`",
             "`doodle-slides`",
-            "镜头｜画面｜白猫｜生图方式｜可见文字｜锁稿原文",
+            "镜头｜时长（秒）｜画面｜白猫｜分镜生成方式｜可见文字｜锁稿原文",
+            "local-video-file",
         )
 
     def test_summary_form_is_checksum_bound_and_cannot_bypass_review(self) -> None:
         self.assert_file_contains(
             ".agents/skills/run-knowledge-video/SKILL.md",
-            "visual-direction-review-form-v1",
-            "visual-direction-form-submission-v1",
+            "visual-direction-review-form-v3",
+            "visual-direction-form-submission-v3",
             "validate-submission.mjs",
             "form itself must not write episode files",
+            "画面 change must reopen the affected row",
             "storyboard-shot-merge-request-v1",
             "validate-merge-request.mjs",
         )
@@ -60,8 +62,11 @@ class PerShotVisualDirectionContractTest(unittest.TestCase):
         )
         self.assert_file_contains(
             "leverage-video/src/shared/visual-direction-review-form/contract.mjs",
-            "visual-direction-form-submission-v1",
+            "visual-direction-form-submission-v3",
+            "local_video_source_path",
             "visual direction form submission is bound to a stale presented map",
+            "visual direction form submission is bound to a stale storyboard checksum",
+            "requires_visual_semantic_rebuild_and_represent",
             "selected route is incompatible",
             "requires_candidate_map_refresh",
             "storyboard-shot-merge-request-v1",
@@ -127,10 +132,10 @@ class PerShotVisualDirectionContractTest(unittest.TestCase):
             "Reopening any legacy shot requires a new v3 artifact",
         )
         self.assert_file_contains(
-            ".agents/skills/doodle-slides/SKILL.md",
-            "不再是新建或修改知识视频分镜的可选路线",
-            "历史只读证据",
-            "ian-handdrawn-ppt",
+            ".agents/skills/run-knowledge-video/references/visual-language-and-comic-routing.md",
+            "`doodle-slides` is retired",
+            "unchanged historical evidence",
+            "Ian remains the default structured recommendation",
             "ink-doodle-knowledge-card",
         )
         self.assert_file_contains(

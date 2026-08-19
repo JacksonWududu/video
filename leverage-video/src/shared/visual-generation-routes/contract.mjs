@@ -21,6 +21,7 @@ export const ACTIVE_ROUTE_IDS = Object.freeze(
 );
 export const XUAN_PAPER_DIORAMA_ROUTE_ID = 'xuan-paper-diorama';
 export const INK_DOODLE_KNOWLEDGE_CARD_ROUTE_ID = 'ink-doodle-knowledge-card';
+export const LOCAL_VIDEO_FILE_ROUTE_ID = 'local-video-file';
 const ROUTES_BY_ID = new Map(CATALOG.routes.map((route) => [route.route_id, route]));
 
 export const LEGACY_CATALOG_VERSION = 'visual-generation-route-catalog-v1';
@@ -40,6 +41,15 @@ const LEGACY_V2_ROUTE_IDS = Object.freeze([
 ]);
 export const LEGACY_V2_CATALOG_CHECKSUM_SHA256 = '9bf0d8b38002ae4e5e441a148eaa73f900937ba178dd2b777be764f68c4abca8';
 export const LEGACY_V2_VISUAL_LANGUAGE_CATALOG_CHECKSUM_SHA256 = 'a267bf4254fdc8bad1e1217dc50deb4417fe0606776159943b4439de72e9b255';
+const LEGACY_V3_PRE_LOCAL_VIDEO_ROUTE_IDS = Object.freeze([
+  'imagegen',
+  XUAN_PAPER_DIORAMA_ROUTE_ID,
+  'ian-handdrawn-ppt',
+  INK_DOODLE_KNOWLEDGE_CARD_ROUTE_ID,
+  'srt-whiteboard-animation',
+]);
+export const LEGACY_V3_PRE_LOCAL_VIDEO_CATALOG_CHECKSUM_SHA256 = '037380ed89c72cbda8bfa336a93989366b913e31ded160a497c80488f7b5077b';
+export const LEGACY_V3_PRE_LOCAL_VIDEO_VISUAL_LANGUAGE_CATALOG_CHECKSUM_SHA256 = '702a473066a3097df41e0ae6a92709c42951c8b50b37259ba0de56abd98834df';
 
 const SHA256 = /^[a-f0-9]{64}$/;
 const GENERIC_AUTHORIZATION = new Set([
@@ -75,7 +85,7 @@ const isV2 = (review) => [
   'per-shot-visual-direction-review-v3',
 ].includes(review?.contract_version);
 const isV3 = (review) => review?.contract_version === 'per-shot-visual-direction-review-v3';
-const presentedRow = (row, version2, version3) => ({
+const presentedRow = (row, version2, version3, includeLocalVideoPath = true) => ({
   shot_id: row.shot_id,
   scene_class: row.scene_class,
   structured_visual_kind: row.structured_visual_kind ?? null,
@@ -92,6 +102,7 @@ const presentedRow = (row, version2, version3) => ({
     visible_text_mode: row.visible_text_mode,
     exact_visible_text: row.exact_visible_text ?? null,
     visible_text_placement: row.visible_text_placement ?? null,
+    ...(includeLocalVideoPath ? {local_video_source_path: row.local_video_source_path ?? null} : {}),
     ...(row.merge_visual_inheritance ? {
       merge_visual_inheritance: row.merge_visual_inheritance,
     } : {}),
@@ -106,7 +117,7 @@ const presentedRow = (row, version2, version3) => ({
   recommendation_reason: row.recommendation_reason,
 });
 
-export const buildPresentedMapSha256 = (review) => sha256Canonical({
+const buildPresentedMapSha256WithPolicy = (review, {includeLocalVideoPath}) => sha256Canonical({
   contract_version: review?.contract_version,
   catalog_version: review?.catalog_version,
   catalog_checksum_sha256: review?.catalog_checksum_sha256,
@@ -116,9 +127,24 @@ export const buildPresentedMapSha256 = (review) => sha256Canonical({
   } : {}),
   storyboard: review?.storyboard,
   rows: Array.isArray(review?.rows)
-    ? review.rows.map((row) => presentedRow(row, isV2(review), isV3(review)))
+    ? review.rows.map((row) => presentedRow(
+      row,
+      isV2(review),
+      isV3(review),
+      includeLocalVideoPath,
+    ))
     : review?.rows,
 });
+
+export const buildPresentedMapSha256 = (review) => buildPresentedMapSha256WithPolicy(
+  review,
+  {includeLocalVideoPath: true},
+);
+
+const buildLegacyV3PresentedMapSha256 = (review) => buildPresentedMapSha256WithPolicy(
+  review,
+  {includeLocalVideoPath: false},
+);
 
 const validateKnownRoutes = (routes, label, routeIds) => {
   if (!Array.isArray(routes) || routes.length === 0) throw new Error(`${label} must list at least one route`);
@@ -128,7 +154,7 @@ const validateKnownRoutes = (routes, label, routeIds) => {
   }
 };
 
-const expectedCompatibleRoutes = (row, whiteCatPresent, version2, version3) => {
+const expectedCompatibleRoutes = (row, whiteCatPresent, version2, version3, legacyV3) => {
   if (!version2) {
     if (whiteCatPresent) return ['imagegen'];
     return row.scene_class === 'structured_graphic'
@@ -137,12 +163,22 @@ const expectedCompatibleRoutes = (row, whiteCatPresent, version2, version3) => {
   }
   if (row.scene_class === 'structured_graphic') {
     return version3
-      ? ['ian-handdrawn-ppt', INK_DOODLE_KNOWLEDGE_CARD_ROUTE_ID, 'srt-whiteboard-animation']
+      ? [
+          'ian-handdrawn-ppt',
+          INK_DOODLE_KNOWLEDGE_CARD_ROUTE_ID,
+          'srt-whiteboard-animation',
+          ...(legacyV3 ? [] : [LOCAL_VIDEO_FILE_ROUTE_ID]),
+        ]
       : ['ian-handdrawn-ppt', 'doodle-slides', 'srt-whiteboard-animation'];
   }
   if (version3) return whiteCatPresent
     ? ['imagegen', XUAN_PAPER_DIORAMA_ROUTE_ID]
-    : ['imagegen', XUAN_PAPER_DIORAMA_ROUTE_ID, 'srt-whiteboard-animation'];
+    : [
+        'imagegen',
+        XUAN_PAPER_DIORAMA_ROUTE_ID,
+        'srt-whiteboard-animation',
+        ...(legacyV3 ? [] : [LOCAL_VIDEO_FILE_ROUTE_ID]),
+      ];
   const comicEligible = row?.comic_eligibility?.eligible === true;
   if (whiteCatPresent) return comicEligible ? ['imagegen', 'comic-imagegen'] : ['imagegen'];
   return comicEligible
@@ -229,6 +265,34 @@ const validateV3VisibleText = (row) => {
   }
 };
 
+const validateV3LocalVideoSelection = (row, selection) => {
+  const selected = selection.visual_generation_route === LOCAL_VIDEO_FILE_ROUTE_ID;
+  const rowPath = row.local_video_source_path ?? null;
+  const selectionPath = selection.local_video_source_path ?? null;
+  if (!selected) {
+    if (rowPath !== null || selectionPath !== null) {
+      throw new Error(`${row.shot_id} non-local-video route requires null local_video_source_path`);
+    }
+    return;
+  }
+  if (selection.white_cat_present !== false) {
+    throw new Error(`${row.shot_id} local-video-file forbids the white cat`);
+  }
+  requireNonEmptyString(rowPath, `${row.shot_id} local video source path`);
+  if (!path.isAbsolute(rowPath) || rowPath.includes('\0')
+    || path.extname(rowPath).toLowerCase() !== '.mp4') {
+    throw new Error(`${row.shot_id} local video source path must be an absolute .mp4 path`);
+  }
+  if (selectionPath !== rowPath) {
+    throw new Error(`${row.shot_id} local video source path must equal the exact presented path`);
+  }
+  if (row.visible_text_mode !== 'none'
+    || row.exact_visible_text !== null
+    || row.visible_text_placement !== null) {
+    throw new Error(`${row.shot_id} local-video-file permits no added visible text`);
+  }
+};
+
 export const resolveRouteVisibleTextPolicy = ({visual_generation_route: routeId, white_cat_present: whiteCatPresent}) => {
   const route = ROUTES_BY_ID.get(routeId);
   if (!route) throw new Error(`unknown visual generation route: ${routeId}`);
@@ -258,9 +322,11 @@ const validateRouteResolvedVisibleText = (row, selection) => {
   return policy;
 };
 
-const validateRow = (row, presentedMapSha256, version2, version3) => {
+const validateRow = (row, presentedMapSha256, version2, version3, legacyV3) => {
   validateClassificationAndIdentity(row);
-  const routeIds = version3 ? ACTIVE_ROUTE_IDS : (version2 ? LEGACY_V2_ROUTE_IDS : LEGACY_ROUTE_IDS);
+  const routeIds = version3
+    ? (legacyV3 ? LEGACY_V3_PRE_LOCAL_VIDEO_ROUTE_IDS : ACTIVE_ROUTE_IDS)
+    : (version2 ? LEGACY_V2_ROUTE_IDS : LEGACY_ROUTE_IDS);
   if (version3 && RETIRED_ROUTE_IDS.includes(row?.user_selection?.visual_generation_route)) {
     throw new Error(`${row.shot_id} ${row.user_selection.visual_generation_route} is retired for new or modified v3 work`);
   }
@@ -319,7 +385,13 @@ const validateRow = (row, presentedMapSha256, version2, version3) => {
       throw new Error(`${row.shot_id} cat addition requires semantic necessity, factual identity review, and re-presentation`);
     }
   }
-  const expectedRoutes = expectedCompatibleRoutes(row, selection.white_cat_present, version2, version3);
+  const expectedRoutes = expectedCompatibleRoutes(
+    row,
+    selection.white_cat_present,
+    version2,
+    version3,
+    legacyV3,
+  );
   if (!arrayEquals(row.compatible_routes, expectedRoutes)) {
     if ([INK_DOODLE_KNOWLEDGE_CARD_ROUTE_ID, 'doodle-slides']
       .includes(selection.visual_generation_route)) {
@@ -374,6 +446,7 @@ const validateRow = (row, presentedMapSha256, version2, version3) => {
       throw new Error(`${row.shot_id} visible text selection must equal the exact presented decision`);
     }
     validateRouteResolvedVisibleText(row, selection);
+    validateV3LocalVideoSelection(row, selection);
   }
 
   const exactMessage = requireNonEmptyString(selection.exact_message, `${row.shot_id} exact selection message`);
@@ -397,6 +470,7 @@ const validateRow = (row, presentedMapSha256, version2, version3) => {
 
 const validateReviewAuthority = (review) => {
   const version2 = isV2(review);
+  let legacyV3 = false;
   if (!version2 && review.contract_version !== 'per-shot-visual-direction-review-v1') {
     throw new Error('unsupported visual direction review contract');
   }
@@ -410,19 +484,25 @@ const validateReviewAuthority = (review) => {
       && review.catalog_checksum_sha256 === LEGACY_V2_CATALOG_CHECKSUM_SHA256
       && review.visual_language_catalog_version === 'visual-language-catalog-v1'
       && review.visual_language_catalog_checksum_sha256 === LEGACY_V2_VISUAL_LANGUAGE_CATALOG_CHECKSUM_SHA256;
-    if (!currentAuthority && !legacyV2Authority) {
+    legacyV3 = review.contract_version === 'per-shot-visual-direction-review-v3'
+      && review.catalog_version === 'visual-generation-route-catalog-v2'
+      && review.catalog_checksum_sha256 === LEGACY_V3_PRE_LOCAL_VIDEO_CATALOG_CHECKSUM_SHA256
+      && review.visual_language_catalog_version === 'visual-language-catalog-v1'
+      && review.visual_language_catalog_checksum_sha256
+        === LEGACY_V3_PRE_LOCAL_VIDEO_VISUAL_LANGUAGE_CATALOG_CHECKSUM_SHA256;
+    if (!currentAuthority && !legacyV2Authority && !legacyV3) {
       throw new Error('visual route catalog version or checksum mismatch');
     }
   } else if (review.catalog_version !== LEGACY_CATALOG_VERSION
     || review.catalog_checksum_sha256 !== LEGACY_CATALOG_CHECKSUM_SHA256) {
     throw new Error('legacy visual route catalog checksum mismatch or unsupported version');
   }
-  return version2;
+  return {version2, legacyV3};
 };
 
 export const validateVisualDirectionReview = (review, {shots = []} = {}) => {
   if (!review || typeof review !== 'object') throw new Error('visual direction review object required');
-  const version2 = validateReviewAuthority(review);
+  const {version2, legacyV3} = validateReviewAuthority(review);
   requireNonEmptyString(review?.storyboard?.path, 'visual direction storyboard path');
   if (!SHA256.test(review?.storyboard?.checksum_sha256 ?? '')) throw new Error('visual direction storyboard checksum is invalid');
   if (typeof review?.presentation?.presented_at !== 'string' || review.presentation.presented_at.trim() === ''
@@ -432,15 +512,18 @@ export const validateVisualDirectionReview = (review, {shots = []} = {}) => {
   if (review.status !== 'approved') throw new Error('visual direction review must be approved');
   if (!Array.isArray(review.rows) || review.rows.length === 0) throw new Error('visual direction review rows are required');
   if (review.generated_shot_count !== review.rows.length) throw new Error('visual direction generated shot count mismatch');
+  const expectedPresentedMapSha256 = legacyV3
+    ? buildLegacyV3PresentedMapSha256(review)
+    : buildPresentedMapSha256(review);
   if (!SHA256.test(review.presented_map_sha256 ?? '')
-    || review.presented_map_sha256 !== buildPresentedMapSha256(review)) {
+    || review.presented_map_sha256 !== expectedPresentedMapSha256) {
     throw new Error('visual direction presented map checksum mismatch');
   }
   const ids = new Set();
   for (const row of review.rows) {
     if (ids.has(row.shot_id)) throw new Error(`duplicate visual direction row: ${row.shot_id}`);
     ids.add(row.shot_id);
-    validateRow(row, review.presented_map_sha256, version2, isV3(review));
+    validateRow(row, review.presented_map_sha256, version2, isV3(review), legacyV3);
   }
   if (!Array.isArray(shots) || shots.length !== review.rows.length) {
     throw new Error('visual direction review must cover every generated shot exactly once');
@@ -464,6 +547,7 @@ export const validateVisualDirectionReview = (review, {shots = []} = {}) => {
       shot.visible_text_mode !== selection.visible_text_mode
       || (shot.exact_visible_text ?? null) !== (selection.exact_visible_text ?? null)
       || (shot.visible_text_placement ?? null) !== (selection.visible_text_placement ?? null)
+      || (shot.local_video_source_path ?? null) !== (selection.local_video_source_path ?? null)
     )) throw new Error(`${shot.shot_id} visible text decision mismatch`);
   });
   return {

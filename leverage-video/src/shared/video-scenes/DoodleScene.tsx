@@ -1,13 +1,26 @@
 import {staticFile} from 'remotion';
 
+import {
+  INTRA_SHOT_TRANSITION_VERSION,
+  IntraShotImageSequence,
+} from '../intra-shot-transitions';
+import type {IntraShotTransitionV1} from '../intra-shot-transitions';
 import {WatercolorImageSequence} from '../watercolor-bloom';
-import type {ImageOccurrence} from './types';
+import type {ImageOccurrence, LegacyIntraShotWatercolorTransition} from './types';
 
 export const DoodleScene: React.FC<{
   readonly imageSequence: readonly ImageOccurrence[];
+  readonly intraShotTransitionContract: 'intra-shot-transition-v1' | 'intra-shot-watercolor-bloom-v1';
+  readonly intraShotTransitions: readonly (IntraShotTransitionV1 | LegacyIntraShotWatercolorTransition)[];
   readonly durationInFrames: number;
   readonly visualGenerationRoute: string;
-}> = ({imageSequence, durationInFrames, visualGenerationRoute}) => {
+}> = ({
+  imageSequence,
+  intraShotTransitionContract,
+  intraShotTransitions,
+  durationInFrames,
+  visualGenerationRoute,
+}) => {
   if (visualGenerationRoute !== 'doodle-slides') {
     throw new Error('DoodleScene requires visual_generation_route=doodle-slides');
   }
@@ -33,7 +46,17 @@ export const DoodleScene: React.FC<{
     throw new Error('DoodleScene image sequence must cover the complete scene duration');
   }
 
-  return (
+  return intraShotTransitionContract === INTRA_SHOT_TRANSITION_VERSION ? (
+    <IntraShotImageSequence
+      occurrences={imageSequence.map((occurrence) => ({
+        assetId: occurrence.asset_id,
+        src: staticFile(occurrence.asset),
+        from: occurrence.from,
+        durationInFrames: occurrence.duration_in_frames,
+      }))}
+      transitions={intraShotTransitions as readonly IntraShotTransitionV1[]}
+    />
+  ) : intraShotTransitionContract === 'intra-shot-watercolor-bloom-v1' ? (
     <WatercolorImageSequence
       occurrences={imageSequence.map((occurrence) => ({
         src: staticFile(occurrence.asset),
@@ -41,5 +64,7 @@ export const DoodleScene: React.FC<{
         durationInFrames: occurrence.duration_in_frames,
       }))}
     />
-  );
+  ) : (() => {
+    throw new Error(`Unsupported intra-shot transition contract: ${intraShotTransitionContract}`);
+  })();
 };

@@ -2,7 +2,10 @@ import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import test from 'node:test';
 
-import {buildKnowledgeVideoAssemblyPlan as buildPlanWithVerification} from './build-assembly-plan.mjs';
+import {
+  buildKnowledgeVideoAssemblyPlan as buildPlanWithVerification,
+  isActiveVisualDirectionArtifactBasename,
+} from './build-assembly-plan.mjs';
 import {
   CATALOG as VISUAL_ROUTE_CATALOG,
   CATALOG_CHECKSUM_SHA256,
@@ -12,7 +15,11 @@ import {
   validateVisualDirectionReview,
 } from '../visual-generation-routes/contract.mjs';
 import {VISUAL_LANGUAGE_CATALOG_CHECKSUM_SHA256} from '../visual-language/contract.mjs';
-import {buildActionStateSchedule} from '../action-state-schedule/contract.mjs';
+import {
+  buildActionStateSchedule,
+  buildActionStateScheduleV3,
+} from '../action-state-schedule/contract.mjs';
+import {buildDefaultIntraShotTransitions} from '../intra-shot-transitions/contract.mjs';
 
 const buildVisualDirectionReview = () => {
   const review = {
@@ -178,6 +185,12 @@ const baseInput = {
   ],
 };
 
+test('accepts immutable approved v3 review artifacts but rejects arbitrary archive names', () => {
+  assert.equal(isActiveVisualDirectionArtifactBasename('per-shot-visual-direction-review-v3-approved-v2.json'), true);
+  assert.equal(isActiveVisualDirectionArtifactBasename('per-shot-visual-direction-review-v3-approved-v0.json'), false);
+  assert.equal(isActiveVisualDirectionArtifactBasename('per-shot-visual-direction-review-v3-draft-v2.json'), false);
+});
+
 const buildComicInput = () => {
   const input = structuredClone(baseInput);
   const comicPlan = {
@@ -303,8 +316,43 @@ const passingVisualDirectionVerifier = (input) => input.visualDirectionReview &&
   checksum_sha256: input.visualDirectionReview.checksum_sha256,
 });
 
+const passingStoryboardVisualRhythmVerifier = (input) => ({
+  artifact: {
+    presented_map_sha256: '8'.repeat(64),
+    storyboard: structuredClone(input.visualDirectionReview.storyboard),
+    visual_direction_review: {
+      path: input.visualDirectionReview.path,
+      checksum_sha256: input.visualDirectionReview.checksum_sha256,
+    },
+    shots: input.shots.map((shot) => ({
+      shot_id: shot.shot_id,
+      motion_tier: shot.motion_tier,
+      asset_plan: {
+        main_image_count: shot.motion_tier === 'hero_pose' ? 1 : Math.max(1, shot.assets?.length ?? 0),
+        layer_count: shot.motion_tier === 'layered' ? 3 : 0,
+        pose_count: shot.motion_tier === 'hero_pose' ? shot.assets.length : 0,
+      },
+      intra_shot_transition_plan: (shot.intra_shot_transitions ?? []).map((transition) => ({
+        from_asset_id: transition.from_asset_id,
+        to_asset_id: transition.to_asset_id,
+        kind: transition.kind,
+        user_selection: transition.user_selection,
+      })),
+    })),
+  },
+  path: `${input.episodeWorkspace}/schema/storyboard-visual-rhythm-v1.json`,
+  checksum_sha256: '9'.repeat(64),
+  validation: {
+    result: 'pass',
+    contract_version: 'storyboard-visual-rhythm-v1',
+    shot_count: input.shots.length,
+    rhythm_qa: {status: 'pass-with-warnings', warnings: []},
+  },
+});
+
 const buildKnowledgeVideoAssemblyPlan = (input, options = {}) => buildPlanWithVerification(input, {
   verifyVisualDirectionReviewEvidence: passingVisualDirectionVerifier,
+  verifyStoryboardVisualRhythmEvidence: passingStoryboardVisualRhythmVerifier,
   ...options,
 });
 
@@ -317,7 +365,9 @@ const buildV3Input = ({characterSchedule = false} = {}) => {
     reasons: ['comic-imagegen 已退出新工作流。'],
   };
   firstRow.comic_plan_candidate = null;
-  firstRow.compatible_routes = ['imagegen', 'xuan-paper-diorama', 'srt-whiteboard-animation'];
+  firstRow.compatible_routes = [
+    'imagegen', 'xuan-paper-diorama', 'srt-whiteboard-animation', 'local-video-file',
+  ];
   firstRow.incompatible_routes = ['ian-handdrawn-ppt', 'ink-doodle-knowledge-card'];
   firstRow.incompatible_route_reasons = {
     'ian-handdrawn-ppt': '叙事插画不兼容结构图路线。',
@@ -335,6 +385,7 @@ const buildV3Input = ({characterSchedule = false} = {}) => {
     'ian-handdrawn-ppt',
     'ink-doodle-knowledge-card',
     'srt-whiteboard-animation',
+    'local-video-file',
   ];
   secondRow.incompatible_routes = ['imagegen', 'xuan-paper-diorama'];
   secondRow.incompatible_route_reasons = {
@@ -360,16 +411,43 @@ const buildV3Input = ({characterSchedule = false} = {}) => {
     row.visible_text_mode = 'none';
     row.exact_visible_text = null;
     row.visible_text_placement = null;
+    row.local_video_source_path = null;
     Object.assign(row.user_selection, {
       visible_text_mode: 'none',
       exact_visible_text: null,
       visible_text_placement: null,
+      local_video_source_path: null,
     });
     Object.assign(input.shots[index], {
+      motion_tier: 'layered',
       visible_text_mode: 'none',
       exact_visible_text: null,
       visible_text_placement: null,
+      local_video_source_path: null,
     });
+  });
+  input.shots.forEach((shot) => {
+    shot.intra_shot_transitions = buildDefaultIntraShotTransitions({
+      imageSequence: shot.assets,
+      fps: 30,
+    });
+  });
+  input.shots[0].motion_tier = 'stateful';
+  input.shots[0].action_state_schedule = buildActionStateScheduleV3({
+    totalFrames: 120,
+    fps: 30,
+    sourceText: '甲乙',
+    motionTier: 'stateful',
+    states: input.shots[0].assets.map((asset, index) => ({
+      state_id: asset.asset_id,
+      semantic_state: ['建立', '结果'][index],
+      narration_byte_start: index * 3,
+      narration_byte_end: (index + 1) * 3,
+      narration_text: ['甲', '乙'][index],
+      at_frame: asset.from,
+      semantic_hold_reason: null,
+    })),
+    intraShotTransitions: input.shots[0].intra_shot_transitions,
   });
   input.visualDirectionReview.presented_map_sha256 = buildPresentedMapSha256(input.visualDirectionReview);
   input.visualDirectionReview.rows.forEach((row) => {
@@ -406,6 +484,7 @@ const buildV3Input = ({characterSchedule = false} = {}) => {
   };
   if (characterSchedule) {
     input.shots[0].character_state_required = true;
+    input.shots[0].motion_tier = 'stateful';
     const template = input.shots[0].assets[0];
     input.shots[0].assets = ['S01-a', 'S01-b', 'S01-c'].map((assetId, index) => ({
       ...template,
@@ -415,9 +494,25 @@ const buildV3Input = ({characterSchedule = false} = {}) => {
       from: index * 40,
       duration_in_frames: 40,
     }));
-    const schedule = buildActionStateSchedule({totalFrames: 120, fps: 30});
-    schedule.occurrences.forEach((occurrence, index) => {
-      occurrence.state_id = input.shots[0].assets[index].asset_id;
+    input.shots[0].intra_shot_transitions = buildDefaultIntraShotTransitions({
+      imageSequence: input.shots[0].assets,
+      fps: 30,
+    });
+    const schedule = buildActionStateScheduleV3({
+      totalFrames: 120,
+      fps: 30,
+      sourceText: '甲乙丙',
+      motionTier: 'stateful',
+      states: input.shots[0].assets.map((asset, index) => ({
+        state_id: asset.asset_id,
+        semantic_state: ['预备', '接触', '结果'][index],
+        narration_byte_start: index * 3,
+        narration_byte_end: (index + 1) * 3,
+        narration_text: ['甲', '乙', '丙'][index],
+        at_frame: asset.from,
+        semantic_hold_reason: null,
+      })),
+      intraShotTransitions: input.shots[0].intra_shot_transitions,
     });
     input.shots[0].action_state_schedule = schedule;
   }
@@ -596,6 +691,65 @@ const routeSecondShotToWhiteboard = (input, whiteboard = whiteboardInput()) => {
   input.visualDirectionReview.rows[1].user_selection.exact_message = '确认 S02 使用白板路线';
 };
 
+const routeSecondShotToLocalVideo = (input) => {
+  const shot = input.shots[1];
+  const selectedPath = '/Users/jackson/Videos/s02.mp4';
+  shot.visual_generation_route = 'local-video-file';
+  shot.treatment_profile_id = 'source-video-native';
+  shot.assets = [];
+  shot.local_video_source_path = selectedPath;
+  shot.local_video = {
+    contract_version: 'local-video-match-v1',
+    visual_generation_route: 'local-video-file',
+    shot_id: 'S02',
+    selected_source_path: selectedPath,
+    asset: 'leverage-video/src/example/assets/video/user-source/s02-local-source-v01.mp4',
+    checksum_sha256: '9'.repeat(64),
+    media: {
+      video_streams: 1,
+      audio_streams: 1,
+      width: 1920,
+      height: 1080,
+      codec: 'h264',
+      rotation_degrees: 0,
+      source_duration_seconds: 8,
+      source_fps: 30,
+      probe_result: 'pass',
+      full_decode_result: 'pass',
+    },
+    target_duration_frames: 120,
+    target_duration_seconds: 4,
+    playback_rate: 2,
+    match_status: 'matched',
+    frame_mapping_policy: 'complete-source-to-exact-shot-frames-v1',
+    fit_policy: 'native-1920x1080-no-resize-crop-or-pad-v1',
+    audio_policy: 'mute-source-audio-v1',
+    approval: {
+      status: 'approved',
+      approved_checksum_sha256: '9'.repeat(64),
+      exact_message: '批准 S02 本地视频匹配预览',
+      decided_at: '2026-08-18T10:00:00+08:00',
+    },
+  };
+  const row = input.visualDirectionReview.rows[1];
+  row.treatment_profile_id = 'source-video-native';
+  row.local_video_source_path = selectedPath;
+  Object.assign(row.user_selection, {
+    visual_generation_route: 'local-video-file',
+    treatment_profile_id: 'source-video-native',
+    local_video_source_path: selectedPath,
+    exact_message: '确认 S02 使用本地视频',
+  });
+  input.shots[0].transition.next_visual_generation_route = 'local-video-file';
+  input.visualDirectionReview.presented_map_sha256 = buildPresentedMapSha256(
+    input.visualDirectionReview,
+  );
+  input.visualDirectionReview.rows.forEach((candidate) => {
+    candidate.user_selection.presented_map_sha256 = input.visualDirectionReview.presented_map_sha256;
+  });
+  return input;
+};
+
 test('routes explicit imagegen visuals to narrative and exact Ian markers to graphic', () => {
   const plan = buildKnowledgeVideoAssemblyPlan(baseInput, {verifySharedReuseEvidence: passingVerifier});
   assert.equal(plan.schema_version, 'knowledge-video-assembly-plan-v1');
@@ -642,6 +796,82 @@ test('v3 continuity cut adds no transition duration and records semantic boundar
   assert.equal(plan.scenes[1].visible_text_policy, 'approved-exact-text-raster-v1');
   assert.equal(plan.scenes[0].assembly_text_policy, 'asset-owned-no-timeline-overlay-v1');
   assert.deepEqual(plan.scenes[0].timeline_text_overlays, []);
+  assert.deepEqual(plan.scenes[0].intra_shot_transitions.map(({kind}) => kind), ['cut']);
+  assert.equal(plan.scenes[0].intra_shot_transition_contract, 'intra-shot-transition-v1');
+  assert.equal(plan.qa_contract.intra_shot_transition_contract, 'intra-shot-transition-v1');
+});
+
+test('real v3 assembly path requires a checksum-current storyboard visual rhythm artifact', () => {
+  const input = buildV3Input();
+  assert.throws(
+    () => buildPlanWithVerification(input, {
+      verifySharedReuseEvidence: passingVerifier,
+      verifyVisualDirectionReviewEvidence: passingVisualDirectionVerifier,
+    }),
+    /storyboard visual rhythm artifact path and checksum are required/i,
+  );
+});
+
+test('v3 assembly fails closed on missing or unapproved intra-shot transition records', () => {
+  const missing = buildV3Input();
+  delete missing.shots[0].intra_shot_transitions;
+  assert.throws(
+    () => buildKnowledgeVideoAssemblyPlan(missing, {verifySharedReuseEvidence: passingVerifier}),
+    /explicit complete intra-shot transition map/i,
+  );
+
+  const unknown = buildV3Input();
+  unknown.shots[0].intra_shot_transitions[0].kind = 'none';
+  assert.throws(
+    () => buildKnowledgeVideoAssemblyPlan(unknown, {verifySharedReuseEvidence: passingVerifier}),
+    /unsupported intra-shot transition kind/i,
+  );
+});
+
+test('v3 assembly accepts only map-bound explicit watercolor selection', () => {
+  const input = buildV3Input();
+  Object.assign(input.shots[0].intra_shot_transitions[0], {
+    kind: 'watercolor-bloom',
+    duration_seconds: 0.6,
+    duration_in_frames: 18,
+    renderer: 'leverage-video/src/shared/watercolor-bloom',
+    user_selection: {
+      status: 'approved',
+      exact_message: '确认 S01 第一处镜内切换使用 watercolor-bloom。',
+      decided_at: '2026-08-19T10:00:00+08:00',
+      presented_map_sha256: '8'.repeat(64),
+    },
+  });
+  input.shots[0].action_state_schedule.intra_shot_transitions[0] = structuredClone(
+    input.shots[0].intra_shot_transitions[0],
+  );
+  input.shots[0].action_state_schedule.occurrences[1].transition_in_frames = 18;
+  input.shots[0].action_state_schedule.occurrences[1].clean_hold_in_frames = 42;
+  const plan = buildKnowledgeVideoAssemblyPlan(input, {verifySharedReuseEvidence: passingVerifier});
+  assert.equal(plan.scenes[0].intra_shot_transitions[0].kind, 'watercolor-bloom');
+
+  input.shots[0].intra_shot_transitions[0].user_selection.presented_map_sha256 = '7'.repeat(64);
+  assert.throws(
+    () => buildKnowledgeVideoAssemblyPlan(input, {verifySharedReuseEvidence: passingVerifier}),
+    /not bound to the active visual rhythm map/i,
+  );
+});
+
+test('routes a deferred approved local video through exact-frame matched playback', () => {
+  const input = routeSecondShotToLocalVideo(buildV3Input());
+  const plan = buildKnowledgeVideoAssemblyPlan(input, {verifySharedReuseEvidence: passingVerifier});
+  const scene = plan.scenes[1];
+  assert.equal(scene.scene_type, 'local-video');
+  assert.equal(scene.duration_frames, 120);
+  assert.equal(scene.local_video.match_status, 'matched');
+  assert.equal(scene.local_video.playback_rate, 2);
+  assert.deepEqual(scene.image_sequence, []);
+
+  input.shots[1].local_video.target_duration_frames = 119;
+  assert.throws(
+    () => buildKnowledgeVideoAssemblyPlan(input, {verifySharedReuseEvidence: passingVerifier}),
+    /timing or policy is stale/i,
+  );
 });
 
 test('routes approved xuan-paper-diorama PNGs to NarrativeScene with pinned style provenance', () => {
@@ -792,6 +1022,74 @@ test('v3 assembly validates the mechanical action-state schedule and exact asset
   assert.throws(
     () => buildKnowledgeVideoAssemblyPlan(input, {verifySharedReuseEvidence: passingVerifier}),
     /action-state|coverage|consecutive/i,
+  );
+});
+
+test('hero_pose carries one locked background behind four transparent pose occurrences', () => {
+  const input = buildV3Input();
+  const template = input.shots[0].assets[0];
+  input.shots[0].motion_tier = 'hero_pose';
+  input.shots[0].hero_pose_background = {
+    asset_id: 'S01-bg',
+    asset: 'example/assets/image/S01-bg.png',
+    checksum_sha256: 'a'.repeat(64),
+    visual_generation_route: 'imagegen',
+  };
+  input.shots[0].assets = ['pose-1', 'pose-2', 'pose-3', 'pose-4'].map((assetId, index) => ({
+    ...template,
+    asset_id: assetId,
+    asset: `example/assets/image/${assetId}.png`,
+    from: index * 30,
+    duration_in_frames: 30,
+  }));
+  input.shots[0].intra_shot_transitions = buildDefaultIntraShotTransitions({
+    imageSequence: input.shots[0].assets,
+    fps: 30,
+  });
+  input.shots[0].action_state_schedule = buildActionStateScheduleV3({
+    totalFrames: 120,
+    sourceText: '甲乙丙丁',
+    motionTier: 'hero_pose',
+    states: input.shots[0].assets.map((asset, index) => ({
+      state_id: asset.asset_id,
+      semantic_state: ['建立', '预备', '冲击', '稳定'][index],
+      narration_byte_start: index * 3,
+      narration_byte_end: (index + 1) * 3,
+      narration_text: ['甲', '乙', '丙', '丁'][index],
+      at_frame: asset.from,
+      semantic_hold_reason: null,
+    })),
+    intraShotTransitions: input.shots[0].intra_shot_transitions,
+  });
+  const plan = buildKnowledgeVideoAssemblyPlan(input, {verifySharedReuseEvidence: passingVerifier});
+  assert.equal(plan.scenes[0].hero_pose_background.asset_id, 'S01-bg');
+  assert.equal(plan.scenes[0].image_sequence.length, 4);
+
+  delete input.shots[0].hero_pose_background;
+  assert.throws(
+    () => buildKnowledgeVideoAssemblyPlan(input, {verifySharedReuseEvidence: passingVerifier}),
+    /hero_pose requires one locked/i,
+  );
+});
+
+test('layered accepts one master without fabricating an action-state family', () => {
+  const input = buildV3Input();
+  input.shots[0].motion_tier = 'layered';
+  input.shots[0].assets = [{
+    ...input.shots[0].assets[0],
+    from: 0,
+    duration_in_frames: 120,
+  }];
+  input.shots[0].intra_shot_transitions = [];
+  delete input.shots[0].action_state_schedule;
+  const plan = buildKnowledgeVideoAssemblyPlan(input, {verifySharedReuseEvidence: passingVerifier});
+  assert.equal(plan.scenes[0].action_state_schedule, null);
+  assert.equal(plan.scenes[0].image_sequence.length, 1);
+
+  input.shots[0].motion_tier = 'stateful';
+  assert.throws(
+    () => buildKnowledgeVideoAssemblyPlan(input, {verifySharedReuseEvidence: passingVerifier}),
+    /stateful requires 2–4|action-state-schedule-v3/i,
   );
 });
 

@@ -167,7 +167,7 @@ def validate_manifest(manifest: dict[str, Any], *, episode_workspace: Path, repo
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--episode-workspace", required=True, type=Path)
-    parser.add_argument("manifest", type=Path)
+    parser.add_argument("manifest")
     args = parser.parse_args()
     repo_root = Path(__file__).resolve().parents[4]
     root = args.episode_workspace.resolve(strict=True)
