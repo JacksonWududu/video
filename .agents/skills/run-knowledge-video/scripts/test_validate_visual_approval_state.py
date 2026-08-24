@@ -2,6 +2,7 @@
 import copy
 import hashlib
 import importlib.util
+import json
 import pathlib
 import struct
 import tempfile
@@ -65,6 +66,230 @@ class VisualApprovalGateTests(unittest.TestCase):
     def _sha256(path):
         return hashlib.sha256(path.read_bytes()).hexdigest()
 
+    def _attach_white_cat_v2(self, item, *, route="imagegen"):
+        is_master = item.get("role") in {
+            "base/master", "white-cat-master", "recurring-character-master",
+        }
+        contract_version = {
+            ("imagegen", True): "ordinary-imagegen-white-cat-master-qa-v2",
+            ("imagegen", False): "ordinary-imagegen-white-cat-action-qa-v2",
+            ("xuan-paper-diorama", True): "xuan-paper-diorama-asset-qa-v1",
+            ("xuan-paper-diorama", False): "xuan-paper-diorama-action-qa-v1",
+        }[(route, is_master)]
+        traces = [
+            {"id": trace_id, "paw_region_id": f"P{index}"}
+            for index, trace_id in enumerate(("F1", "F2", "H1", "H2"), start=1)
+        ]
+        numbered_map_path = "assets/image/white-cat-numbered-map.png"
+        numbered_map = self._write_png(numbered_map_path, marker=b"numbered-map-v1")
+        item.update(
+            white_cat_present=True,
+            visual_generation_route=route,
+            qa_contract_version=contract_version,
+            identity_qa={
+                "result": "pass",
+                "cat_count": 1,
+                "foreleg_count": 2,
+                "hindleg_count": 2,
+                "paw_count": 4,
+                "accessory_geometry_correct": True,
+                "satchel_count": 1,
+                "bag_strap_count": 2,
+                "bag_end_attachment_count": 2,
+                "front_strap_attached_to_forward_bag_end": True,
+                "rear_strap_attached_to_rear_bag_end": True,
+                "himation_trim_distinct_from_bag_straps": True,
+                "satchel_anatomical_flank": "right",
+                "both_bag_end_anchors_visibly_traceable": True,
+                "strap_paths_spatially_distinct": True,
+                "source_retry_policy_compliant": True,
+                "anatomy_evidence": {
+                    "contract_version": "white-cat-anatomy-qa-v2",
+                    "result": "pass",
+                    "source_image": {
+                        "path": item["path"],
+                        "checksum_sha256": item["checksum_sha256"],
+                    },
+                    "limb_traces": traces,
+                    "forward_trace_ids": ["F1", "F2", "H1", "H2"],
+                    "reverse_trace_ids": ["F1", "F2", "H1", "H2"],
+                    "unassigned_paw_like_shapes": 0,
+                    "ambiguous_limb_regions": 0,
+                    "branched_or_fused_limb_regions": 0,
+                    "inspection_evidence": {
+                        "methods": ["full_resolution", "numbered_limb_map"],
+                        "numbered_limb_map_path": numbered_map_path,
+                        "numbered_limb_map_checksum_sha256": self._sha256(numbered_map),
+                        "numbered_limb_map_source_checksum_sha256": item[
+                            "checksum_sha256"
+                        ],
+                        "numbered_limb_map_limb_ids": ["F1", "F2", "H1", "H2"],
+                    },
+                },
+            },
+        )
+        return item
+
+    def _attach_ian_layered_scene(self, item):
+        source_text = "测试"
+        scene_plan = {
+            "contract_version": "ian-layered-scene-plan-v1",
+            "shot_id": "S06",
+            "narration_source_text_sha256": hashlib.sha256(
+                source_text.encode("utf-8")
+            ).hexdigest(),
+            "scene_renderer": "ian-static-layered-scene-v1",
+            "background_policy": "static-paper-background-v1",
+            "layer_asset_policy": "full-canvas-transparent-png-v1",
+            "layer_entry_transition": {
+                "contract_version": "ian-layer-entry-fade-v1",
+                "duration_frames": 8,
+                "easing": "linear",
+            },
+            "motion_policy": {
+                "scene_transform": "forbidden",
+                "layer_transform": "forbidden",
+                "mask_reveal": "forbidden",
+                "internal_cut": "forbidden",
+                "opacity_animation": "ian-layer-entry-fade-v1",
+            },
+            "layer_count": 1,
+            "layers": [{
+                "layer_id": "L01",
+                "z_index": 1,
+                "semantic_role": "核心概念",
+                "source_text_start_byte": 0,
+                "source_text_end_byte_exclusive": len(source_text.encode("utf-8")),
+                "source_text": source_text,
+                "entry_frame": 0,
+            }],
+        }
+        encoded_plan = json.dumps(
+            scene_plan, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+        ).encode("utf-8")
+        plan_checksum = hashlib.sha256(encoded_plan).hexdigest()
+        background_path = "episodes/fixture/assets/image/ian/background.png"
+        layer_path = "episodes/fixture/assets/image/ian/L01.png"
+        final_path = "episodes/fixture/assets/image/ian/final.png"
+        background = self._write_png(background_path, 1920, 1080, b"background")
+        layer = self._write_png(layer_path, 1920, 1080, b"layer")
+        final = self._write_png(final_path, 1920, 1080, b"final")
+        members = [
+            {
+                "member_role": "background",
+                "layer_id": "background",
+                "path": background_path,
+                "checksum_sha256": self._sha256(background),
+                "width": 1920,
+                "height": 1080,
+                "has_alpha": False,
+            },
+            {
+                "member_role": "semantic-layer",
+                "layer_id": "L01",
+                "path": layer_path,
+                "checksum_sha256": self._sha256(layer),
+                "width": 1920,
+                "height": 1080,
+                "has_alpha": True,
+            },
+            {
+                "member_role": "final-composite",
+                "layer_id": "final-composite",
+                "path": final_path,
+                "checksum_sha256": self._sha256(final),
+                "width": 1920,
+                "height": 1080,
+                "has_alpha": False,
+            },
+        ]
+        manifest_path = "episodes/fixture/schema/ian-layered-scene-v1.json"
+        manifest_file = self.repository_root / manifest_path
+        manifest_file.parent.mkdir(parents=True, exist_ok=True)
+        manifest_file.write_text(json.dumps({
+            "contract_version": "ian-knowledge-video-layered-scene-v1",
+            "queue_item_id": item["asset_id"],
+            "shot_id": "S06",
+            "scene_plan": scene_plan,
+            "scene_plan_sha256": plan_checksum,
+            "background": {
+                "path": background_path,
+                "checksum_sha256": self._sha256(background),
+                "width": 1920,
+                "height": 1080,
+                "has_alpha": False,
+            },
+            "layers": [{
+                "layer_id": "L01",
+                "path": layer_path,
+                "checksum_sha256": self._sha256(layer),
+                "width": 1920,
+                "height": 1080,
+                "has_alpha": True,
+            }],
+            "final_composite": {
+                "path": final_path,
+                "checksum_sha256": self._sha256(final),
+                "width": 1920,
+                "height": 1080,
+                "has_alpha": False,
+            },
+        }, ensure_ascii=False), encoding="utf-8")
+        style_path = "episodes/fixture/assets/image/ian/style.png"
+        style = self._write_png(style_path, 1920, 1080, b"style")
+        references = [{
+            "role": "visual_style_reference_only",
+            "path": style_path,
+            "checksum_sha256": self._sha256(style),
+        }]
+        generation_lineage = []
+        for index, member in enumerate(members[:-1]):
+            prompt_path = f"episodes/fixture/assets/narration/ian-member-{index + 1}-prompt.txt"
+            prompt_file = self.repository_root / prompt_path
+            prompt_file.parent.mkdir(parents=True, exist_ok=True)
+            prompt_file.write_text(
+                f"16:9 landscape composition\nIan member {member['layer_id']}\n",
+                encoding="utf-8",
+            )
+            generation_lineage.append({
+                "stage": "independent-member-generation",
+                "generation_mode": "codex-native-imagegen-independent-member-v1",
+                "member_role": member["member_role"],
+                "layer_id": member["layer_id"],
+                "prompt": {
+                    "path": prompt_path,
+                    "checksum_sha256": self._sha256(prompt_file),
+                },
+                "reference_inputs": references,
+                "output": {
+                    "path": member["path"],
+                    "checksum_sha256": member["checksum_sha256"],
+                },
+                "selection_status": "selected",
+            })
+        item.update(
+            shot_id="S06",
+            status="awaiting_user_approval",
+            strict_review=True,
+            visual_generation_route="ian-handdrawn-ppt",
+            qa_contract_version="ian-layered-scene-qa-v1",
+            path=final_path,
+            checksum_sha256=self._sha256(final),
+            presented_checksum_sha256=self._sha256(final),
+            measured_dimensions=[1920, 1080],
+            scene_package_manifest_path=manifest_path,
+            scene_package_manifest_checksum_sha256=self._sha256(manifest_file),
+            ian_scene_plan=scene_plan,
+            ian_scene_plan_sha256=plan_checksum,
+            ian_scene_package_members=members,
+            actual_reference_inputs=references,
+            generation_lineage=generation_lineage,
+        )
+        item["presented_ian_layered_scene_package"] = (
+            self.gate._require_ian_layered_scene_package(item)
+        )
+        return {"item": item, "layer": layer, "manifest": manifest_file}
+
     def test_blocks_next_image_until_current_exact_bytes_are_approved(self):
         with self.assertRaisesRegex(ValueError, "current asset is not approved"):
             self.gate.require_generation_allowed(self.state, "S06-action-01-v02")
@@ -79,6 +304,70 @@ class VisualApprovalGateTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(ValueError, "checksum mismatch"):
             self.gate.record_approval(self.state, "S06-master-v02", "批准 S06 母图", "2026-08-12T00:00:00Z")
+
+    def test_ian_strict_approval_binds_the_complete_layered_package(self):
+        item = self.state["visual_asset_review"]["queue"][0]
+        self._attach_ian_layered_scene(item)
+        approved = self.gate.record_approval(
+            self.state,
+            item["asset_id"],
+            "批准 Ian 完整分层场景包",
+            "2026-08-24T12:00:00Z",
+            repository_root=self.repository_root,
+        )
+        self.assertEqual(approved["status"], "approved")
+        self.assertEqual(
+            approved["approved_ian_layered_scene_package"],
+            approved["presented_ian_layered_scene_package"],
+        )
+        self.assertEqual(
+            len(approved["approved_ian_layered_scene_package"]["members"]), 3
+        )
+
+    def test_ian_approval_rejects_a_changed_semantic_layer(self):
+        item = self.state["visual_asset_review"]["queue"][0]
+        evidence = self._attach_ian_layered_scene(item)
+        evidence["layer"].write_bytes(evidence["layer"].read_bytes() + b"changed")
+        with self.assertRaisesRegex(ValueError, "package member changed on disk"):
+            self.gate.record_approval(
+                self.state,
+                item["asset_id"],
+                "批准 Ian 完整分层场景包",
+                "2026-08-24T12:00:00Z",
+                repository_root=self.repository_root,
+            )
+
+    def test_ian_approval_rejects_a_manifest_plan_not_bound_to_the_storyboard_queue(self):
+        item = self.state["visual_asset_review"]["queue"][0]
+        evidence = self._attach_ian_layered_scene(item)
+        manifest = json.loads(evidence["manifest"].read_text(encoding="utf-8"))
+        manifest["scene_plan"]["layers"][0]["semantic_role"] = "已篡改"
+        evidence["manifest"].write_text(
+            json.dumps(manifest, ensure_ascii=False), encoding="utf-8"
+        )
+        item["scene_package_manifest_checksum_sha256"] = self._sha256(
+            evidence["manifest"]
+        )
+        item["presented_ian_layered_scene_package"] = (
+            self.gate._require_ian_layered_scene_package(item)
+        )
+        with self.assertRaisesRegex(ValueError, "package manifest is stale"):
+            self.gate.record_approval(
+                self.state,
+                item["asset_id"],
+                "批准 Ian 完整分层场景包",
+                "2026-08-24T12:00:00Z",
+                repository_root=self.repository_root,
+            )
+
+    def test_ian_approval_rejects_cross_member_generation_lineage(self):
+        item = self.state["visual_asset_review"]["queue"][0]
+        self._attach_ian_layered_scene(item)
+        item["generation_lineage"][1]["output"] = dict(
+            item["generation_lineage"][0]["output"]
+        )
+        with self.assertRaisesRegex(ValueError, "generation lineage is stale"):
+            self.gate._require_ian_layered_scene_package(item)
 
     def test_approved_master_unlocks_only_the_immediate_next_asset(self):
         item = self.state["visual_asset_review"]["queue"][0]
@@ -106,6 +395,21 @@ class VisualApprovalGateTests(unittest.TestCase):
         self.gate.record_changes_requested(state, "S06-master-v02", "脸不像 v2", "2026-08-12T00:00:00Z")
         with self.assertRaisesRegex(ValueError, "current asset is not approved"):
             self.gate.require_generation_allowed(state, "S06-action-01-v02")
+
+    def test_third_white_cat_qa_failure_blocks_automatic_retry(self):
+        item = self.state["visual_asset_review"]["queue"][0]
+        item.update(
+            status="changes_requested",
+            white_cat_generation_attempt_control={
+                "contract_version": "white-cat-imagegen-attempt-limit-v1",
+                "maximum_automatic_qa_failures": 3,
+                "qa_failed_generation_count": 3,
+                "automatic_retry_status": "stopped_user_takeover_required",
+            },
+        )
+        self.state["visual_asset_review"]["queue_generation_allowed"] = True
+        with self.assertRaisesRegex(ValueError, "user takeover required"):
+            self.gate.require_generation_allowed(self.state, "S06-master-v02")
 
     def test_approval_accepts_1672x941_as_close_16x9(self):
         item = self.state["visual_asset_review"]["queue"][0]
@@ -161,6 +465,111 @@ class VisualApprovalGateTests(unittest.TestCase):
         )
         self.assertEqual(approved["status"], "approved")
 
+    def test_white_cat_manual_approval_accepts_bound_v2_state_evidence(self):
+        item = self.state["visual_asset_review"]["queue"][0]
+        item.update(
+            status="awaiting_user_approval",
+            path="assets/image/s06-master-v02.png",
+            checksum_sha256="a" * 64,
+            presented_checksum_sha256="a" * 64,
+            measured_dimensions=[1672, 941],
+        )
+        self._attach_white_cat_v2(item)
+        approved = self.gate.record_approval(
+            self.state, item["asset_id"], "批准白猫母图", "2026-08-22T11:00:00Z"
+        )
+        self.assertEqual(approved["status"], "approved")
+
+    def test_white_cat_manual_approval_rejects_forged_source_binding_without_mutation(self):
+        item = self.state["visual_asset_review"]["queue"][0]
+        item.update(
+            status="awaiting_user_approval",
+            path="assets/image/s06-master-v02.png",
+            checksum_sha256="a" * 64,
+            presented_checksum_sha256="a" * 64,
+            measured_dimensions=[1672, 941],
+        )
+        self._attach_white_cat_v2(item)
+        item["identity_qa"]["anatomy_evidence"]["source_image"][
+            "checksum_sha256"
+        ] = "b" * 64
+        with self.assertRaisesRegex(ValueError, "anatomy source binding is stale"):
+            self.gate.record_approval(
+                self.state, item["asset_id"], "批准白猫母图", "2026-08-22T11:00:00Z"
+            )
+        self.assertEqual(item["status"], "awaiting_user_approval")
+        self.assertNotIn("approved_checksum_sha256", item)
+
+    def test_white_cat_manual_approval_rejects_p2_failure_without_mutation(self):
+        item = self.state["visual_asset_review"]["queue"][0]
+        item.update(
+            status="awaiting_user_approval",
+            path="assets/image/s06-master-v02.png",
+            checksum_sha256="a" * 64,
+            presented_checksum_sha256="a" * 64,
+            measured_dimensions=[1672, 941],
+        )
+        self._attach_white_cat_v2(item)
+        item["identity_qa"]["bag_strap_count"] = 1
+        with self.assertRaisesRegex(ValueError, "P2 accessory QA is invalid"):
+            self.gate.record_approval(
+                self.state, item["asset_id"], "批准白猫母图", "2026-08-22T11:00:00Z"
+            )
+        self.assertEqual(item["status"], "awaiting_user_approval")
+        self.assertNotIn("approved_checksum_sha256", item)
+
+    def test_white_cat_manual_approval_rejects_tampered_numbered_map_without_mutation(self):
+        item = self.state["visual_asset_review"]["queue"][0]
+        source = self._write_png("assets/image/s06-master-v02.png")
+        item.update(
+            status="awaiting_user_approval",
+            path="assets/image/s06-master-v02.png",
+            checksum_sha256=self._sha256(source),
+            presented_checksum_sha256=self._sha256(source),
+            measured_dimensions=[1672, 941],
+        )
+        self._attach_white_cat_v2(item)
+        numbered_map = self.repository_root / item["identity_qa"]["anatomy_evidence"][
+            "inspection_evidence"
+        ]["numbered_limb_map_path"]
+        numbered_map.write_bytes(b"tampered-after-qa")
+        with self.assertRaisesRegex(ValueError, "numbered limb map changed on disk"):
+            self.gate.record_approval(
+                self.state,
+                item["asset_id"],
+                "批准白猫母图",
+                "2026-08-22T11:00:00Z",
+                repository_root=self.repository_root,
+            )
+        self.assertEqual(item["status"], "awaiting_user_approval")
+        self.assertNotIn("approved_checksum_sha256", item)
+
+    def test_white_cat_lock_rejects_numbered_map_tampered_after_approval(self):
+        item = self.state["visual_asset_review"]["queue"][0]
+        self.state["visual_asset_review"]["queue"] = [item]
+        source = self._write_png("assets/image/s06-master-v02.png")
+        item.update(
+            status="awaiting_user_approval",
+            path="assets/image/s06-master-v02.png",
+            checksum_sha256=self._sha256(source),
+            presented_checksum_sha256=self._sha256(source),
+            measured_dimensions=[1672, 941],
+        )
+        self._attach_white_cat_v2(item)
+        self.gate.record_approval(
+            self.state,
+            item["asset_id"],
+            "批准白猫母图",
+            "2026-08-22T11:00:00Z",
+            repository_root=self.repository_root,
+        )
+        numbered_map = self.repository_root / item["identity_qa"]["anatomy_evidence"][
+            "inspection_evidence"
+        ]["numbered_limb_map_path"]
+        numbered_map.write_bytes(b"tampered-after-approval")
+        with self.assertRaisesRegex(ValueError, "numbered limb map changed on disk"):
+            self.gate.validate_visual_assets_locked(self.state, self.repository_root)
+
     def test_batch_mode_qa_pass_unlocks_only_next_asset_without_final_approval(self):
         self.state["visual_asset_review"]["mode"] = "batch_final_review"
         item = self.state["visual_asset_review"]["queue"][0]
@@ -176,6 +585,44 @@ class VisualApprovalGateTests(unittest.TestCase):
         self.assertEqual(passed["status"], "qa_passed_pending_batch_review")
         self.assertNotIn("approved_checksum_sha256", passed)
         self.gate.require_generation_allowed(self.state, "S06-action-01-v02")
+
+    def test_white_cat_batch_qa_accepts_xuan_wrapper_with_anatomy_v2(self):
+        self.state["visual_asset_review"]["mode"] = "batch_final_review"
+        item = self.state["visual_asset_review"]["queue"][0]
+        item.update(
+            status="awaiting_batch_qa",
+            path="assets/image/s06-xuan-master-v02.png",
+            checksum_sha256="a" * 64,
+            measured_dimensions=[1672, 941],
+        )
+        self._attach_white_cat_v2(item, route="xuan-paper-diorama")
+        passed = self.gate.record_batch_qa_pass(
+            self.state, item["asset_id"], "2026-08-22T11:01:00Z"
+        )
+        self.assertEqual(passed["status"], "qa_passed_pending_batch_review")
+
+    def test_white_cat_batch_approval_rechecks_unique_paw_evidence(self):
+        self.state["visual_asset_review"]["mode"] = "batch_final_review"
+        item = self.state["visual_asset_review"]["queue"][0]
+        self.state["visual_asset_review"]["queue"] = [item]
+        item.update(
+            status="awaiting_batch_qa",
+            path="assets/image/s06-master-v02.png",
+            checksum_sha256="a" * 64,
+            measured_dimensions=[1672, 941],
+        )
+        self._attach_white_cat_v2(item)
+        self.gate.record_batch_qa_pass(
+            self.state, item["asset_id"], "2026-08-22T11:01:00Z"
+        )
+        item["identity_qa"]["anatomy_evidence"]["limb_traces"][1][
+            "paw_region_id"
+        ] = "P1"
+        with self.assertRaisesRegex(ValueError, "paw region IDs are invalid"):
+            self.gate.record_batch_approval(
+                self.state, "全部批准", "2026-08-22T11:02:00Z"
+            )
+        self.assertEqual(item["status"], "qa_passed_pending_batch_review")
 
     def test_batch_final_approval_requires_every_item_to_be_qa_passed_or_preapproved(self):
         self.state["visual_asset_review"]["mode"] = "batch_final_review"
@@ -432,6 +879,64 @@ class VisualApprovalGateTests(unittest.TestCase):
         ))
         self.assertNotIn("active_batch", state["visual_asset_review"])
 
+    def test_white_cat_hybrid_approval_rechecks_anatomy_after_qa(self):
+        state = self._hybrid_state(1)
+        item = state["visual_asset_review"]["queue"][0]
+        item["role"] = "action-01"
+        relative_path = "assets/image/S01-white-cat-action-v01.png"
+        target = self._write_png(relative_path)
+        item.update(
+            status="awaiting_batch_qa",
+            path=relative_path,
+            checksum_sha256=self._sha256(target),
+            measured_dimensions=[1672, 941],
+            narration_source_text="白猫动作",
+            technical_qa={"result": "pass"},
+        )
+        self._attach_white_cat_v2(item)
+        self.gate.record_hybrid_qa_pass(
+            state, item["asset_id"], "2026-08-22T11:03:00Z"
+        )
+        item["identity_qa"]["result"] = "fail"
+        with self.assertRaisesRegex(ValueError, "identity QA did not pass"):
+            self.gate.record_hybrid_batch_approval(
+                state, None, "批准整批", "2026-08-22T11:04:00Z",
+                repository_root=self.repository_root,
+            )
+        self.assertEqual(item["status"], "qa_passed_pending_batch_review")
+
+    def test_white_cat_hybrid_approval_rejects_deleted_numbered_map(self):
+        state = self._hybrid_state(1)
+        item = state["visual_asset_review"]["queue"][0]
+        item["role"] = "action-01"
+        relative_path = "assets/image/S01-white-cat-action-v01.png"
+        target = self._write_png(relative_path)
+        item.update(
+            status="awaiting_batch_qa",
+            path=relative_path,
+            checksum_sha256=self._sha256(target),
+            measured_dimensions=[1672, 941],
+            narration_source_text="白猫动作",
+            technical_qa={"result": "pass"},
+        )
+        self._attach_white_cat_v2(item)
+        self.gate.record_hybrid_qa_pass(
+            state, item["asset_id"], "2026-08-22T11:03:00Z"
+        )
+        map_path = self.repository_root / item["identity_qa"]["anatomy_evidence"][
+            "inspection_evidence"
+        ]["numbered_limb_map_path"]
+        map_path.unlink()
+        with self.assertRaisesRegex(ValueError, "numbered limb map"):
+            self.gate.record_hybrid_batch_approval(
+                state,
+                None,
+                "批准整批",
+                "2026-08-22T11:04:00Z",
+                repository_root=self.repository_root,
+            )
+        self.assertEqual(item["status"], "qa_passed_pending_batch_review")
+
     def test_hybrid_single_change_preserves_unchanged_approved_bytes(self):
         state = self._hybrid_state(4)
         for index in range(1, 5):
@@ -536,6 +1041,31 @@ class VisualApprovalGateTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "changed on disk|checksum mismatch"):
             self.gate.validate_visual_assets_locked(state, self.repository_root)
 
+    def test_visual_asset_lock_keeps_approved_legacy_white_cat_v1_readable(self):
+        state = self._hybrid_state(1)
+        item = state["visual_asset_review"]["queue"][0]
+        relative_path = "assets/image/S01-legacy-white-cat-master-v01.png"
+        target = self._write_png(relative_path)
+        checksum = self._sha256(target)
+        item.update(
+            role="base/master",
+            white_cat_present=True,
+            visual_generation_route="imagegen",
+            qa_contract_version="ordinary-imagegen-white-cat-master-qa-v1",
+            status="approved",
+            path=relative_path,
+            checksum_sha256=checksum,
+            presented_checksum_sha256=checksum,
+            approved_checksum_sha256=checksum,
+            measured_dimensions=[1672, 941],
+            approval_disk_checksum_sha256=checksum,
+            approval_disk_measured_dimensions=[1672, 941],
+        )
+        self.assertEqual(
+            self.gate.validate_visual_assets_locked(state, self.repository_root)["result"],
+            "pass",
+        )
+
     def _local_video_state(self):
         state = self._hybrid_state(1)
         generated = state["visual_asset_review"]["queue"][0]
@@ -621,6 +1151,220 @@ class VisualApprovalGateTests(unittest.TestCase):
         local["status"] = "pending_generation"
         with self.assertRaisesRegex(ValueError, "must be imported"):
             self.gate.require_generation_allowed(state, local["asset_id"])
+
+    def _one_click_state(self):
+        state = {
+            "visual_asset_review": {
+                "contract_version": "visual-asset-review-v3",
+                "mode": "one_click_final_review_v1",
+                "storyboard_sha256": "a" * 64,
+                "policy_sha256": "b" * 64,
+                "generation_aspect_ratio": [16, 9],
+                "generation_aspect_ratio_max_relative_error": 0.005,
+                "queue_generation_allowed": True,
+                "queue": [],
+            }
+        }
+        for index in range(2):
+            relative = f"assets/image/one-click-{index}.png"
+            target = self._write_png(relative, marker=f"v{index}".encode())
+            state["visual_asset_review"]["queue"].append({
+                "asset_id": f"S01-state-{index}",
+                "path": relative,
+                "checksum_sha256": self._sha256(target),
+                "measured_dimensions": [1672, 941],
+                "depends_on": [] if index == 0 else ["S01-state-0"],
+                "status": "awaiting_batch_qa" if index == 0 else "pending_generation",
+                "technical_qa": {"result": "pass"},
+            })
+        return state
+
+    def test_one_click_qa_continues_but_final_review_precedes_caption_and_lock(self):
+        state = self._one_click_state()
+        self.gate.record_hybrid_qa_pass(state, "S01-state-0", "2026-08-22T10:00:00+08:00")
+        self.gate.require_generation_allowed(state, "S01-state-1")["status"] = "awaiting_batch_qa"
+        self.gate.record_hybrid_qa_pass(state, "S01-state-1", "2026-08-22T10:01:00+08:00")
+        self.assertEqual(state["current_phase"], "awaiting_precomposition_visual_review")
+        with self.assertRaisesRegex(ValueError, "exact hash-list approval"):
+            self.gate.validate_visual_assets_locked(state, self.repository_root)
+        final_review = self.gate.present_one_click_final_visual_review(state)
+        approved = self.gate.approve_one_click_final_visual_review(
+            state,
+            final_review["presented_map_sha256"],
+            "批准完整精确哈希清单",
+            "2026-08-22T10:02:00+08:00",
+            repository_root=self.repository_root,
+        )
+        self.assertEqual(approved["status"], "approved")
+        self.assertEqual(state["current_phase"], "awaiting_caption_delivery_choice")
+        self.assertEqual(
+            self.gate.validate_visual_assets_locked(state, self.repository_root)["result"],
+            "pass",
+        )
+
+    def test_white_cat_one_click_qa_rejects_missing_v2_evidence_before_status_change(self):
+        state = self._one_click_state()
+        item = state["visual_asset_review"]["queue"][0]
+        item.update(
+            role="base/master",
+            white_cat_present=True,
+            visual_generation_route="imagegen",
+        )
+        with self.assertRaisesRegex(ValueError, "QA contract version is invalid"):
+            self.gate.record_hybrid_qa_pass(
+                state, item["asset_id"], "2026-08-22T11:05:00Z"
+            )
+        self.assertEqual(item["status"], "awaiting_batch_qa")
+        self.assertNotIn("batch_qa_checksum_sha256", item)
+
+    def test_white_cat_one_click_final_payload_rechecks_numbered_map_binding(self):
+        state = self._one_click_state()
+        first, second = state["visual_asset_review"]["queue"]
+        first["role"] = "base/master"
+        self._attach_white_cat_v2(first)
+        self.gate.record_hybrid_qa_pass(
+            state, first["asset_id"], "2026-08-22T11:06:00Z"
+        )
+        self.gate.require_generation_allowed(state, second["asset_id"])[
+            "status"
+        ] = "awaiting_batch_qa"
+        self.gate.record_hybrid_qa_pass(
+            state, second["asset_id"], "2026-08-22T11:07:00Z"
+        )
+        first["identity_qa"]["anatomy_evidence"]["inspection_evidence"][
+            "numbered_limb_map_source_checksum_sha256"
+        ] = "0" * 64
+        with self.assertRaisesRegex(ValueError, "numbered limb-map evidence is stale"):
+            self.gate.present_one_click_final_visual_review(state)
+        self.assertNotIn("final_review", state["visual_asset_review"])
+
+    def test_white_cat_one_click_review_binds_map_and_rejects_post_presentation_tamper(self):
+        state = self._one_click_state()
+        first, second = state["visual_asset_review"]["queue"]
+        first["role"] = "base/master"
+        self._attach_white_cat_v2(first)
+        self.gate.record_hybrid_qa_pass(
+            state, first["asset_id"], "2026-08-22T11:06:00Z"
+        )
+        self.gate.require_generation_allowed(state, second["asset_id"])[
+            "status"
+        ] = "awaiting_batch_qa"
+        self.gate.record_hybrid_qa_pass(
+            state, second["asset_id"], "2026-08-22T11:07:00Z"
+        )
+        final_review = self.gate.present_one_click_final_visual_review(state)
+        anatomy_review = final_review["assets"][0]["white_cat_anatomy_review"]
+        inspection = first["identity_qa"]["anatomy_evidence"]["inspection_evidence"]
+        self.assertEqual(
+            anatomy_review,
+            {
+                "numbered_limb_map_path": inspection["numbered_limb_map_path"],
+                "numbered_limb_map_checksum_sha256": inspection[
+                    "numbered_limb_map_checksum_sha256"
+                ],
+                "numbered_limb_map_source_checksum_sha256": first[
+                    "checksum_sha256"
+                ],
+                "numbered_limb_map_limb_ids": ["F1", "F2", "H1", "H2"],
+            },
+        )
+        numbered_map = self.repository_root / inspection["numbered_limb_map_path"]
+        numbered_map.write_bytes(b"tampered-after-final-review-presentation")
+        with self.assertRaisesRegex(ValueError, "numbered limb map changed on disk"):
+            self.gate.approve_one_click_final_visual_review(
+                state,
+                final_review["presented_map_sha256"],
+                "批准完整精确哈希清单",
+                "2026-08-22T11:08:00Z",
+                repository_root=self.repository_root,
+            )
+        self.assertTrue(all(
+            item["status"] == "qa_passed_pending_final_review"
+            for item in state["visual_asset_review"]["queue"]
+        ))
+
+    def test_one_click_stale_final_hash_fails_without_approving_assets(self):
+        state = self._one_click_state()
+        for item in state["visual_asset_review"]["queue"]:
+            item["status"] = "qa_passed_pending_final_review"
+        self.gate.present_one_click_final_visual_review(state)
+        with self.assertRaisesRegex(ValueError, "stale"):
+            self.gate.approve_one_click_final_visual_review(
+                state,
+                "f" * 64,
+                "批准完整精确哈希清单",
+                "2026-08-22T10:02:00+08:00",
+                repository_root=self.repository_root,
+            )
+        self.assertTrue(all(
+            item["status"] == "qa_passed_pending_final_review"
+            for item in state["visual_asset_review"]["queue"]
+        ))
+
+    def test_one_click_pending_final_review_can_requeue_one_named_asset(self):
+        state = self._one_click_state()
+        for item in state["visual_asset_review"]["queue"]:
+            item.update(
+                status="qa_passed_pending_final_review",
+                qa_evidence_path=f"schema/{item['asset_id']}-qa.json",
+                qa_evidence_checksum_sha256="c" * 64,
+                batch_qa_checksum_sha256=item["checksum_sha256"],
+            )
+        final_review = self.gate.present_one_click_final_visual_review(state)
+        untouched = dict(state["visual_asset_review"]["queue"][0])
+
+        changed = self.gate.record_one_click_changes_requested(
+            state,
+            "S01-state-1",
+            "文字越出方框，请调整后重呈完整清单",
+            "2026-08-24T10:00:00+08:00",
+        )
+
+        review = state["visual_asset_review"]
+        self.assertNotIn("final_review", review)
+        self.assertEqual(state["phase"], "visual_production")
+        self.assertEqual(state["current_phase"], "visual_production")
+        self.assertEqual(review["current_asset_id"], "S01-state-1")
+        self.assertTrue(review["queue_generation_allowed"])
+        self.assertEqual(review["queue"][0], untouched)
+        self.assertEqual(changed["status"], "changes_requested")
+        self.assertTrue(changed["is_revision"])
+        self.assertFalse(changed["strict_review"])
+        for stale_key in (
+            "path", "checksum_sha256", "qa_evidence_path",
+            "qa_evidence_checksum_sha256", "batch_qa_checksum_sha256",
+        ):
+            self.assertNotIn(stale_key, changed)
+        archive = state["superseded_artifacts"][-1]
+        self.assertEqual(
+            archive["record_type"],
+            "superseded_one_click_final_visual_review",
+        )
+        self.assertEqual(
+            archive["prior_presented_map_sha256"],
+            final_review["presented_map_sha256"],
+        )
+        self.assertEqual(archive["affected_asset_ids"], ["S01-state-1"])
+        self.assertEqual(archive["preserved_unaffected_asset_count"], 1)
+        self.assertEqual(
+            archive["prior_final_review"]["presented_map_sha256"],
+            final_review["presented_map_sha256"],
+        )
+
+    def test_one_click_change_rejects_a_stale_pending_digest(self):
+        state = self._one_click_state()
+        for item in state["visual_asset_review"]["queue"]:
+            item["status"] = "qa_passed_pending_final_review"
+        self.gate.present_one_click_final_visual_review(state)
+        state["visual_asset_review"]["final_review"]["presented_map_sha256"] = "f" * 64
+
+        with self.assertRaisesRegex(ValueError, "stale"):
+            self.gate.record_one_click_changes_requested(
+                state,
+                "S01-state-1",
+                "文字越出方框",
+                "2026-08-24T10:00:00+08:00",
+            )
 
 
 if __name__ == "__main__":

@@ -8,6 +8,16 @@ export type FullFrameMaskSweepTiming = {
   holdEndFrame: number;
 };
 
+export const shouldUseStaticFullFrame = ({
+  shouldAnimate,
+  frame,
+  sweepFrames,
+}: {
+  shouldAnimate: boolean;
+  frame: number;
+  sweepFrames: number;
+}): boolean => !shouldAnimate || frame >= sweepFrames;
+
 export const getFullFrameMaskSweepTiming = ({
   durationInFrames,
   fps,

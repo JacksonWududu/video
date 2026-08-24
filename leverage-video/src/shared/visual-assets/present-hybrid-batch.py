@@ -66,6 +66,7 @@ def present(args: argparse.Namespace) -> dict[str, Any]:
         "contract_version", "assets", "asset_ids", "checksum_map", "manifest_sha256"
     )):
         raise ValueError("active hybrid batch manifest is stale")
+    ian_packages: dict[str, dict[str, Any]] = {}
     for item in items:
         file = resolve_root_relative(item["path"], f"{item['asset_id']} raster")
         if sha256_bytes(file.read_bytes()) != item["checksum_sha256"]:
@@ -73,12 +74,16 @@ def present(args: argparse.Namespace) -> dict[str, Any]:
         qa_file = resolve_root_relative(item["qa_evidence_path"], f"{item['asset_id']} QA evidence")
         if sha256_bytes(qa_file.read_bytes()) != item["qa_evidence_checksum_sha256"]:
             raise ValueError(f"{item['asset_id']} QA evidence checksum is stale")
+        ian_package = gate._require_ian_layered_scene_package(item, REPOSITORY_ROOT)
+        if ian_package is not None:
+            ian_packages[item["asset_id"]] = ian_package
     shot_ids = {item["shot_id"] for item in items}
     shot_label = next(iter(shot_ids)) if len(shot_ids) == 1 else "跨镜头"
     all_actions = all(str(item.get("role", "")).startswith("action-") for item in items)
     asset_label = "动作态" if all_actions else "视觉资产"
     exact_message = (
-        f"现呈交 {shot_label} {asset_label} {len(items)} 张精确 PNG"
+        f"现呈交 {shot_label} {asset_label} {len(items)} 份精确视觉交付"
+        f"{'（Ian 项含分层场景包）' if ian_packages else ''}"
         f"（批次清单 SHA-256 {manifest['manifest_sha256']}），"
         "等待用户明确批准此批次全部精确字节。"
     )
@@ -108,6 +113,10 @@ def present(args: argparse.Namespace) -> dict[str, Any]:
                 "qa_evidence_path": item["qa_evidence_path"],
                 "qa_evidence_checksum_sha256": item["qa_evidence_checksum_sha256"],
                 "narration_source_text": item["narration_source_text"],
+                **(
+                    {"ian_layered_scene_package": ian_packages[item["asset_id"]]}
+                    if item["asset_id"] in ian_packages else {}
+                ),
             }
             for item in items
         ],
@@ -131,6 +140,7 @@ def present(args: argparse.Namespace) -> dict[str, Any]:
         "storyboard_path": payload["storyboard_path"],
         "storyboard_checksum_sha256": payload["storyboard_checksum_sha256"],
     }
+    state["phase"] = "awaiting_visual_asset_review"
     state["current_phase"] = "awaiting_visual_asset_review"
     state_bytes = (json.dumps(state, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
     manifest_file.parent.mkdir(parents=True, exist_ok=True)

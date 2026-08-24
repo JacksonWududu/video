@@ -17,20 +17,22 @@ class C07C10ResolutionContractTest(unittest.TestCase):
         for needle in needles:
             self.assertIn(needle, content, f"{relative_path} lacks {needle!r}")
 
-    def test_c07_ian_adapter_is_v3_bound_and_single_frame(self) -> None:
+    def test_c07_ian_adapter_is_v3_bound_and_layered(self) -> None:
         self.assert_contains(
             ".agents/skills/ian-handdrawn-ppt/references/knowledge-video-frame.md",
-            "ian-knowledge-video-frame-v1",
-            "exactly one final 1920×1080 PNG",
+            "ian-knowledge-video-layered-scene-v1",
+            "one opaque 1920×1080 near-white paper background",
+            "ordered 1920×1080 transparent PNG semantic layers",
+            "transparent full-canvas layer",
+            "fixed eight-frame fade",
             "per-shot-visual-direction-review-v3",
             "contact sheet is an outer Visual Asset Review artifact only",
             "repository-root-relative paths",
         )
         self.assert_contains(
-            ".agents/skills/ian-handdrawn-ppt/scripts/validate_knowledge_video_frame.py",
-            "visual direction review checksum is stale",
-            "ordinary page shell",
-            "exact approved Chinese",
+            ".agents/skills/ian-handdrawn-ppt/scripts/validate_knowledge_video_layered_scene.mjs",
+            "inspectIanLayeredScenePackage",
+            "<episode-workspace> <manifest-root-relative-path>",
         )
 
     def test_c08_current_writes_are_v3_and_legacy_is_read_only(self) -> None:

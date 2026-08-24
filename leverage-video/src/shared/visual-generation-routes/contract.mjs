@@ -9,6 +9,7 @@ import {
   validateComicShotPlan,
   validateVisualLanguageSelection,
 } from '../visual-language/contract.mjs';
+import {validateConciseSummaryVisibleText} from '../visible-text-review/contract.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const CATALOG_BYTES = fs.readFileSync(path.join(HERE, 'catalog.json'));
@@ -141,6 +142,52 @@ export const buildPresentedMapSha256 = (review) => buildPresentedMapSha256WithPo
   {includeLocalVideoPath: true},
 );
 
+export const authorizeVisualDirectionRecommendationsOneClick = (
+  review,
+  {policySha256, authorizedAt},
+) => {
+  if (review?.contract_version !== 'per-shot-visual-direction-review-v3'
+    || !SHA256.test(policySha256 ?? '')
+    || typeof authorizedAt !== 'string' || Number.isNaN(Date.parse(authorizedAt))
+    || !Array.isArray(review.rows) || review.rows.length === 0) {
+    throw new Error('one-click visual direction authorization input is invalid');
+  }
+  const mapSha256 = buildPresentedMapSha256(review);
+  if (review.presented_map_sha256 !== mapSha256) {
+    throw new Error('one-click visual direction canonical map is stale');
+  }
+  const next = structuredClone(review);
+  next.status = 'policy_authorized';
+  next.policy_authorization = {
+    policy_sha256: policySha256,
+    authorized_at: authorizedAt,
+    user_has_reviewed_specific_map: false,
+    presented_map_sha256: mapSha256,
+  };
+  next.rows.forEach((row) => {
+    row.user_selection = {
+      status: 'policy_authorized',
+      white_cat_present: row.white_cat_recommendation.recommended,
+      visual_structure_id: row.visual_language_recommendation.visual_structure_id,
+      treatment_profile_id: row.visual_language_recommendation.treatment_profile_id,
+      visual_generation_route: row.recommended_route,
+      comic_plan: null,
+      visible_text_mode: row.visible_text_mode,
+      exact_visible_text: row.exact_visible_text ?? null,
+      visible_text_placement: row.visible_text_placement ?? null,
+      local_video_source_path: null,
+      policy_sha256: policySha256,
+      deterministic_recommendation_selected: true,
+      user_has_reviewed_specific_map: false,
+      exact_message: null,
+      decided_at: null,
+      authorized_at: authorizedAt,
+      presented_map_sha256: mapSha256,
+    };
+  });
+  return next;
+};
+
 const buildLegacyV3PresentedMapSha256 = (review) => buildPresentedMapSha256WithPolicy(
   review,
   {includeLocalVideoPath: false},
@@ -262,6 +309,7 @@ const validateV3VisibleText = (row) => {
   } else {
     requireNonEmptyString(row.exact_visible_text, `${row.shot_id} exact visible text`);
     requireNonEmptyString(row.visible_text_placement, `${row.shot_id} visible text placement`);
+    validateConciseSummaryVisibleText(row.exact_visible_text, {shotId: row.shot_id});
   }
 };
 
@@ -322,7 +370,7 @@ const validateRouteResolvedVisibleText = (row, selection) => {
   return policy;
 };
 
-const validateRow = (row, presentedMapSha256, version2, version3, legacyV3) => {
+const validateRow = (row, presentedMapSha256, version2, version3, legacyV3, policyAuthorized = false) => {
   validateClassificationAndIdentity(row);
   const routeIds = version3
     ? (legacyV3 ? LEGACY_V3_PRE_LOCAL_VIDEO_ROUTE_IDS : ACTIVE_ROUTE_IDS)
@@ -355,7 +403,11 @@ const validateRow = (row, presentedMapSha256, version2, version3, legacyV3) => {
   requireNonEmptyString(row.recommendation_reason, `${row.shot_id} route recommendation reason`);
 
   const selection = row.user_selection;
-  if (selection?.status !== 'approved') throw new Error(`${row.shot_id} requires an explicit approved selection`);
+  if (selection?.status !== (policyAuthorized ? 'policy_authorized' : 'approved')) {
+    throw new Error(policyAuthorized
+      ? `${row.shot_id} policy-authorized selection status is missing`
+      : `${row.shot_id} requires an explicit approved selection`);
+  }
   if (typeof selection.white_cat_present !== 'boolean') throw new Error(`${row.shot_id} requires an explicit white-cat selection`);
   if (!routeIds.includes(selection.visual_generation_route)) {
     throw new Error(`${row.shot_id} has unknown route: ${selection.visual_generation_route}`);
@@ -449,6 +501,20 @@ const validateRow = (row, presentedMapSha256, version2, version3, legacyV3) => {
     validateV3LocalVideoSelection(row, selection);
   }
 
+  if (policyAuthorized) {
+    if (!SHA256.test(selection.policy_sha256 ?? '')
+      || selection.deterministic_recommendation_selected !== true
+      || selection.user_has_reviewed_specific_map !== false
+      || selection.exact_message !== null
+      || typeof selection.authorized_at !== 'string'
+      || Number.isNaN(Date.parse(selection.authorized_at))) {
+      throw new Error(`${row.shot_id} policy authorization is invalid or fabricates concrete-map review`);
+    }
+    if (selection.presented_map_sha256 !== presentedMapSha256) {
+      throw new Error(`${row.shot_id} policy selection is bound to a stale canonical map`);
+    }
+    return;
+  }
   const exactMessage = requireNonEmptyString(selection.exact_message, `${row.shot_id} exact selection message`);
   if (GENERIC_AUTHORIZATION.has(exactMessage.trim().toLowerCase())) {
     throw new Error(`${row.shot_id} generic authorization is not a visual direction selection`);
@@ -505,11 +571,19 @@ export const validateVisualDirectionReview = (review, {shots = []} = {}) => {
   const {version2, legacyV3} = validateReviewAuthority(review);
   requireNonEmptyString(review?.storyboard?.path, 'visual direction storyboard path');
   if (!SHA256.test(review?.storyboard?.checksum_sha256 ?? '')) throw new Error('visual direction storyboard checksum is invalid');
-  if (typeof review?.presentation?.presented_at !== 'string' || review.presentation.presented_at.trim() === ''
+  const policyAuthorized = review.status === 'policy_authorized';
+  if (policyAuthorized) {
+    if (!SHA256.test(review.policy_authorization?.policy_sha256 ?? '')
+      || review.policy_authorization?.user_has_reviewed_specific_map !== false) {
+      throw new Error('visual direction policy authorization is missing or fabricates review');
+    }
+  } else if (typeof review?.presentation?.presented_at !== 'string' || review.presentation.presented_at.trim() === ''
     || typeof review?.presentation?.exact_message !== 'string' || review.presentation.exact_message.trim() === '') {
     throw new Error('complete visual direction table presentation evidence is required');
   }
-  if (review.status !== 'approved') throw new Error('visual direction review must be approved');
+  if (!['approved', 'policy_authorized'].includes(review.status)) {
+    throw new Error('visual direction review must be approved or policy-authorized');
+  }
   if (!Array.isArray(review.rows) || review.rows.length === 0) throw new Error('visual direction review rows are required');
   if (review.generated_shot_count !== review.rows.length) throw new Error('visual direction generated shot count mismatch');
   const expectedPresentedMapSha256 = legacyV3
@@ -523,7 +597,7 @@ export const validateVisualDirectionReview = (review, {shots = []} = {}) => {
   for (const row of review.rows) {
     if (ids.has(row.shot_id)) throw new Error(`duplicate visual direction row: ${row.shot_id}`);
     ids.add(row.shot_id);
-    validateRow(row, review.presented_map_sha256, version2, isV3(review), legacyV3);
+    validateRow(row, review.presented_map_sha256, version2, isV3(review), legacyV3, policyAuthorized);
   }
   if (!Array.isArray(shots) || shots.length !== review.rows.length) {
     throw new Error('visual direction review must cover every generated shot exactly once');
@@ -552,7 +626,7 @@ export const validateVisualDirectionReview = (review, {shots = []} = {}) => {
   });
   return {
     result: 'pass',
-    status: 'approved',
+    status: review.status,
     contract_version: review.contract_version,
     catalog_version: review.catalog_version,
     catalog_checksum_sha256: review.catalog_checksum_sha256,

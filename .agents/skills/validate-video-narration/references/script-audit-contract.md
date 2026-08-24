@@ -38,11 +38,11 @@ Map every substantive script claim to its evidence, the strongest wording the ev
 
 ## Content structure audit
 
-Before the general structure audit, validate the episode-opening sentence:
+Before the general structure audit, record the episode-opening sentence:
 
-- Read the first complete sentence exactly from the current versioned `script_resource` candidate. It must match `苏格拉底的猫今天聊的是，<topic-text>` with only `，` or `,` permitted after `是`. Run `python3 .agents/skills/validate-video-narration/scripts/validate_opening_topic.py <candidate-path>`; its JSON result and exit status are the mechanical authority.
-- Capture the exact non-empty `<topic-text>` preceding terminal `。！？!?` punctuation. Preserve internal punctuation and whitespace after trim; record rule ID `opening-topic-extraction-v1`, the exact first sentence, and the extracted topic text.
-- Treat missing prefix, empty topic text, additional wording outside the pattern, or an ambiguous first-sentence boundary as a Gate 2 blocker. Show the discrepancy and wait for the user to update the resolved source or explicitly ask Codex to edit that exact path; never generate or silently rewrite the sentence.
+- Run `python3 .agents/skills/validate-video-narration/scripts/record_first_sentence.py <candidate-path> --expected-sha256 <candidate-sha256>`. Preserve its passing `opening-first-sentence-record-v1` output, which binds the exact first complete sentence and UTF-8 byte range to the current versioned `script_resource` candidate checksum.
+- Do not require a fixed brand prefix or extract the topic from this sentence. Punctuation, added introductory wording, or another natural first sentence cannot by itself block Gate 2.
+- `.agents/skills/validate-video-narration/scripts/validate_opening_topic.py` and `opening-topic-extraction-v1` are retired historical evidence only. Do not invoke or emit them for a new or revised active audit. A missing or ambiguous complete first sentence still blocks because `OPEN-00` needs one exact narration span; show that content problem without silently rewriting it.
 
 Check that the script contains one recognizable situation, one central question, one primary knowledge point, no more than two necessary supporting points, an important limit or counterexample, and one useful closing judgment question.
 
@@ -91,6 +91,6 @@ Present:
 6. the complete current versioned candidate exactly as resolved from the local source;
 7. suggested description and any necessary disclaimer;
 8. character count and estimated duration, clearly marked as estimates before audio validation.
-9. opening-sentence validation result and the exact mechanically extracted topic text retained only as narration-validation evidence.
+9. `opening-first-sentence-record-v1` evidence containing the exact first sentence and candidate-bound byte range; no topic extraction or brand-prefix validation.
 
 Ask the user to judge whether the opening feels real, the situation is natural, the voice fits the channel, any sentence is too formal, verbose, or misleading, and whether the exact text is approved. Research verification, concept distinctions, counting, and risk analysis remain Codex's responsibility; the user is not required to review every paper.

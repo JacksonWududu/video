@@ -84,6 +84,9 @@ const openingContractVersion = 'cover-only-v1';
 <EpisodeOpening coverSource={opening.cover_source} durationInFrames={opening.first_sentence_end_frame} narrationStartFrame={0} />;
 <TransitionedScene transition={scene.transition} durationInFrames={scene.duration_frames} isTerminal={sceneIndex === scenes.length - 1}></TransitionedScene>;
 <GraphicScene visualGenerationRoute={scene.visual_generation_route ?? ''} />;
+<IanLayeredScene scene={scene.ian_layered_scene!} visualGenerationRoute={scene.visual_generation_route} />;
+useCurrentFrame; interpolate; layer.entry_frame; opacity;
+<CanvasImage src={scene.image_sequence[0].asset} width={1920} height={1080} fit="fill" />;
 <DoodleScene visualGenerationRoute={scene.visual_generation_route} />;
 <ComicScene visualGenerationRoute={scene.visual_generation_route} comicPlan={scene.comic_plan!} />;
 <IntraShotImageSequence occurrences={scene.image_sequence} transitions={scene.intra_shot_transitions} />;
@@ -101,6 +104,7 @@ assert.deepEqual(validateSceneTransitions({plan: goodPlan, source: goodSource}),
   scene_routing: 'pass_explicit_visual_generation_routes',
   whiteboard_scene_count: 0,
   comic_scene_count: 0,
+  ian_layered_scene_contract: null,
   opening_contract_version: 'cover-only-v1',
   opening_hard_cut_exceptions: ['OPEN-00→S01'],
 });
@@ -129,6 +133,12 @@ v3Plan.qa_contract.intra_shot_transition_contract = 'intra-shot-transition-v1';
 v3Plan.qa_contract.ordinary_boundaries_with_transition_decisions = 1;
 v3Plan.qa_contract.ordinary_boundaries_with_animated_transitions = 0;
 v3Plan.qa_contract.ordinary_boundaries_with_cuts = 1;
+v3Plan.qa_contract.ian_layered_scene_packages = {
+  contract_version: 'ian-layered-scene-consumption-evidence-v1',
+  result: 'pass',
+  shot_ids: [],
+  records: [],
+};
 v3Plan.scenes.forEach((scene) => Object.assign(scene, {
   duration_frames: scene.end_frame - scene.start_frame,
   motion_tier: 'layered',
@@ -146,6 +156,7 @@ v3Plan.scenes.forEach((scene) => Object.assign(scene, {
   visible_text_policy: 'approved-raster-v1',
   assembly_text_policy: 'asset-owned-no-timeline-overlay-v1',
   timeline_text_overlays: [],
+  ian_layered_scene: null,
 }));
 v3Plan.scenes[0].transition_intent = '连续语义直接切到下一镜';
 v3Plan.scenes[0].transition = {
@@ -185,9 +196,99 @@ assert.deepEqual(validateSceneTransitions({plan: v3Plan, source: goodSource}), {
   scene_routing: 'pass_explicit_visual_generation_routes',
   whiteboard_scene_count: 0,
   comic_scene_count: 0,
+  ian_layered_scene_contract: 'ian-static-layered-scene-v1',
   opening_contract_version: 'cover-only-v1',
   opening_hard_cut_exceptions: ['OPEN-00→S01'],
 });
+
+const ianPlan = structuredClone(v3Plan);
+ianPlan.scenes.forEach((scene) => {
+  const finalChecksum = `${scene.shot_id === 'S01' ? '4' : '5'}`.repeat(64);
+  scene.image_sequence[0].checksum_sha256 = finalChecksum;
+  Object.assign(scene, {
+    scene_type: 'ian-layered',
+    visual_generation_route: 'ian-handdrawn-ppt',
+    visible_text_mode: 'required',
+    exact_visible_text: '完整图',
+    visible_text_placement: '画面内',
+    visible_text_policy: 'approved-exact-text-raster-v1',
+    ian_layered_scene: {
+      contract_version: 'ian-static-layered-scene-v1',
+      package_contract_version: 'ian-knowledge-video-layered-scene-v1',
+      package_manifest: {
+        path: `leverage-video/src/example/schema/${scene.shot_id}-ian-layered.json`,
+        checksum_sha256: '1'.repeat(64),
+      },
+      scene_plan_sha256: '2'.repeat(64),
+      layer_entry_transition: {
+        contract_version: 'ian-layer-entry-fade-v1', duration_frames: 8, easing: 'linear',
+      },
+      background: {asset: `${scene.shot_id}-background.png`, checksum_sha256: '3'.repeat(64)},
+      layers: [{
+        layer_id: 'L01', z_index: 1, semantic_role: 'knowledge-structure',
+        source_text_start_byte: 0, source_text_end_byte_exclusive: 3,
+        source_text: '甲', entry_frame: 0,
+        asset: `${scene.shot_id}-L01.png`, checksum_sha256: '6'.repeat(64),
+      }],
+      final_composite: {asset: scene.image_sequence[0].asset, checksum_sha256: finalChecksum},
+      motion_policy: {
+        scene_transform: 'forbidden', layer_transform: 'forbidden',
+        mask_reveal: 'forbidden', internal_cut: 'forbidden',
+        opacity_animation: 'ian-layer-entry-fade-v1',
+      },
+    },
+  });
+});
+ianPlan.scenes[0].transition.source_visual_generation_route = 'ian-handdrawn-ppt';
+ianPlan.scenes[0].transition.next_visual_generation_route = 'ian-handdrawn-ppt';
+ianPlan.qa_contract.ian_layered_scene_packages = {
+  contract_version: 'ian-layered-scene-consumption-evidence-v1',
+  result: 'pass',
+  shot_ids: ['S01', 'S02'],
+  records: ianPlan.scenes.map((scene) => ({
+    shot_id: scene.shot_id,
+    package_manifest: structuredClone(scene.ian_layered_scene.package_manifest),
+    package: {
+      contract_version: 'ian-knowledge-video-layered-scene-v1',
+      scene_plan_sha256: scene.ian_layered_scene.scene_plan_sha256,
+      layers: scene.ian_layered_scene.layers.map((layer) => ({
+        layer_id: layer.layer_id,
+        checksum_sha256: layer.checksum_sha256,
+        entry_frame: layer.entry_frame,
+      })),
+    },
+  })),
+};
+assert.equal(
+  validateSceneTransitions({plan: ianPlan, source: goodSource}).ian_layered_scene_contract,
+  'ian-static-layered-scene-v1',
+);
+const retiredMotionPlan = structuredClone(ianPlan);
+retiredMotionPlan.scenes[1].internal_motion_contract = 'ian-subtle-raster-motion-v1';
+retiredMotionPlan.scenes[1].internal_motion = {start: {scale: 1}, end: {scale: 1.04}};
+assert.throws(
+  () => validateSceneTransitions({plan: retiredMotionPlan, source: goodSource}),
+  /whole-raster motion is retired/i,
+);
+const transformedIanPlan = structuredClone(ianPlan);
+transformedIanPlan.scenes[0].ian_layered_scene.motion_policy.scene_transform = 'allowed';
+assert.throws(
+  () => validateSceneTransitions({plan: transformedIanPlan, source: goodSource}),
+  /stale or permits motion/i,
+);
+const staleIanScene = structuredClone(ianPlan);
+staleIanScene.scenes[0].ian_layered_scene.layers = [];
+assert.throws(
+  () => validateSceneTransitions({plan: staleIanScene, source: goodSource}),
+  /stale or permits motion|static layered package/i,
+);
+assert.throws(
+  () => validateSceneTransitions({
+    plan: ianPlan,
+    source: `${goodSource}\n<FullFrameMaskSweep />;`,
+  }),
+  /forbidden full-frame mask sweep/i,
+);
 const staleSchemaPolicyPlan = structuredClone(v3Plan);
 staleSchemaPolicyPlan.qa_contract.visual_direction_artifact_policy.artifact_mode = 'legacy_read_only';
 assert.throws(

@@ -4,6 +4,7 @@ import {TransitionedScene} from '../scene-transitions';
 import {DoodleScene} from './DoodleScene';
 import {EpisodeOpening} from './EpisodeOpening';
 import {GraphicScene} from './GraphicScene';
+import {IanLayeredScene} from './IanLayeredScene';
 import {NarrationTrack} from './NarrationTrack';
 import {NarrativeScene} from './NarrativeScene';
 import {LocalVideoScene} from './LocalVideoScene';
@@ -43,6 +44,12 @@ export const KnowledgeVideo: React.FC<{
           ) : scene.scene_type === 'whiteboard' ? (
             <WhiteboardScene
               whiteboard={scene.whiteboard!}
+              durationInFrames={scene.duration_frames}
+              visualGenerationRoute={scene.visual_generation_route}
+            />
+          ) : scene.scene_type === 'ian-layered' ? (
+            <IanLayeredScene
+              scene={scene.ian_layered_scene!}
               durationInFrames={scene.duration_frames}
               visualGenerationRoute={scene.visual_generation_route}
             />

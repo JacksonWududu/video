@@ -1,7 +1,27 @@
 #!/usr/bin/env node
 import assert from 'node:assert/strict';
 
-import {resolveTransitionTailStyle} from './visual-state.mjs';
+import {
+  resolveTransitionTailProgress,
+  resolveTransitionTailStyle,
+} from './visual-state.mjs';
+
+assert.equal(resolveTransitionTailProgress({tailFrame: 0, durationInFrames: 12}), 0);
+assert.equal(resolveTransitionTailProgress({tailFrame: 11, durationInFrames: 12}), 11 / 12);
+assert.ok(
+  resolveTransitionTailProgress({tailFrame: 11, durationInFrames: 12}) < 1,
+  'the last of 12 visible transition frames must retain a visible outgoing edge',
+);
+
+const paperStart = resolveTransitionTailStyle({kind: 'paper-wipe', options: {}, progress: 0});
+const paperMiddle = resolveTransitionTailStyle({kind: 'paper-wipe', options: {}, progress: 0.5});
+const paperLastVisible = resolveTransitionTailStyle({kind: 'paper-wipe', options: {}, progress: 11 / 12});
+assert.match(paperStart.transform, /^translate3d\(/);
+assert.match(paperMiddle.transform, /^translate3d\(/);
+assert.match(paperLastVisible.transform, /^translate3d\(/);
+assert.equal(paperStart.clipPath, undefined, 'paper wipe must not clip a frozen Canvas subtree');
+assert.equal(paperMiddle.clipPath, undefined, 'paper wipe must remain compositor-stable mid-transition');
+assert.notEqual(paperMiddle.transform, paperLastVisible.transform);
 
 const noOptions = {};
 for (const kind of [

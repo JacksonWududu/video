@@ -88,6 +88,7 @@ def approve(args: argparse.Namespace) -> dict[str, Any]:
         None,
     )
     review["current_asset_id"] = next_item.get("asset_id") if next_item else None
+    state["phase"] = "visual_production"
     state["current_phase"] = "visual_production"
 
     temporary = state_file.with_suffix(".json.hybrid-approval.tmp")

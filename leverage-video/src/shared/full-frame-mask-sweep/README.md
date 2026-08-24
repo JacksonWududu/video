@@ -1,6 +1,8 @@
 # FullFrameMaskSweep
 
-一个可复用的 Remotion 整图遮罩组件：图片保持不动，一个与当前画布同尺寸的遮罩从左向右移动，最后完整图片固定停留 3 秒。
+> 历史只读模块。未完成与新建 Ian 项目统一使用 `ian-knowledge-video-layered-scene-v1` 和 `IanLayeredScene`：背景及元素固定不动，只按口播时点做透明层渐显，不消费本组件。任何新建、修改、迁移、revoice、预览或渲染均不得导入或消费它。`ian-static-full-frame-v1` 与 `ian-subtle-raster-motion-v1` 同样只属于已完成历史。保留源码与测试仅用于核验既有成片血缘。
+
+旧行为：图片保持不动，一个与当前画布同尺寸的遮罩从左向右移动，最后完整图片固定停留 3 秒。
 
 ## 时长规则
 
@@ -16,7 +18,7 @@
 
 3 秒及以下的分镜不会创建遮罩动画，直接按实际分镜时长显示完整图片。只有非正数、非整数帧数或无效 fps 才会报错。
 
-## 用法
+## 历史用法（禁止用于新输出）
 
 ```tsx
 import {Sequence, staticFile} from 'remotion';

@@ -70,17 +70,116 @@ def is_strict_revision_candidate(item: dict[str, Any] | None) -> bool:
     )
 
 
+def expected_reference_inputs(
+    profile: dict[str, Any],
+    revision_source: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    style = {
+        "role": "visual_style_reference_only",
+        "path": profile["style_anchor_path"],
+        "checksum_sha256": profile["style_anchor_checksum_sha256"],
+    }
+    if revision_source is None:
+        return [style]
+    return [
+        {
+            "role": "edit_target_prior_presented_raster",
+            "path": revision_source["path"],
+            "checksum_sha256": revision_source["checksum_sha256"],
+        },
+        style,
+    ]
+
+
+def validate_text_container_evidence(
+    evidence: dict[str, Any], *, asset_id: str,
+    exact_visible_text: str, generated_source: dict[str, Any],
+) -> None:
+    if (
+        not isinstance(evidence, dict)
+        or evidence.get("contract_version") != "ian-text-container-qa-evidence-v1"
+        or evidence.get("result") != "pass"
+        or evidence.get("asset_id") != asset_id
+        or evidence.get("raster") != generated_source
+    ):
+        raise ValueError("Ian text-container QA binding is stale or incomplete")
+    regions = evidence.get("inspection", {}).get("regions")
+    expected_labels = exact_visible_text.split("｜")
+    if (
+        not isinstance(regions, list)
+        or [region.get("text") for region in regions if isinstance(region, dict)]
+        != expected_labels
+        or any(region.get("result") != "pass" for region in regions)
+    ):
+        raise ValueError("Ian text-container QA must cover the complete exact label list")
+
+
+def validate_strict_revision_source(
+    state: dict[str, Any],
+    item: dict[str, Any],
+    revision_source: dict[str, Any],
+) -> None:
+    checksum_bound_file(revision_source, "Ian strict revision source")
+    prior_record = next(
+        (
+            record
+            for record in reversed(state.get("superseded_artifacts", []))
+            if record.get("record_type") == "superseded_visual_asset_batch"
+            and item.get("asset_id") in record.get("asset_ids", [])
+        ),
+        None,
+    )
+    if not isinstance(prior_record, dict):
+        raise ValueError("Ian strict revision lacks a superseded presented batch")
+    manifest_file = resolve_root_relative(
+        prior_record.get("prior_manifest_path", ""),
+        "superseded Ian batch manifest",
+    )
+    if sha256_file(manifest_file) != prior_record.get("prior_manifest_file_checksum_sha256"):
+        raise ValueError("superseded Ian batch manifest checksum is stale")
+    manifest = json.loads(manifest_file.read_text(encoding="utf-8"))
+    prior_asset = next(
+        (
+            asset
+            for asset in manifest.get("review_assets", [])
+            if asset.get("asset_id") == item.get("asset_id")
+        ),
+        None,
+    )
+    if (
+        manifest.get("manifest_sha256") != prior_record.get("prior_manifest_sha256")
+        or not isinstance(prior_asset, dict)
+        or prior_asset.get("checksum_sha256") != revision_source.get("checksum_sha256")
+    ):
+        raise ValueError("Ian strict revision source is not the prior presented raster")
+
+
+def pause_for_strict_revision(state: dict[str, Any], asset_id: str) -> None:
+    review = state["visual_asset_review"]
+    review["queue_generation_allowed"] = False
+    review["current_asset_id"] = asset_id
+    state["phase"] = "awaiting_visual_asset_review"
+    state["current_phase"] = "awaiting_visual_asset_review"
+
+
 def record(args: argparse.Namespace) -> dict[str, Any]:
+    raise ValueError(
+        "record-generated-ian-hybrid-qa.py is completed-history read-only; "
+        "unfinished and new Ian shots must use record-generated-ian-layered-scene-qa.py"
+    )
+
+    # Historical implementation retained below for byte-level forensic reference only.
     workspace = resolve_root_relative(args.episode_workspace, "episode workspace")
     state_file = workspace / "schema/episode-state.json"
     state = json.loads(state_file.read_text(encoding="utf-8"))
     gate = load_module(GATE_PATH, "visual_approval_gate")
     review = state.get("visual_asset_review", {})
+    one_click = review.get("mode") == "one_click_final_review_v1"
     candidate = next(
         (queued for queued in review.get("queue", []) if queued.get("asset_id") == args.asset_id),
         None,
     )
-    is_strict_revision = is_strict_revision_candidate(candidate)
+    is_strict_revision = is_strict_revision_candidate(candidate) and not one_click
     if is_strict_revision:
         if review.get("current_asset_id") != args.asset_id:
             raise ValueError("strict revision is not the current visual asset")
@@ -93,14 +192,18 @@ def record(args: argparse.Namespace) -> dict[str, Any]:
         item = gate.require_generation_allowed(state, args.asset_id)
     if (
         item.get("visual_generation_route") != "ian-handdrawn-ppt"
-        or (item.get("strict_review") is not False and not is_strict_revision)
+        or (item.get("strict_review") is not False and not is_strict_revision and not one_click)
     ):
         raise ValueError("asset is not an Ian knowledge-video frame")
 
     qa_file = resolve_root_relative(args.qa_path, "QA evidence path")
     qa = json.loads(qa_file.read_text(encoding="utf-8"))
+    qa_contract_version = qa.get("contract_version")
     if (
-        qa.get("contract_version") != "ian-knowledge-video-frame-qa-v1"
+        qa_contract_version not in {
+            "ian-knowledge-video-frame-qa-v1",
+            "ian-knowledge-video-frame-qa-v2",
+        }
         or qa.get("result") != "pass"
         or qa.get("asset_id") != args.asset_id
         or qa.get("generator") != "codex-native-imagegen"
@@ -144,17 +247,31 @@ def record(args: argparse.Namespace) -> dict[str, Any]:
     output = manifest["output_raster"]
     if output.get("path") != normalization["normalized"].get("path") or output.get("sha256") != normalization["normalized"].get("checksum_sha256"):
         raise ValueError("Ian manifest output does not match normalized raster")
+    if qa_contract_version == "ian-knowledge-video-frame-qa-v2":
+        containment_file = checksum_bound_file(
+            qa.get("text_container_qa", {}), "Ian text-container QA evidence",
+        )
+        validate_text_container_evidence(
+            json.loads(containment_file.read_text(encoding="utf-8")),
+            asset_id=args.asset_id,
+            exact_visible_text=item["exact_visible_text"],
+            generated_source={
+                "path": normalization["source"]["path"],
+                "checksum_sha256": normalization["source"]["checksum_sha256"],
+            },
+        )
 
     profile = qa["style_profile"]
     skill_file = resolve_root_relative(profile.get("skill_path", ""), "Ian skill path")
     anchor_file = resolve_root_relative(profile.get("style_anchor_path", ""), "Ian style anchor path")
     if sha256_file(skill_file) != profile.get("skill_checksum_sha256") or sha256_file(anchor_file) != profile.get("style_anchor_checksum_sha256"):
         raise ValueError("pinned Ian style checksum is stale")
-    if qa["actual_reference_inputs"] != [{
-        "role": "visual_style_reference_only",
-        "path": profile["style_anchor_path"],
-        "checksum_sha256": profile["style_anchor_checksum_sha256"],
-    }]:
+    revision_source = qa.get("revision_source") if is_strict_revision else None
+    if revision_source is not None:
+        if not isinstance(revision_source, dict):
+            raise ValueError("Ian strict revision source binding is invalid")
+        validate_strict_revision_source(state, item, revision_source)
+    if qa["actual_reference_inputs"] != expected_reference_inputs(profile, revision_source):
         raise ValueError("Ian generation must bind the exact style anchor")
 
     for check in ("semantic_qa", "visible_text_qa", "style_qa", "visual_qa"):
@@ -192,6 +309,7 @@ def record(args: argparse.Namespace) -> dict[str, Any]:
         state_visible_text=qa["state_visible_text"],
         qa_evidence_path=args.qa_path,
         qa_evidence_checksum_sha256=sha256_file(qa_file),
+        qa_contract_version=qa_contract_version,
         technical_qa={
             "result": "pass",
             "rule_id": "ian-knowledge-video-frame-v1",
@@ -202,6 +320,10 @@ def record(args: argparse.Namespace) -> dict[str, Any]:
         style_qa=qa["style_qa"],
         visual_qa=qa["visual_qa"],
     )
+    if revision_source is not None:
+        item["revision_source"] = revision_source
+    if qa_contract_version == "ian-knowledge-video-frame-qa-v2":
+        item["text_container_qa"] = qa["text_container_qa"]
     if is_strict_revision:
         item.update(
             presented_checksum_sha256=normalization["normalized"]["checksum_sha256"],
@@ -210,8 +332,7 @@ def record(args: argparse.Namespace) -> dict[str, Any]:
                 f"现呈交 {item['asset_id']} 修订 PNG，等待用户明确批准此精确字节。"
             ),
         )
-        state["visual_asset_review"]["queue_generation_allowed"] = False
-        state["visual_asset_review"]["current_asset_id"] = args.asset_id
+        pause_for_strict_revision(state, args.asset_id)
     else:
         gate.record_hybrid_qa_pass(state, args.asset_id, args.qa_time)
         active = [
@@ -219,7 +340,9 @@ def record(args: argparse.Namespace) -> dict[str, Any]:
             if candidate.get("active_for_current_storyboard") is not False and candidate.get("status") != "superseded"
         ]
         next_item = next(
-            (candidate for candidate in active if candidate.get("status") not in {"approved", "qa_passed_pending_batch_review"}),
+            (candidate for candidate in active if candidate.get("status") not in {
+                "approved", "qa_passed_pending_batch_review", "qa_passed_pending_final_review",
+            }),
             None,
         )
         state["visual_asset_review"]["current_asset_id"] = next_item.get("asset_id") if next_item else None

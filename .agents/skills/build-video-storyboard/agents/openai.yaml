@@ -1,4 +1,4 @@
 interface:
   display_name: "Build Video Storyboard"
   short_description: "Build storyboards with v3 visual and semantic transitions"
-  default_prompt: "Use $build-video-storyboard to build an audio-timed storyboard, lock storyboard-visual-rhythm-v1 motion tiers, plan stateful 2–4 complete states or hero_pose 4–6 poses from real narration semantics, default every v3 adjacent image transition to cut and require explicit approval for watercolor-bloom, collect route/text choices through the seven-column v3 form, reject retired routes, or retime a locked sequence without changing states, assets, or effects."
+  default_prompt: "Use $build-video-storyboard to build an audio-timed storyboard with explicit standard/rich density, lock storyboard-visual-rhythm-v2 and action-state-schedule-v4 hashes/counts/fallbacks, preserve standard counts, enforce rich bounds and clean-frame/UTF-8 rules, derive concise visible-text candidates and require one whole-map user approval in both manual and one-click modes, reject retired routes, or retime a locked sequence without changing density, states, assets, or effects."

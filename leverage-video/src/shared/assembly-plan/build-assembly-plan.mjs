@@ -9,6 +9,7 @@ import {
 } from '../scene-transitions/contract.mjs';
 import {
   ACTION_STATE_SCHEDULE_V3_VERSION,
+  ACTION_STATE_SCHEDULE_V4_VERSION,
   buildActionStatePlanSha256,
   validateActionStateSchedule,
 } from '../action-state-schedule/contract.mjs';
@@ -43,10 +44,23 @@ import {
   validateLocalVideoMatchBinding,
 } from '../local-video-match/contract.mjs';
 import {validateStoryboardVisualRhythm} from '../storyboard-visual-rhythm/contract.mjs';
+import {
+  assertOneClickProtectedActionAllowed,
+  validateApprovalSelectionSequence,
+} from '../workflow-approval/contract.mjs';
+import {
+  IAN_LAYERED_SCENE_PACKAGE_VERSION,
+  IAN_LAYERED_SCENE_RENDERER_VERSION,
+  sha256Canonical as sha256IanCanonical,
+  validateIanLayeredScenePackage,
+  validateIanLayeredSceneRhythmBinding,
+} from '../ian-layered-scene/contract.mjs';
+import {validateIanStoryboardLayeredSceneSection} from '../storyboard/validate-final-storyboard.mjs';
 
 const SHA256 = /^[a-f0-9]{64}$/;
 const WHITEBOARD_ROUTE = 'srt-whiteboard-animation';
 const COMIC_ROUTE = 'comic-imagegen';
+const IAN_ROUTE = 'ian-handdrawn-ppt';
 const XUAN_ROUTE = XUAN_PAPER_DIORAMA_ROUTE_ID;
 const INK_DOODLE_ROUTE = INK_DOODLE_KNOWLEDGE_CARD_ROUTE_ID;
 const LOCAL_VIDEO_ROUTE = LOCAL_VIDEO_ROUTE_ID;
@@ -292,6 +306,7 @@ const validateAssets = (
   requireActionSchedule = false,
   requireV3Contracts = false,
   visualRhythmMapSha256 = null,
+  expectedActionScheduleVersion = ACTION_STATE_SCHEDULE_V3_VERSION,
 ) => {
   if (!Array.isArray(shot.assets) || shot.assets.length === 0) {
     throw new Error(`${shot.shot_id} requires at least one approved raster`);
@@ -442,16 +457,24 @@ const validateAssets = (
   if (requireActionSchedule) {
     actionStateSchedule = shot.action_state_schedule;
     if (requireV3Contracts
-      && actionStateSchedule?.contract_version !== ACTION_STATE_SCHEDULE_V3_VERSION) {
-      throw new Error(`${shot.shot_id} current character action requires action-state-schedule-v3`);
+      && actionStateSchedule?.contract_version !== expectedActionScheduleVersion) {
+      throw new Error(`${shot.shot_id} current character action requires ${expectedActionScheduleVersion}`);
     }
     validateActionStateSchedule(actionStateSchedule, {
       totalFrames: durationFrames,
       fps,
+      densityMode: expectedActionScheduleVersion === ACTION_STATE_SCHEDULE_V4_VERSION
+        ? shot.density_mode
+        : null,
+      densitySelectionSha256: expectedActionScheduleVersion === ACTION_STATE_SCHEDULE_V4_VERSION
+        ? shot.visual_density_selection_sha256
+        : null,
       revoiceLock: shot.revoice_parent_action_state_ids
         ? {
             state_ids: shot.revoice_parent_action_state_ids,
             state_plan_sha256: shot.revoice_parent_action_state_plan_sha256,
+            density_mode: shot.revoice_parent_density_mode,
+            visual_density_selection_sha256: shot.revoice_parent_visual_density_selection_sha256,
           }
         : null,
     });
@@ -519,6 +542,8 @@ const buildScene = (
   requireV3Contracts,
   revoiceVariant,
   visualRhythmMapSha256,
+  expectedActionScheduleVersion,
+  ianLayeredSceneEvidence,
 ) => {
   const startFrame = requireInteger(shot.start_frame, `${shot.shot_id}.start_frame`);
   const endFrame = requireInteger(shot.end_frame, `${shot.shot_id}.end_frame`, 1);
@@ -530,7 +555,7 @@ const buildScene = (
     XUAN_ROUTE,
     INK_DOODLE_ROUTE,
     COMIC_ROUTE,
-    'ian-handdrawn-ppt',
+    IAN_ROUTE,
     'doodle-slides',
     WHITEBOARD_ROUTE,
     LOCAL_VIDEO_ROUTE,
@@ -569,7 +594,7 @@ const buildScene = (
   }
   const requiresCharacterSchedule = requireV3Contracts
     && ['stateful', 'hero_pose'].includes(shot.motion_tier)
-    && ['imagegen', XUAN_ROUTE, 'ian-handdrawn-ppt', INK_DOODLE_ROUTE].includes(visualGenerationRoute);
+    && ['imagegen', XUAN_ROUTE, IAN_ROUTE, INK_DOODLE_ROUTE].includes(visualGenerationRoute);
   const localVideo = visualGenerationRoute === LOCAL_VIDEO_ROUTE
     ? validateLocalVideo(shot, durationFrames, fps)
     : null;
@@ -587,6 +612,7 @@ const buildScene = (
       requiresCharacterSchedule,
       requireV3Contracts,
       visualRhythmMapSha256,
+      expectedActionScheduleVersion,
     );
   const whiteboard = visualGenerationRoute === WHITEBOARD_ROUTE
     ? validateWhiteboard(shot, durationFrames, imageSequence)
@@ -620,7 +646,7 @@ const buildScene = (
     imagegen: 'narrative',
     [XUAN_ROUTE]: 'narrative',
     [COMIC_ROUTE]: 'comic',
-    'ian-handdrawn-ppt': 'graphic',
+    [IAN_ROUTE]: requireV3Contracts ? 'ian-layered' : 'graphic',
     [INK_DOODLE_ROUTE]: 'graphic',
     'doodle-slides': 'doodle',
     [WHITEBOARD_ROUTE]: 'whiteboard',
@@ -659,6 +685,79 @@ const buildScene = (
       });
     }
   }
+  let ianLayeredScene = null;
+  if (requireV3Contracts && visualGenerationRoute === IAN_ROUTE) {
+    if (shot.internal_motion_contract != null || shot.internal_motion != null) {
+      throw new Error(`${shot.shot_id} Ian whole-raster motion is retired; use a layered scene package`);
+    }
+    if (!ianLayeredSceneEvidence || ianLayeredSceneEvidence.shot_id !== shot.shot_id) {
+      throw new Error(`${shot.shot_id} requires checksum-bound Ian layered-scene package evidence`);
+    }
+    const packageValue = validateIanLayeredScenePackage(ianLayeredSceneEvidence.package, {
+      episodeWorkspace: ianLayeredSceneEvidence.package.episode_workspace,
+      queueItemId: imageSequence[0]?.asset_id,
+      shotId: shot.shot_id,
+      treatmentProfileId: shot.treatment_profile_id,
+      sourceText: shot.narration_source_text,
+      shotStartFrame: startFrame,
+      shotEndFrame: endFrame,
+    });
+    if (imageSequence.length !== 1
+      || ianLayeredSceneEvidence.storyboard_scene_plan_sha256 !== packageValue.scene_plan_sha256
+      || imageSequence[0].from !== 0
+      || imageSequence[0].duration_in_frames !== durationFrames
+      || imageSequence[0].checksum_sha256 !== packageValue.final_composite.checksum_sha256
+      || ianLayeredSceneEvidence.render_assets?.final_composite?.asset
+        !== imageSequence[0].asset
+      || ianLayeredSceneEvidence.render_assets?.final_composite?.checksum_sha256
+        !== packageValue.final_composite.checksum_sha256) {
+      throw new Error(`${shot.shot_id} Ian review composite differs from its layered package`);
+    }
+    const backgroundAsset = ianLayeredSceneEvidence.render_assets?.background;
+    const layerAssets = ianLayeredSceneEvidence.render_assets?.layers;
+    if (backgroundAsset?.checksum_sha256 !== packageValue.background.checksum_sha256
+      || !Array.isArray(layerAssets)
+      || JSON.stringify(layerAssets.map((item) => item.layer_id))
+        !== JSON.stringify(packageValue.layers.map((item) => item.layer_id))
+      || layerAssets.some((item, index) => (
+        item.checksum_sha256 !== packageValue.layers[index].checksum_sha256
+        || typeof item.asset !== 'string'
+        || item.asset === ''
+      ))) {
+      throw new Error(`${shot.shot_id} Ian public render assets differ from the package members`);
+    }
+    ianLayeredScene = {
+      contract_version: IAN_LAYERED_SCENE_RENDERER_VERSION,
+      package_contract_version: IAN_LAYERED_SCENE_PACKAGE_VERSION,
+      package_manifest: structuredClone(ianLayeredSceneEvidence.package_manifest),
+      scene_plan_sha256: packageValue.scene_plan_sha256,
+      storyboard_scene_plan_sha256: ianLayeredSceneEvidence.storyboard_scene_plan_sha256,
+      layer_entry_transition: structuredClone(packageValue.scene_plan.layer_entry_transition),
+      background: {
+        asset: backgroundAsset.asset,
+        checksum_sha256: backgroundAsset.checksum_sha256,
+      },
+      layers: packageValue.layers.map((layer, index) => ({
+        layer_id: layer.layer_id,
+        z_index: layer.z_index,
+        semantic_role: layer.semantic_role,
+        source_text_start_byte: layer.source_text_start_byte,
+        source_text_end_byte_exclusive: layer.source_text_end_byte_exclusive,
+        source_text: layer.source_text,
+        entry_frame: layer.entry_frame,
+        asset: layerAssets[index].asset,
+        checksum_sha256: layer.checksum_sha256,
+      })),
+      final_composite: {
+        asset: imageSequence[0].asset,
+        checksum_sha256: packageValue.final_composite.checksum_sha256,
+      },
+      motion_policy: structuredClone(packageValue.scene_plan.motion_policy),
+    };
+  } else if (requireV3Contracts
+    && (shot.internal_motion_contract != null || shot.internal_motion != null)) {
+    throw new Error(`${shot.shot_id} non-Ian scene must not carry retired Ian internal motion`);
+  }
   return {
     shot_id: shot.shot_id,
     start_frame: startFrame,
@@ -672,7 +771,14 @@ const buildScene = (
     comic_plan: visualGenerationRoute === COMIC_ROUTE ? shot.comic_plan : null,
     white_cat_present: shot.white_cat_present,
     visual_generation_route: visualGenerationRoute,
+    ian_layered_scene: ianLayeredScene,
     motion_tier: requireV3Contracts ? shot.motion_tier : null,
+    density_mode: expectedActionScheduleVersion === ACTION_STATE_SCHEDULE_V4_VERSION
+      ? shot.density_mode
+      : null,
+    visual_density_selection_sha256: expectedActionScheduleVersion === ACTION_STATE_SCHEDULE_V4_VERSION
+      ? shot.visual_density_selection_sha256
+      : null,
     ...(requireV3Contracts ? {
       visible_text_mode: shot.visible_text_mode,
       exact_visible_text: shot.exact_visible_text ?? null,
@@ -687,7 +793,10 @@ const buildScene = (
       : INTRA_SHOT_WATERCOLOR_BLOOM_RULE_ID,
     intra_shot_transitions: whiteboard ? [] : intraShotTransitions,
     action_state_schedule: actionStateSchedule,
-    action_state_plan_sha256: actionStateSchedule?.contract_version === ACTION_STATE_SCHEDULE_V3_VERSION
+    action_state_plan_sha256: [
+      ACTION_STATE_SCHEDULE_V3_VERSION,
+      ACTION_STATE_SCHEDULE_V4_VERSION,
+    ].includes(actionStateSchedule?.contract_version)
       ? buildActionStatePlanSha256(actionStateSchedule)
       : null,
     hero_pose_background: heroPoseBackground,
@@ -759,8 +868,11 @@ const verifyStoryboardVisualRhythmEvidence = (input) => {
   if (typeof input.episodeWorkspace !== 'string' || input.episodeWorkspace === '') {
     throw new Error('episodeWorkspace is required for storyboard visual rhythm verification');
   }
-  const expectedPath = `${input.episodeWorkspace}/schema/storyboard-visual-rhythm-v1.json`;
-  if (evidence?.path !== expectedPath || !SHA256.test(evidence?.checksum_sha256 ?? '')) {
+  const allowedPaths = new Set([
+    `${input.episodeWorkspace}/schema/storyboard-visual-rhythm-v1.json`,
+    `${input.episodeWorkspace}/schema/storyboard-visual-rhythm-v2.json`,
+  ]);
+  if (!allowedPaths.has(evidence?.path) || !SHA256.test(evidence?.checksum_sha256 ?? '')) {
     throw new Error('storyboard visual rhythm artifact path and checksum are required');
   }
   const artifactPath = path.resolve(REPOSITORY_ROOT, evidence.path);
@@ -782,6 +894,169 @@ const verifyStoryboardVisualRhythmEvidence = (input) => {
     validation: validateStoryboardVisualRhythm(artifact, {
       shotIds: input.shots.map(({shot_id: shotId}) => shotId),
     }),
+  };
+};
+
+const verifyRootRelativeBinding = (binding, label, episodeWorkspace, {schemaOnly = false} = {}) => {
+  if (typeof binding?.path !== 'string' || binding.path === '' || path.isAbsolute(binding.path)) {
+    throw new Error(`${label} path must be repository-relative`);
+  }
+  requireSha256(binding.checksum_sha256, `${label}.checksum_sha256`);
+  const episodeRoot = path.resolve(REPOSITORY_ROOT, episodeWorkspace);
+  const resolved = path.resolve(REPOSITORY_ROOT, binding.path);
+  const allowedRoot = schemaOnly ? path.join(episodeRoot, 'schema') : episodeRoot;
+  const relative = path.relative(allowedRoot, resolved);
+  if (relative === '' || relative.startsWith('..') || path.isAbsolute(relative)) {
+    throw new Error(`${label} path is outside the active episode${schemaOnly ? ' schema' : ''}`);
+  }
+  if (sha256File(resolved) !== binding.checksum_sha256) {
+    throw new Error(`${label} checksum mismatch`);
+  }
+};
+
+const verifyPublicIanAsset = (asset, checksum, label) => {
+  if (typeof asset !== 'string' || asset === '' || path.isAbsolute(asset)
+    || asset.replaceAll('\\', '/').split('/').includes('..')) {
+    throw new Error(`${label} must be relative to leverage-video/public`);
+  }
+  requireSha256(checksum, `${label}.checksum_sha256`);
+  const publicRoot = path.resolve(REPOSITORY_ROOT, 'leverage-video/public');
+  const resolved = path.resolve(publicRoot, asset);
+  const relative = path.relative(publicRoot, resolved);
+  if (relative === '' || relative.startsWith('..') || path.isAbsolute(relative)) {
+    throw new Error(`${label} escapes leverage-video/public`);
+  }
+  const status = fs.lstatSync(resolved);
+  if (!status.isFile() || status.isSymbolicLink() || status.size === 0
+    || sha256File(resolved) !== checksum) {
+    throw new Error(`${label} public bytes are missing or stale`);
+  }
+};
+
+const extractStoryboardShotSection = (markdown, shotId) => {
+  const escapedShotId = shotId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = markdown.match(new RegExp(
+    `^## ${escapedShotId}\\n([\\s\\S]*?)(?=^## |(?![\\s\\S]))`,
+    'm',
+  ));
+  if (!match) throw new Error(`${shotId} is missing from the bound storyboard`);
+  return match[1];
+};
+
+const verifyIanLayeredScenePackageEvidence = (input) => {
+  if (typeof input.episodeWorkspace !== 'string' || input.episodeWorkspace === '') {
+    throw new Error('episodeWorkspace is required for Ian layered-scene verification');
+  }
+  const records = input.shots
+    .filter((shot) => shot.visual_generation_route === IAN_ROUTE)
+    .map((shot) => {
+      const binding = shot.ian_layered_scene;
+      const manifestBinding = binding?.package_manifest;
+      if (typeof manifestBinding?.path !== 'string'
+        || !manifestBinding.path.startsWith(`${input.episodeWorkspace}/schema/`)
+        || path.extname(manifestBinding.path) !== '.json') {
+        throw new Error(`${shot.shot_id} Ian package manifest must be in the active episode schema`);
+      }
+      requireSha256(
+        manifestBinding.checksum_sha256,
+        `${shot.shot_id}.ian_layered_scene.package_manifest.checksum_sha256`,
+      );
+      const manifestPath = path.resolve(REPOSITORY_ROOT, manifestBinding.path);
+      if (sha256File(manifestPath) !== manifestBinding.checksum_sha256) {
+        throw new Error(`${shot.shot_id} Ian package manifest checksum mismatch`);
+      }
+      const packageValue = readJson(manifestPath);
+      const validatedPackage = validateIanLayeredScenePackage(packageValue, {
+        episodeWorkspace: input.episodeWorkspace,
+        queueItemId: shot.assets?.[0]?.asset_id,
+        shotId: shot.shot_id,
+        treatmentProfileId: shot.treatment_profile_id,
+        storyboardBinding: input.visualDirectionReview.storyboard,
+        visualDirectionBinding: {
+          path: input.visualDirectionReview.path,
+          checksum_sha256: input.visualDirectionReview.checksum_sha256,
+          presented_map_sha256: input.visualDirectionReview.presented_map_sha256,
+        },
+        sourceText: shot.narration_source_text,
+        shotStartFrame: shot.start_frame,
+        shotEndFrame: shot.end_frame,
+      });
+      const storyboardPath = path.resolve(REPOSITORY_ROOT, input.visualDirectionReview.storyboard.path);
+      const storyboardSection = extractStoryboardShotSection(
+        fs.readFileSync(storyboardPath, 'utf8'),
+        shot.shot_id,
+      );
+      const storyboardScenePlan = validateIanStoryboardLayeredSceneSection(
+        storyboardSection,
+        shot.shot_id,
+        {
+          sourceText: shot.narration_source_text,
+          durationFrames: shot.end_frame - shot.start_frame,
+        },
+      );
+      const storyboardScenePlanSha256 = sha256IanCanonical(storyboardScenePlan);
+      if (validatedPackage.scene_plan_sha256 !== storyboardScenePlanSha256
+        || JSON.stringify(validatedPackage.scene_plan) !== JSON.stringify(storyboardScenePlan)) {
+        throw new Error(`${shot.shot_id} Ian package scene plan differs from the bound storyboard`);
+      }
+      const renderAssets = binding?.render_assets;
+      verifyPublicIanAsset(
+        renderAssets?.background?.asset,
+        renderAssets?.background?.checksum_sha256,
+        `${shot.shot_id} Ian background`,
+      );
+      for (const [index, layer] of (renderAssets?.layers ?? []).entries()) {
+        if (layer.layer_id !== packageValue.layers[index]?.layer_id) {
+          throw new Error(`${shot.shot_id} Ian layer render order is stale`);
+        }
+        verifyPublicIanAsset(
+          layer.asset,
+          layer.checksum_sha256,
+          `${shot.shot_id} Ian layer ${layer.layer_id}`,
+        );
+      }
+      verifyPublicIanAsset(
+        renderAssets?.final_composite?.asset,
+        renderAssets?.final_composite?.checksum_sha256,
+        `${shot.shot_id} Ian final composite`,
+      );
+      return {
+        shot_id: shot.shot_id,
+        storyboard_scene_plan_sha256: storyboardScenePlanSha256,
+        package_manifest: structuredClone(manifestBinding),
+        package: packageValue,
+        render_assets: structuredClone(renderAssets),
+      };
+    });
+  return {
+    contract_version: 'ian-layered-scene-consumption-evidence-v1',
+    result: 'pass',
+    records,
+  };
+};
+
+export const validateIanLayeredSceneEvidence = ({evidence, input}) => {
+  const expectedShotIds = input.shots
+    .filter((shot) => shot.visual_generation_route === IAN_ROUTE)
+    .map((shot) => shot.shot_id);
+  if (evidence?.contract_version !== 'ian-layered-scene-consumption-evidence-v1'
+    || evidence.result !== 'pass'
+    || !Array.isArray(evidence.records)
+    || JSON.stringify(evidence.records.map((record) => record?.shot_id))
+      !== JSON.stringify(expectedShotIds)) {
+    throw new Error('Ian layered-scene evidence does not cover the ordered active Ian shots');
+  }
+  if (evidence.records.some((record) => (
+    !SHA256.test(record?.storyboard_scene_plan_sha256 ?? '')
+    || record.storyboard_scene_plan_sha256 !== record.package?.scene_plan_sha256
+  ))) {
+    throw new Error('Ian layered-scene evidence has a stale storyboard scene-plan binding');
+  }
+  return {
+    contract_version: 'ian-layered-scene-consumption-evidence-v1',
+    result: 'pass',
+    shot_ids: expectedShotIds,
+    records: structuredClone(evidence.records),
   };
 };
 
@@ -868,8 +1143,52 @@ export const buildKnowledgeVideoAssemblyPlan = (input, options = {}) => {
       }
     });
   }
+  const expectedActionScheduleVersion = visualRhythmEvidence?.artifact?.contract_version
+    === 'storyboard-visual-rhythm-v2'
+    ? ACTION_STATE_SCHEDULE_V4_VERSION
+    : ACTION_STATE_SCHEDULE_V3_VERSION;
+  let workflowApprovalValidation = null;
+  if (expectedActionScheduleVersion === ACTION_STATE_SCHEDULE_V4_VERSION) {
+    const workflow = input.workflowApproval;
+    if (!workflow || typeof workflow !== 'object') {
+      throw new Error('new storyboard assembly requires workflow approval selection evidence');
+    }
+    workflowApprovalValidation = validateApprovalSelectionSequence({
+      gate2ScriptSha256: workflow.gate2ScriptSha256,
+      density: workflow.density,
+      mode: workflow.mode,
+      policy: workflow.policy ?? null,
+    });
+    if (workflow.density.selection_sha256
+      !== visualRhythmEvidence.artifact.visual_density_selection_sha256
+      || workflow.density.density_mode !== visualRhythmEvidence.artifact.density_mode) {
+      throw new Error('workflow density selection differs from storyboard visual rhythm');
+    }
+    if (workflow.mode.approval_mode === 'one_click') {
+      assertOneClickProtectedActionAllowed({
+        phase: workflow.phase,
+        captionDelivery: workflow.captionDelivery,
+        visualReview: workflow.visualReview,
+      }, 'composition');
+    }
+  }
   const transitionContract = requireV3Contracts ? 'scene-transition-v3' : 'scene-transition-v2';
   const transitionCatalog = requireV3Contracts ? 'scene-transition-catalog-v3' : 'scene-transition-catalog-v2';
+  if (requireV3Contracts && input.ianInternalMotionPolicy !== undefined) {
+    throw new Error('Ian internal-motion policies are retired; rebuild Ian as layered scene packages');
+  }
+  const ianLayeredSceneEvidence = requireV3Contracts
+    ? validateIanLayeredSceneEvidence({
+        evidence: (
+          options.verifyIanLayeredScenePackageEvidence
+          ?? verifyIanLayeredScenePackageEvidence
+        )(input),
+        input,
+      })
+    : null;
+  const ianLayeredSceneByShot = new Map(
+    (ianLayeredSceneEvidence?.records ?? []).map((record) => [record.shot_id, record]),
+  );
   const scenes = input.shots.map((shot, index) => buildScene(
     shot,
     index,
@@ -878,10 +1197,19 @@ export const buildKnowledgeVideoAssemblyPlan = (input, options = {}) => {
     requireV3Contracts,
     revoiceVariant,
     visualRhythmEvidence?.artifact?.presented_map_sha256 ?? null,
+    expectedActionScheduleVersion,
+    ianLayeredSceneByShot.get(shot.shot_id) ?? null,
   ));
   if (requireV3Contracts) {
     scenes.forEach((scene, index) => {
       const rhythmShot = visualRhythmEvidence.artifact.shots[index];
+      if (scene.visual_generation_route === IAN_ROUTE) {
+        const layeredEvidence = ianLayeredSceneByShot.get(scene.shot_id);
+        validateIanLayeredSceneRhythmBinding(layeredEvidence.package.scene_plan, {
+          shotStartFrame: scene.start_frame,
+          rhythmShot,
+        });
+      }
       const expectedAssetCount = scene.motion_tier === 'hero_pose'
         ? rhythmShot.asset_plan.pose_count
         : rhythmShot.asset_plan.main_image_count;
@@ -976,6 +1304,8 @@ export const buildKnowledgeVideoAssemblyPlan = (input, options = {}) => {
         checksum_sha256: visualRhythmEvidence.checksum_sha256,
         ...visualRhythmEvidence.validation,
       },
+      workflow_approval: workflowApprovalValidation,
+      ian_layered_scene_packages: ianLayeredSceneEvidence,
       intra_shot_transition_contract: requireV3Contracts
         ? INTRA_SHOT_TRANSITION_VERSION
         : INTRA_SHOT_WATERCOLOR_BLOOM_RULE_ID,

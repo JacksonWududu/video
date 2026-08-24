@@ -4,6 +4,7 @@ import test from 'node:test';
 import {
   FULL_FRAME_MASK_HOLD_SECONDS,
   getFullFrameMaskSweepTiming,
+  shouldUseStaticFullFrame,
 } from './timing.ts';
 
 test('derives a 7-second sweep plus a 3-second hold for a 10-second shot', () => {
@@ -67,6 +68,21 @@ test('uses a static full-image hold for a shot shorter than 3 seconds', () => {
       holdStartFrame: 0,
       holdEndFrame: 59,
     },
+  );
+});
+
+test('drops the reveal mask exactly when the clean hold begins', () => {
+  assert.equal(
+    shouldUseStaticFullFrame({shouldAnimate: true, frame: 209, sweepFrames: 210}),
+    false,
+  );
+  assert.equal(
+    shouldUseStaticFullFrame({shouldAnimate: true, frame: 210, sweepFrames: 210}),
+    true,
+  );
+  assert.equal(
+    shouldUseStaticFullFrame({shouldAnimate: false, frame: 0, sweepFrames: 0}),
+    true,
   );
 });
 

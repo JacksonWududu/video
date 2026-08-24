@@ -56,7 +56,46 @@ export const approvePendingTransitionRows = ({proposal, exactMessage, decidedAt}
   return {proposal: nextProposal, pendingBoundaryIds, presentedMapSha256};
 };
 
-const buildArtifacts = ({episodeWorkspace, exactMessage, decidedAt}) => {
+export const authorizePendingTransitionRowsOneClick = ({proposal, policySha256, authorizedAt}) => {
+  if (proposal.status !== 'awaiting_user_selection'
+    || !/^[a-f0-9]{64}$/.test(policySha256 ?? '')
+    || typeof authorizedAt !== 'string' || Number.isNaN(Date.parse(authorizedAt))) {
+    throw new Error('one-click transition authorization input or proposal status is invalid');
+  }
+  const presentedMapSha256 = buildTransitionReviewPresentedMapSha256(proposal);
+  if (proposal.presented_map_sha256 !== presentedMapSha256) {
+    throw new Error('one-click transition canonical map is stale');
+  }
+  const pendingBoundaryIds = proposal.rows
+    .filter((row) => row.user_selection?.status === 'pending')
+    .map((row) => `${row.source_shot_id}->${row.next_shot_id}`);
+  if (pendingBoundaryIds.length !== proposal.rows.length) {
+    throw new Error('one-click transition authorization requires a complete deterministic pending map');
+  }
+  const nextProposal = structuredClone(proposal);
+  nextProposal.status = 'policy_authorized';
+  nextProposal.rows.forEach((row) => {
+    row.user_selection = {
+      status: 'policy_authorized',
+      policy_sha256: policySha256,
+      deterministic_recommendation_selected: true,
+      user_has_reviewed_specific_map: false,
+      exact_message: null,
+      decided_at: null,
+      authorized_at: authorizedAt,
+      presented_map_sha256: presentedMapSha256,
+    };
+  });
+  nextProposal.policy_authorization = {
+    policy_sha256: policySha256,
+    authorized_at: authorizedAt,
+    user_has_reviewed_specific_map: false,
+    presented_map_sha256: presentedMapSha256,
+  };
+  return {proposal: nextProposal, pendingBoundaryIds, presentedMapSha256};
+};
+
+const buildArtifacts = ({episodeWorkspace, exactMessage = null, decidedAt, policySha256 = null}) => {
   const validation = validateEpisodeTransitionReviewProposal(episodeWorkspace);
   if (validation.pending_boundary_count === 0) throw new Error('transition review has no pending boundary');
   const workspacePath = resolveRootRelative(episodeWorkspace, 'episode workspace');
@@ -67,11 +106,14 @@ const buildArtifacts = ({episodeWorkspace, exactMessage, decidedAt}) => {
   if (sha256(proposalBytes) !== state.transition_review.checksum_sha256) {
     throw new Error('transition review checksum changed before approval');
   }
-  const approval = approvePendingTransitionRows({
-    proposal: JSON.parse(proposalBytes),
-    exactMessage,
-    decidedAt,
-  });
+  const oneClick = policySha256 !== null;
+  const approval = oneClick
+    ? authorizePendingTransitionRowsOneClick({
+        proposal: JSON.parse(proposalBytes), policySha256, authorizedAt: decidedAt,
+      })
+    : approvePendingTransitionRows({
+        proposal: JSON.parse(proposalBytes), exactMessage, decidedAt,
+      });
   if (JSON.stringify(approval.pendingBoundaryIds) !== JSON.stringify(validation.pending_boundary_ids)) {
     throw new Error('pending transition boundary set changed before approval');
   }
@@ -79,21 +121,30 @@ const buildArtifacts = ({episodeWorkspace, exactMessage, decidedAt}) => {
   const nextState = structuredClone(state);
   nextState.storyboard_construction = {
     ...nextState.storyboard_construction,
-    status: 'transition_review_approved_pending_final_qa',
-    ordinary_transition_status: 'approved_pending_storyboard_binding_and_final_qa',
+    status: oneClick
+      ? 'transition_policy_authorized_pending_final_qa'
+      : 'transition_review_approved_pending_final_qa',
+    ordinary_transition_status: oneClick
+      ? 'policy_authorized_pending_storyboard_binding_and_final_qa'
+      : 'approved_pending_storyboard_binding_and_final_qa',
   };
   nextState.transition_review = {
     ...nextState.transition_review,
-    status: 'approved',
+    status: oneClick ? 'policy_authorized' : 'approved',
     checksum_sha256: sha256(nextProposalBytes),
     pending_boundary_ids: [],
     pending_boundary_count: 0,
     approved_boundary_count: approval.proposal.rows.length,
     newly_approved_boundary_ids: approval.pendingBoundaryIds,
-    exact_decision_message: exactMessage,
-    decided_at: decidedAt,
+    exact_decision_message: oneClick ? null : exactMessage,
+    decided_at: oneClick ? null : decidedAt,
+    ...(oneClick ? {
+      policy_sha256: policySha256,
+      authorized_at: decidedAt,
+      user_has_reviewed_specific_map: false,
+    } : {}),
   };
-  nextState.current_phase = 'transition_review_approved';
+  nextState.current_phase = oneClick ? 'transition_policy_authorized' : 'transition_review_approved';
   const nextStateBytes = jsonBytes(nextState);
   return {
     result: 'pass',
@@ -126,23 +177,30 @@ const writeArtifacts = (artifacts) => {
 
 const isCli = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (isCli) {
-  const [episodeWorkspace, exactMessage, decidedAt, mode] = process.argv.slice(2);
-  if (!episodeWorkspace || !exactMessage || !decidedAt || !['--dry-run', '--apply'].includes(mode)
+  const [episodeWorkspace, decisionOrPolicy, decidedAt, mode] = process.argv.slice(2);
+  const oneClick = ['--one-click-dry-run', '--one-click-apply'].includes(mode);
+  if (!episodeWorkspace || !decisionOrPolicy || !decidedAt
+    || !['--dry-run', '--apply', '--one-click-dry-run', '--one-click-apply'].includes(mode)
     || process.argv.length !== 6
     || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}$/.test(decidedAt)) {
-    console.error('usage: node approve-review-proposal.mjs <episode-workspace> <exact-message> <ISO-8601-with-offset> <--dry-run|--apply>');
+    console.error('usage: node approve-review-proposal.mjs <episode-workspace> <exact-message|policy-sha256> <ISO-8601-with-offset> <--dry-run|--apply|--one-click-dry-run|--one-click-apply>');
     process.exit(2);
   }
   try {
-    const artifacts = buildArtifacts({episodeWorkspace, exactMessage, decidedAt});
-    if (mode === '--apply') writeArtifacts(artifacts);
+    const artifacts = buildArtifacts({
+      episodeWorkspace,
+      exactMessage: oneClick ? null : decisionOrPolicy,
+      policySha256: oneClick ? decisionOrPolicy : null,
+      decidedAt,
+    });
+    if (['--apply', '--one-click-apply'].includes(mode)) writeArtifacts(artifacts);
     process.stdout.write(`${JSON.stringify({
       result: artifacts.result,
       approved_boundary_ids: artifacts.approved_boundary_ids,
       presented_map_sha256: artifacts.presented_map_sha256,
       proposal_checksum_sha256: sha256(artifacts.proposal.bytes),
       state_checksum_sha256: sha256(artifacts.state.bytes),
-      applied: mode === '--apply',
+      applied: ['--apply', '--one-click-apply'].includes(mode),
     }, null, 2)}\n`);
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));

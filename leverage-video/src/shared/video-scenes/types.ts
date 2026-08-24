@@ -1,8 +1,40 @@
 import type {SceneTransitionContract} from '../scene-transitions';
 import type {IntraShotTransitionV1} from '../intra-shot-transitions';
 import type {IntraShotWatercolorTransition} from '../watercolor-bloom/contract.mjs';
-
 export type MotionTier = 'layered' | 'stateful' | 'hero_pose';
+
+export type IanLayeredSceneBinding = {
+  readonly contract_version: 'ian-static-layered-scene-v1';
+  readonly package_contract_version: 'ian-knowledge-video-layered-scene-v1';
+  readonly package_manifest: {readonly path: string; readonly checksum_sha256: string};
+  readonly scene_plan_sha256: string;
+  readonly storyboard_scene_plan_sha256: string;
+  readonly layer_entry_transition: {
+    readonly contract_version: 'ian-layer-entry-fade-v1';
+    readonly duration_frames: 8;
+    readonly easing: 'linear';
+  };
+  readonly background: {readonly asset: string; readonly checksum_sha256: string};
+  readonly layers: readonly {
+    readonly layer_id: string;
+    readonly z_index: number;
+    readonly semantic_role: string;
+    readonly source_text_start_byte: number;
+    readonly source_text_end_byte_exclusive: number;
+    readonly source_text: string;
+    readonly entry_frame: number;
+    readonly asset: string;
+    readonly checksum_sha256: string;
+  }[];
+  readonly final_composite: {readonly asset: string; readonly checksum_sha256: string};
+  readonly motion_policy: {
+    readonly scene_transform: 'forbidden';
+    readonly layer_transform: 'forbidden';
+    readonly mask_reveal: 'forbidden';
+    readonly internal_cut: 'forbidden';
+    readonly opacity_animation: 'ian-layer-entry-fade-v1';
+  };
+};
 
 export type LegacyIntraShotWatercolorTransition = IntraShotWatercolorTransition & {
   readonly from_asset_id: string;
@@ -156,7 +188,7 @@ export type CurrentKnowledgeVideoScene = {
   readonly start_frame: number;
   readonly end_frame: number;
   readonly duration_frames: number;
-  readonly scene_type: 'narrative' | 'comic' | 'graphic' | 'doodle' | 'whiteboard' | 'local-video';
+  readonly scene_type: 'narrative' | 'comic' | 'graphic' | 'ian-layered' | 'doodle' | 'whiteboard' | 'local-video';
   readonly scene_class: 'narrative_illustration' | 'structured_graphic';
   readonly structured_visual_kind: string | null;
   readonly visual_structure_id: string | null;
@@ -164,6 +196,7 @@ export type CurrentKnowledgeVideoScene = {
   readonly comic_plan: ComicShotPlan | null;
   readonly white_cat_present: boolean;
   readonly visual_generation_route: VisualGenerationRoute;
+  readonly ian_layered_scene?: IanLayeredSceneBinding | null;
   readonly motion_tier?: MotionTier | null;
   readonly image_sequence: readonly ImageOccurrence[];
   readonly hero_pose_background?: null | {

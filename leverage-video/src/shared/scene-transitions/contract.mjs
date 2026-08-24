@@ -451,14 +451,26 @@ export const validateUserApprovedTransition = (
     throw new Error(`transition renderer mismatch: ${sourceShotId}`);
   }
   const selection = transition.user_selection;
-  if (selection?.status !== 'approved') {
-    throw new Error(`transition user selection is not approved: ${sourceShotId}`);
+  const policyAuthorized = selection?.status === 'policy_authorized';
+  if (selection?.status !== 'approved' && !policyAuthorized) {
+    throw new Error(`transition user selection is neither approved nor policy-authorized: ${sourceShotId}`);
   }
-  if (typeof selection.exact_message !== 'string' || selection.exact_message.trim() === '') {
-    throw new Error(`transition user selection message is missing: ${sourceShotId}`);
-  }
-  if (typeof selection.decided_at !== 'string' || Number.isNaN(Date.parse(selection.decided_at))) {
-    throw new Error(`transition user selection time is invalid: ${sourceShotId}`);
+  if (policyAuthorized) {
+    if (!SHA256.test(selection.policy_sha256 ?? '')
+      || selection.deterministic_recommendation_selected !== true
+      || selection.user_has_reviewed_specific_map !== false
+      || selection.exact_message !== null
+      || typeof selection.authorized_at !== 'string'
+      || Number.isNaN(Date.parse(selection.authorized_at))) {
+      throw new Error(`transition policy authorization is invalid or fabricates review: ${sourceShotId}`);
+    }
+  } else {
+    if (typeof selection.exact_message !== 'string' || selection.exact_message.trim() === '') {
+      throw new Error(`transition user selection message is missing: ${sourceShotId}`);
+    }
+    if (typeof selection.decided_at !== 'string' || Number.isNaN(Date.parse(selection.decided_at))) {
+      throw new Error(`transition user selection time is invalid: ${sourceShotId}`);
+    }
   }
   if (typeof selection.presented_map_sha256 !== 'string'
     || !SHA256.test(selection.presented_map_sha256)) {

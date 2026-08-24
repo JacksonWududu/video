@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Contract checks for the Ian-only full-frame mask-sweep render rule."""
+"""Contract checks for the active static Ian layered-scene rule."""
 
 from pathlib import Path
 import unittest
@@ -8,58 +8,83 @@ import unittest
 ROOT = Path(__file__).resolve().parents[4]
 
 
-class IanFullFrameMaskSweepContractTest(unittest.TestCase):
+class IanLayeredSceneContractTest(unittest.TestCase):
     def assert_file_contains(self, relative_path: str, *needles: str) -> None:
         content = (ROOT / relative_path).read_text(encoding="utf-8")
         for needle in needles:
             self.assertIn(needle, content, f"{relative_path} lacks {needle!r}")
 
-    def test_authoritative_state_machine_defines_scope_timing_and_evidence(self) -> None:
+    def test_authoritative_state_machine_defines_package_timing_and_entry_owners(self) -> None:
         self.assert_file_contains(
             ".agents/skills/run-knowledge-video/references/workflow-state-machine.md",
-            "ian-full-frame-mask-sweep-v1",
-            "`visual_generation_route: ian-handdrawn-ppt`",
-            "leverage-video/src/shared/full-frame-mask-sweep",
-            "duration_in_frames <= round(fps × 3)",
-            "sweep_frames = duration_in_frames - round(fps × 3)",
-            "hold_frames = round(fps × 3)",
-            "does not apply to any non-Ian visual",
-            "shot duration rather than the full-composition duration",
+            "ian-knowledge-video-layered-scene-v1",
+            "ian-layered-scene-plan-v1",
+            "meaningful_change_events",
+            "event.at_frame - shot_start_frame",
+            "transparent semantic layers",
+            "eight-frame fade",
+            "spatially static",
+            "`OPEN-00 → S01`",
+            "approved incoming `scene-transition-v3`",
+            "completed-history evidence only",
         )
 
-    def test_remotion_contract_requires_the_shared_component_only_for_ian(self) -> None:
+    def test_remotion_contract_consumes_layers_and_forbids_raster_motion(self) -> None:
         self.assert_file_contains(
             ".agents/skills/assemble-video-master/references/remotion-assembly-and-render.md",
-            "ian-full-frame-mask-sweep-v1",
+            "`IanLayeredScene`",
+            "`qa_contract.ian_layered_scene_packages`",
+            "fixed at `left: 0`, `top: 0`, scale 1, and rotation 0",
+            "linear 0→1 over exactly eight local frames",
             "`FullFrameMaskSweep`",
-            "leverage-video/src/shared/full-frame-mask-sweep",
-            "must use",
-            "Ink `GraphicScene` and historical `DoodleScene` never import or consume `FullFrameMaskSweep`",
-            "exactly 3 seconds",
-            "explicit exception to the general 2.5-second maximum continuous hold",
+            "scene and layer translation, scaling, rotation",
+            "approved incoming `scene-transition-v3`",
         )
 
-    def test_assembly_entry_and_storyboard_contract_route_the_effect(self) -> None:
+    def test_assembly_and_storyboard_require_exact_layer_plan(self) -> None:
         self.assert_file_contains(
             ".agents/skills/assemble-video-master/SKILL.md",
-            "ian-full-frame-mask-sweep-v1",
+            "ian-knowledge-video-layered-scene-v1",
+            "IanLayeredScene",
             "visual_generation_route: ian-handdrawn-ppt",
+            "exactly eight frames",
         )
         self.assert_file_contains(
             ".agents/skills/build-video-storyboard/references/storyboard-contract.md",
-            "ian-full-frame-mask-sweep-v1",
-            "derived from the final shot duration",
-            "not a selectable motion alternative",
+            "Ian 分层场景计划",
+            "ian-layered-scene-plan-v1",
+            "contiguous exact UTF-8 byte ranges",
+            "meaningful_change_events",
+            "Only layer opacity may change",
+            "completed-history evidence only",
         )
 
-    def test_summary_exposes_the_ian_only_rule(self) -> None:
+    def test_renderer_changes_only_layer_opacity(self) -> None:
+        renderer = (
+            ROOT / "leverage-video/src/shared/video-scenes/IanLayeredScene.tsx"
+        ).read_text(encoding="utf-8")
+        self.assertIn("layer.entry_frame", renderer)
+        self.assertIn("opacity", renderer)
+        for forbidden in (
+            "transform:",
+            "translate(",
+            "scale(",
+            "rotate(",
+            "maskImage",
+            "clipPath",
+            "FullFrameMaskSweep",
+        ):
+            self.assertNotIn(forbidden, renderer)
+
+    def test_summary_exposes_static_layered_rule_and_legacy_boundary(self) -> None:
         self.assert_file_contains(
             ".agents/skills/run-knowledge-video/references/whole-workflow-summary.md",
-            "ian-full-frame-mask-sweep-v1",
-            "只适用于 `visual_generation_route: ian-handdrawn-ppt`",
-            "大于 3 秒",
-            "小于或等于 3 秒",
-            "非 Ian 分镜不自动使用",
+            "ian-knowledge-video-layered-scene-v1",
+            "静止背景",
+            "全画布透明 PNG 层",
+            "固定 8 帧透明度渐显",
+            "不平移、不缩放、不旋转",
+            "仅供已完成历史项目只读",
         )
 
 

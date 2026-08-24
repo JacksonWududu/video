@@ -1,0 +1,16 @@
+# White-cat generation accuracy binding
+
+For every white-cat master or action image, read and follow both canonical files before prompting or QA:
+
+- `/Users/jackson/Documents/Codex/character-library/white-cat/v2/generation-constraints.json`
+- `/Users/jackson/Documents/Codex/character-library/white-cat/v2/satchel-generation-accuracy-v1.md`
+
+Bind their current SHA-256 values in generation QA. Use the machine P2 `prompt_text`, fill all five `prompt_instance_required_fields`, and record the directional trace fields required by `record-generated-imagegen-strict.py`.
+
+For every new or explicitly rebuilt white-cat master, action image, strict revision, and final normalized `xuan-paper-diorama` PNG, validate `identity_qa.anatomy_evidence` as `white-cat-anatomy-qa-v2`. The machine schema is `leverage-video/src/shared/visual-assets/schemas/white-cat-anatomy-qa-v2.schema.json`. Evidence must bind the exact reviewed source path, SHA-256, and decoded dimensions; its numbered limb map must be a different path and different bytes, be a complete decodable PNG of the same dimensions, bind the source SHA-256, and enumerate exactly `F1/F2/H1/H2` in both directions and in `numbered_limb_map_limb_ids`.
+
+QA and approval are separate state transitions. A P0/P1/P2 pass may move a manual item only to its pending user/batch review boundary, or a one-click item to `qa_passed_pending_final_review`; it never writes `approved`. The episode workspace validator requires current v2 evidence for every active white-cat `imagegen` or `xuan-paper-diorama` item in `awaiting_user_approval`, `awaiting_batch_qa`, `qa_passed_pending_batch_review`, or `qa_passed_pending_final_review`, including the current numbered-map bytes. Manual strict, hybrid, one-click final approval, and asset lock reread that map; one-click presentation binds its path/hash/source hash/limb IDs into the exact review payload. It permits v1 only for already `approved` historical ImageGen items whose exact source, QA, presented/approved checksums, decision message, and decision time remain valid. Revision, replacement, reapproval, or explicit rebuild returns the item to v2; no shot ID or date grants an exemption.
+
+Workflow rule: a P0/P1/P2-failed output is evidence only, never the next edit target. Return to the last fully valid source; after one failed topology repair from that base, switch to a readable three-quarter composition and regenerate from canonical references.
+
+After every failed white-cat ImageGen QA, call `leverage-video/src/shared/visual-assets/record-white-cat-imagegen-qa-failure.py` with the exact prompt, output, reason, and timestamp. For an anatomy or satchel failure, begin `reason` with the most specific stable P0/P2 code, for example `P0_AMBIGUOUS_TRACE: ...` or `P2_SATCHEL_TOPOLOGY: ...`; never record only a generic identity failure. The third failed generation for the same logical asset is a hard stop: pause the queue, forbid every automatic retry—including a new prompt, base, composition, or version—and tell the user to take over. Resume only after explicit user direction and a user-supplied or user-directed replacement path.

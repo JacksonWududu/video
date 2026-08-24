@@ -63,10 +63,26 @@ export type ActionStateScheduleV3 = {
   };
 };
 
-export type ActionStateSchedule = ActionStateScheduleV2 | ActionStateScheduleV3;
+export type ActionStateScheduleV4 = Omit<ActionStateScheduleV3, 'contract_version' | 'extended_family_approval'> & {
+  readonly contract_version: 'action-state-schedule-v4';
+  readonly density_mode: 'standard' | 'rich';
+  readonly visual_density_selection_sha256: string;
+  readonly background_asset_id: string | null;
+  readonly density_fallback: null | {
+    readonly target_minimum: number;
+    readonly actual_count: number;
+    readonly maximum_feasible_count: number;
+    readonly reason_code: 'insufficient_semantic_beats' | 'insufficient_clean_hold_capacity';
+    readonly rationale: string;
+  };
+  readonly quantity_rationale: string | null;
+};
+
+export type ActionStateSchedule = ActionStateScheduleV2 | ActionStateScheduleV3 | ActionStateScheduleV4;
 
 export const ACTION_STATE_SCHEDULE_VERSION: 'action-state-schedule-v2';
 export const ACTION_STATE_SCHEDULE_V3_VERSION: 'action-state-schedule-v3';
+export const ACTION_STATE_SCHEDULE_V4_VERSION: 'action-state-schedule-v4';
 export const ACTION_STATE_FPS: 30;
 export const MIN_MULTI_STATE_HOLD_FRAMES: 18;
 export const MAX_STATE_HOLD_FRAMES: 75;
@@ -90,7 +106,7 @@ export function calculateActionStateCadenceAdvisory(totalFrames: number): {
   enforcement: 'advisory-only';
 };
 
-export function buildActionStatePlanSha256(schedule: ActionStateScheduleV3): string;
+export function buildActionStatePlanSha256(schedule: ActionStateScheduleV3 | ActionStateScheduleV4): string;
 
 export function buildActionStateScheduleV3(input: {
   totalFrames: number;
@@ -111,18 +127,25 @@ export function retimeActionStateScheduleV3(input: {
   fps?: 30;
 }): ActionStateScheduleV3;
 
+export function buildActionStateScheduleV4(input: Readonly<Record<string, unknown>>): ActionStateScheduleV4;
+export function retimeActionStateScheduleV4(input: Readonly<Record<string, unknown>>): ActionStateScheduleV4;
+
 export function validateActionStateSchedule(
   schedule: unknown,
   context: {
     totalFrames: number;
     fps?: number;
+    densityMode?: 'standard' | 'rich' | null;
+    densitySelectionSha256?: string | null;
     revoiceLock?: {
       state_ids: readonly string[];
       state_plan_sha256?: string;
+      density_mode?: 'standard' | 'rich';
+      visual_density_selection_sha256?: string;
     } | null;
   },
 ): {
   result: 'pass';
-  contract_version: 'action-state-schedule-v2' | 'action-state-schedule-v3';
+  contract_version: 'action-state-schedule-v2' | 'action-state-schedule-v3' | 'action-state-schedule-v4';
   state_count_total: number;
 };

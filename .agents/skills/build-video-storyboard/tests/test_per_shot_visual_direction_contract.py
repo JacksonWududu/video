@@ -21,23 +21,24 @@ class PerShotVisualDirectionContractTest(unittest.TestCase):
             "visual-direction-review-form-v3",
             "editable non-empty 画面",
             "visual-direction-form-submission-v3",
-            "storyboard_construction → awaiting_visual_direction_review → visual_direction_review_approved → awaiting_transition_review → transition_review_approved → storyboard_qa_passed → awaiting_storyboard_review",
-            "before Per-Boundary Transition Review",
+            "storyboard_construction → awaiting_visual_direction_review → visual_direction_review_approved → awaiting_visible_text_review → visible_text_review_approved → awaiting_transition_review → transition_review_approved → storyboard_qa_passed → awaiting_storyboard_review",
+            "before a transition proposal",
             "`确认全部推荐`",
-            "`默认`, `继续`, `你看着办`, general authorization, or Storyboard Review as a selection",
+            "Neither path approves the visible-text candidates",
         )
 
     def test_skill_requires_explicit_v3_visual_text_and_route_choices(self) -> None:
         self.assert_file_contains(
             ".agents/skills/build-video-storyboard/SKILL.md",
-            "Record each approved row's exact choice text/time/status",
+            "visible-text candidate tuple",
+            "visible-text-batch-review-v1",
             "comic treatment remains an `imagegen` treatment",
             "`comic-imagegen` is retired",
             "`imagegen`",
             "`xuan-paper-diorama` as an explicit, non-default narrative alternative",
             "`ian-handdrawn-ppt` as the structured default",
             "Never recommend Whiteboard or local video by default",
-            "Do not enter Transition Review, Storyboard Review, or visual production",
+            "do not enter Transition Review, Storyboard Review, or visual production",
         )
 
     def test_summary_requires_approved_seven_column_direction_fields(self) -> None:

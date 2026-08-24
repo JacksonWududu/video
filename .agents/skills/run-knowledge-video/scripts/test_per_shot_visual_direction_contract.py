@@ -18,10 +18,10 @@ class PerShotVisualDirectionContractTest(unittest.TestCase):
         self.assert_file_contains(
             ".agents/skills/run-knowledge-video/SKILL.md",
             "Per-Shot Visual Direction Review",
-            "before transition review",
+            "before the visible-text batch gate and transition review",
             "per-shot-visual-direction-review-v3",
-            "`确认全部推荐`",
-            "Never treat `默认`, `继续`, `你看着办`, general authorization, or Storyboard Review",
+            "visible-text-batch-review-v1",
+            "Only after phase `visible_text_review_approved`",
         )
 
     def test_v3_review_catalogs_active_routes_and_retires_comic_and_doodle(self) -> None:
@@ -56,7 +56,7 @@ class PerShotVisualDirectionContractTest(unittest.TestCase):
             "Batch edits affect only compatible rows",
             "whiteboard-clean-progressive",
             "preserves a compatible current treatment",
-            "Reopen only the changed rows and their adjacent ordinary boundaries",
+            "Reopen only the changed direction rows and their adjacent ordinary boundaries",
             "compact_after_merge",
             "all current active rows",
         )
@@ -116,7 +116,8 @@ class PerShotVisualDirectionContractTest(unittest.TestCase):
         self.assert_file_contains(
             ".agents/skills/run-knowledge-video/references/whole-workflow-summary.md",
             "Per-Shot Visual Direction Review",
-            "`comic-imagegen` 已退出新建/修改选择",
+            "Complete Visible Text Batch Review",
+            "`comic-imagegen` 仅保留历史只读解析",
         )
         self.assert_file_contains(
             ".agents/skills/run-knowledge-video/agents/openai.yaml",

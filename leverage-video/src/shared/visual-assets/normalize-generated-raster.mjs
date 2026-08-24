@@ -28,14 +28,26 @@ export const normalizeGeneratedRaster = async ({sourceInput, sourceArchiveRelati
   const sourceArchive = resolveOutput(sourceArchiveRelative, 'source archive');
   const output = resolveOutput(outputRelative, 'normalized output');
   const evidence = resolveOutput(evidenceRelative, 'normalization evidence');
-  for (const target of [sourceArchive, output, evidence]) {
+  for (const target of [output, evidence]) {
     if (fs.existsSync(target)) throw new Error(`refusing to overwrite: ${target}`);
   }
   const sourceBytes = fs.readFileSync(sourceInput);
-  writeExclusive(sourceArchive, sourceBytes);
+  if (fs.existsSync(sourceArchive)) {
+    const archiveStat = fs.lstatSync(sourceArchive);
+    if (!archiveStat.isFile() || archiveStat.isSymbolicLink()) {
+      throw new Error(`existing source archive is not a regular non-symlink file: ${sourceArchive}`);
+    }
+    const archivedBytes = fs.readFileSync(sourceArchive);
+    if (!archivedBytes.equals(sourceBytes)) {
+      throw new Error(`existing source archive bytes do not match source input: ${sourceArchive}`);
+    }
+  } else {
+    writeExclusive(sourceArchive, sourceBytes);
+  }
   const sourceMetadata = await sharp(sourceBytes).metadata();
   const sourceRaster = assertLandscape16By9(sourceMetadata.width, sourceMetadata.height);
   const geometry = coverGeometry(sourceRaster.width, sourceRaster.height);
+  fs.mkdirSync(path.dirname(output), {recursive: true});
   await sharp(sourceBytes, {failOn: 'error'})
     .resize(1920, 1080, {fit: 'cover', position: 'centre', kernel: sharp.kernel.lanczos3})
     .png({compressionLevel: 9, adaptiveFiltering: false, palette: false})

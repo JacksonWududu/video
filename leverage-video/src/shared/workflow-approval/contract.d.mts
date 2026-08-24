@@ -1,0 +1,22 @@
+export const VISUAL_DENSITY_SELECTION_VERSION: 'visual-density-selection-v1';
+export const WORKFLOW_APPROVAL_MODE_VERSION: 'workflow-approval-mode-v1';
+export const ONE_CLICK_APPROVAL_POLICY_VERSION: 'one-click-approval-policy-v1';
+export const ONE_CLICK_VISUAL_REVIEW_VERSION: 'visual-asset-review-v3';
+export const ONE_CLICK_FINAL_REVIEW_MODE: 'one_click_final_review_v1';
+export const ONE_CLICK_FINAL_REVIEW_PHASE: 'awaiting_precomposition_visual_review';
+export const CAPTION_CHOICE_PHASE: 'awaiting_caption_delivery_choice';
+
+export function buildVisualDensitySelectionSha256(selection: unknown): string;
+export function validateVisualDensitySelection(selection: unknown, context: unknown): unknown;
+export function buildWorkflowApprovalModeSha256(selection: unknown): string;
+export function validateWorkflowApprovalMode(selection: unknown, context: unknown): unknown;
+export function buildOneClickApprovalPolicySha256(policy: unknown): string;
+export function validateOneClickApprovalPolicy(policy: unknown, bindings: unknown): unknown;
+export function validateApprovalSelectionSequence(value: unknown): unknown;
+export function resolveLegacyDensity(value: unknown): string;
+export function calculateSelectionInvalidation(value: unknown): unknown;
+export function buildOneClickFinalVisualMapSha256(review: unknown): string;
+export function validateOneClickFinalVisualReview(review: unknown, context?: unknown): unknown;
+export function approveOneClickFinalVisualReview(review: unknown, decision: unknown): unknown;
+export function assertOneClickProtectedActionAllowed(state: unknown, action: string): unknown;
+export function validateRevoiceDensityLock(value: unknown): unknown;

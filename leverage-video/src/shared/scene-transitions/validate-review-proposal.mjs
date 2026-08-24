@@ -46,17 +46,22 @@ export const validateEpisodeTransitionReviewProposal = (episodeWorkspace) => {
   const state = JSON.parse(fs.readFileSync(path.join(workspacePath, 'schema/episode-state.json'), 'utf8'));
   const approved = [
     'transition_review_approved',
+    'transition_policy_authorized',
     'storyboard_qa_passed',
     'awaiting_storyboard_review',
     'storyboard_review_approved',
+    'storyboard_policy_authorized',
     'visual_production',
     'awaiting_visual_asset_review',
+    'awaiting_precomposition_visual_review',
     'visual_assets_locked',
     'composition_locked',
     'awaiting_caption_delivery_choice',
     'final_rendering',
     'delivered',
   ].includes(state.current_phase);
+  const oneClick = state.workflow_approval_mode?.approval_mode === 'one_click';
+  const finalizedStatus = oneClick ? 'policy_authorized' : 'approved';
   if (state.workspace_path !== episodeWorkspace
     || (!approved && state.current_phase !== 'awaiting_transition_review')) {
     throw new Error('episode is not at awaiting_transition_review or transition_review_approved');
@@ -68,8 +73,8 @@ export const validateEpisodeTransitionReviewProposal = (episodeWorkspace) => {
   }
   const proposal = JSON.parse(proposalBytes);
   if (proposal.contract_version !== 'per-boundary-transition-review-v1'
-    || proposal.status !== (approved ? 'approved' : 'awaiting_user_selection')
-    || state.transition_review.status !== (approved ? 'approved' : 'awaiting_user_selection')
+    || proposal.status !== (approved ? finalizedStatus : 'awaiting_user_selection')
+    || state.transition_review.status !== (approved ? finalizedStatus : 'awaiting_user_selection')
     || proposal.catalog_version !== SCENE_TRANSITION_CATALOG_VERSION
     || proposal.fps !== 30
     || proposal.ordinary_boundary_count !== proposal.rows?.length
@@ -124,10 +129,11 @@ export const validateEpisodeTransitionReviewProposal = (episodeWorkspace) => {
     throw new Error('transition review visual-direction checksum is stale');
   }
   const review = JSON.parse(reviewBytes);
-  if (review.status !== 'approved'
+  const directionStatus = oneClick ? 'policy_authorized' : 'approved';
+  if (review.status !== directionStatus
     || review.presented_map_sha256 !== proposal.visual_direction_review.presented_map_sha256
-    || review.rows.some((row) => row.user_selection?.status !== 'approved')) {
-    throw new Error('transition review lacks approved visual-direction evidence');
+    || review.rows.some((row) => row.user_selection?.status !== directionStatus)) {
+    throw new Error('transition review lacks authorized visual-direction evidence');
   }
   const overrideByBoundary = new Map();
   const overrideBinding = proposal.user_requested_transition_overrides;
@@ -195,8 +201,8 @@ export const validateEpisodeTransitionReviewProposal = (episodeWorkspace) => {
     }
     const rowSelectionStatus = row.user_selection?.status;
     if (row.renderer !== RENDERER
-      || !['pending', 'approved'].includes(rowSelectionStatus)
-      || (approved && rowSelectionStatus !== 'approved')
+      || !['pending', 'approved', 'policy_authorized'].includes(rowSelectionStatus)
+      || (approved && rowSelectionStatus !== finalizedStatus)
       || (!approved && refreshLineage === null && rowSelectionStatus !== 'pending')) {
       throw new Error(`transition proposal row status or renderer is invalid: ${row.source_shot_id}`);
     }
@@ -240,7 +246,7 @@ export const validateEpisodeTransitionReviewProposal = (episodeWorkspace) => {
   const approvedBoundaryIds = [];
   proposal.rows.forEach((row, index) => {
     const boundaryId = `${row.source_shot_id}->${row.next_shot_id}`;
-    if (row.user_selection.status === 'approved') {
+    if (['approved', 'policy_authorized'].includes(row.user_selection.status)) {
       validateUserApprovedTransition(row, {
         fps: proposal.fps,
         sourceShotId: row.source_shot_id,

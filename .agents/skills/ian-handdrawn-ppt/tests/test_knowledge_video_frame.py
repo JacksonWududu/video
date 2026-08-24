@@ -91,6 +91,56 @@ class IanKnowledgeVideoFrameTests(unittest.TestCase):
     def validate(self, root: Path, manifest: dict):
         return CONTRACT.validate_manifest(manifest, episode_workspace=root, repo_root=REPO)
 
+    def policy_authorize(self, root: Path, manifest: dict) -> str:
+        policy_sha = "f" * 64
+        authorized_at = "2026-08-24T10:00:00+08:00"
+        review_path = root / "schema" / "per-shot-visual-direction-review-v3.json"
+        review = json.loads(review_path.read_text(encoding="utf-8"))
+        review["status"] = "policy_authorized"
+        review["policy_authorization"] = {
+            "policy_sha256": policy_sha,
+            "authorized_at": authorized_at,
+            "user_has_reviewed_specific_map": False,
+            "presented_map_sha256": review["presented_map_sha256"],
+        }
+        selection = review["rows"][0]["user_selection"]
+        selection.update({
+            "status": "policy_authorized",
+            "policy_sha256": policy_sha,
+            "deterministic_recommendation_selected": True,
+            "user_has_reviewed_specific_map": False,
+            "exact_message": None,
+            "decided_at": None,
+            "authorized_at": authorized_at,
+        })
+        review_path.write_text(json.dumps(review, ensure_ascii=False), encoding="utf-8")
+        review_sha = hashlib.sha256(review_path.read_bytes()).hexdigest()
+        manifest["visual_direction_review"]["sha256"] = review_sha
+        state = {
+            "workflow_approval_mode": {"approval_mode": "one_click"},
+            "one_click_approval_policy": {
+                "contract_version": "one-click-approval-policy-v1",
+                "policy_sha256": policy_sha,
+                "preauthorizations": {
+                    "deterministic_visual_direction_recommendations": True,
+                    "continue_during_visual_production": True,
+                },
+                "user_has_reviewed_specific_maps": False,
+            },
+            "visual_direction_review": {
+                "status": "policy_authorized",
+                "path": manifest["visual_direction_review"]["path"],
+                "checksum_sha256": review_sha,
+                "presented_map_sha256": review["presented_map_sha256"],
+                "policy_sha256": policy_sha,
+                "user_has_reviewed_specific_map": False,
+            },
+        }
+        (root / "schema" / "episode-state.json").write_text(
+            json.dumps(state, ensure_ascii=False), encoding="utf-8"
+        )
+        return policy_sha
+
     def test_accepts_one_text_free_frame(self):
         temporary, root, manifest = self.fixture()
         with temporary:
@@ -104,6 +154,23 @@ class IanKnowledgeVideoFrameTests(unittest.TestCase):
             changed["verified_visible_text"] = ["因果。"]
             with self.assertRaisesRegex(ValueError, "exact approved Chinese"):
                 self.validate(root, changed)
+
+    def test_accepts_policy_authorized_frame_when_current_and_policy_bound(self):
+        temporary, root, manifest = self.fixture()
+        with temporary:
+            self.policy_authorize(root, manifest)
+            self.assertEqual(self.validate(root, manifest)["result"], "pass")
+
+    def test_rejects_policy_authorized_frame_with_stale_state_policy(self):
+        temporary, root, manifest = self.fixture()
+        with temporary:
+            self.policy_authorize(root, manifest)
+            state_path = root / "schema" / "episode-state.json"
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+            state["one_click_approval_policy"]["policy_sha256"] = "b" * 64
+            state_path.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "policy"):
+                self.validate(root, manifest)
 
     def test_rejects_page_shell_multi_output_and_stale_review(self):
         temporary, root, manifest = self.fixture()

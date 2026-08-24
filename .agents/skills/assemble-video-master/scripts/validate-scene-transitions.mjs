@@ -15,13 +15,21 @@ import {
 } from '../../../../leverage-video/src/shared/intra-shot-transitions/contract.mjs';
 import {
   ACTION_STATE_SCHEDULE_V3_VERSION,
+  ACTION_STATE_SCHEDULE_V4_VERSION,
   validateActionStateSchedule,
 } from '../../../../leverage-video/src/shared/action-state-schedule/contract.mjs';
 import {resolveRouteVisibleTextPolicy} from '../../../../leverage-video/src/shared/visual-generation-routes/contract.mjs';
+import {
+  IAN_LAYERED_SCENE_PACKAGE_VERSION,
+  IAN_LAYERED_SCENE_RENDERER_VERSION,
+  IAN_LAYER_ENTRY_DURATION_FRAMES,
+  IAN_LAYER_ENTRY_TRANSITION_VERSION,
+} from '../../../../leverage-video/src/shared/ian-layered-scene/contract.mjs';
 
 const LEGACY_ALLOWED_KINDS = new Set(TRANSITION_KINDS);
 const COVER_SOURCE = '/Users/jackson/Desktop/video-edit/video-resource/cover.png';
 const SHA256 = /^[a-f0-9]{64}$/;
+const IAN_ROUTE = 'ian-handdrawn-ppt';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPOSITORY_ROOT = path.resolve(HERE, '../../../..');
 
@@ -34,10 +42,57 @@ const expandSharedRendererSource = (source) => {
     fs.readFileSync(path.join(REPOSITORY_ROOT, 'leverage-video/src/shared/video-scenes/ComicScene.tsx'), 'utf8'),
     fs.readFileSync(path.join(REPOSITORY_ROOT, 'leverage-video/src/shared/video-scenes/NarrativeScene.tsx'), 'utf8'),
     fs.readFileSync(path.join(REPOSITORY_ROOT, 'leverage-video/src/shared/video-scenes/GraphicScene.tsx'), 'utf8'),
+    fs.readFileSync(path.join(REPOSITORY_ROOT, 'leverage-video/src/shared/video-scenes/IanLayeredScene.tsx'), 'utf8'),
     fs.readFileSync(path.join(REPOSITORY_ROOT, 'leverage-video/src/shared/video-scenes/DoodleScene.tsx'), 'utf8'),
     fs.readFileSync(path.join(REPOSITORY_ROOT, 'leverage-video/src/shared/video-scenes/WhiteboardScene.tsx'), 'utf8'),
     fs.readFileSync(path.join(REPOSITORY_ROOT, 'leverage-video/src/shared/video-scenes/LocalVideoScene.tsx'), 'utf8'),
   ].join('\n');
+};
+
+const validateIanLayeredSceneCoverage = ({evidence, scenes}) => {
+  const expectedShotIds = scenes
+    .filter((scene) => scene.visual_generation_route === IAN_ROUTE)
+    .map((scene) => scene.shot_id);
+  if (evidence?.contract_version !== 'ian-layered-scene-consumption-evidence-v1'
+    || evidence?.result !== 'pass'
+    || JSON.stringify(evidence?.shot_ids) !== JSON.stringify(expectedShotIds)
+    || !Array.isArray(evidence?.records)
+    || JSON.stringify(evidence.records.map((record) => record?.shot_id))
+      !== JSON.stringify(expectedShotIds)) {
+    throw new Error('v3 assembly lacks complete Ian layered-scene package evidence');
+  }
+  const sceneByShotId = new Map(scenes.map((scene) => [scene.shot_id, scene]));
+  for (const record of evidence.records) {
+    const scene = sceneByShotId.get(record.shot_id);
+    const binding = scene?.ian_layered_scene;
+    const packageValue = record.package;
+    if (binding?.contract_version !== IAN_LAYERED_SCENE_RENDERER_VERSION
+      || binding.package_contract_version !== IAN_LAYERED_SCENE_PACKAGE_VERSION
+      || packageValue?.contract_version !== IAN_LAYERED_SCENE_PACKAGE_VERSION
+      || JSON.stringify(binding.package_manifest) !== JSON.stringify(record.package_manifest)
+      || binding.scene_plan_sha256 !== packageValue.scene_plan_sha256
+      || binding.layer_entry_transition?.contract_version !== IAN_LAYER_ENTRY_TRANSITION_VERSION
+      || binding.layer_entry_transition?.duration_frames !== IAN_LAYER_ENTRY_DURATION_FRAMES
+      || binding.layer_entry_transition?.easing !== 'linear'
+      || binding.motion_policy?.scene_transform !== 'forbidden'
+      || binding.motion_policy?.layer_transform !== 'forbidden'
+      || binding.motion_policy?.mask_reveal !== 'forbidden'
+      || binding.motion_policy?.internal_cut !== 'forbidden'
+      || binding.motion_policy?.opacity_animation !== IAN_LAYER_ENTRY_TRANSITION_VERSION
+      || !Array.isArray(binding.layers)
+      || binding.layers.length !== packageValue.layers?.length
+      || binding.layers.some((layer, index) => (
+        layer.layer_id !== packageValue.layers[index].layer_id
+        || layer.checksum_sha256 !== packageValue.layers[index].checksum_sha256
+        || layer.entry_frame !== packageValue.layers[index].entry_frame
+      ))) {
+      throw new Error(`${record.shot_id} Ian layered-scene binding is stale or permits motion`);
+    }
+  }
+  return {
+    contract_version: IAN_LAYERED_SCENE_RENDERER_VERSION,
+    shot_ids: expectedShotIds,
+  };
 };
 
 const validateCoverOnlyOpening = ({plan, source}) => {
@@ -170,6 +225,7 @@ export const validateSceneTransitions = ({plan, source}) => {
   if (!Array.isArray(modifiedShotIds)) {
     throw new Error('assembly plan lacks visual direction artifact policy evidence');
   }
+  let ianLayeredSceneValidation = null;
   if (sceneRoutingContract === 'explicit-visual-generation-route-v3') {
     if (visualDirectionArtifactPolicy?.result !== 'pass'
       || visualDirectionArtifactPolicy?.artifact_mode !== 'current_v3'
@@ -177,13 +233,26 @@ export const validateSceneTransitions = ({plan, source}) => {
       throw new Error('new or modified assembly requires current_v3 visual direction evidence');
     }
     if (plan?.qa_contract?.storyboard_visual_rhythm?.result !== 'pass'
-      || plan.qa_contract.storyboard_visual_rhythm?.contract_version
-        !== 'storyboard-visual-rhythm-v1') {
+      || !['storyboard-visual-rhythm-v1', 'storyboard-visual-rhythm-v2'].includes(
+        plan.qa_contract.storyboard_visual_rhythm?.contract_version,
+      )) {
       throw new Error('v3 assembly lacks approved storyboard visual rhythm evidence');
+    }
+    if (plan.qa_contract.storyboard_visual_rhythm.contract_version === 'storyboard-visual-rhythm-v2'
+      && (plan.qa_contract.workflow_approval?.result !== 'pass'
+        || !['manual', 'one_click'].includes(plan.qa_contract.workflow_approval?.approval_mode))) {
+      throw new Error('v2 rhythm assembly lacks valid workflow approval selection evidence');
     }
     if (plan?.qa_contract?.intra_shot_transition_contract !== INTRA_SHOT_TRANSITION_VERSION
       || !/IntraShotImageSequence/.test(source)) {
       throw new Error('v3 assembly is not bound to the generic intra-shot transition renderer');
+    }
+    ianLayeredSceneValidation = validateIanLayeredSceneCoverage({
+      evidence: plan?.qa_contract?.ian_layered_scene_packages,
+      scenes: plan.scenes,
+    });
+    if (/FullFrameMaskSweep|full-frame-mask-sweep/.test(source)) {
+      throw new Error('Ian renderer still consumes forbidden full-frame mask sweep code');
     }
   } else if (visualDirectionArtifactPolicy?.result !== 'pass'
     || visualDirectionArtifactPolicy?.artifact_mode !== 'legacy_read_only'
@@ -264,27 +333,60 @@ export const validateSceneTransitions = ({plan, source}) => {
       if (!['layered', 'stateful', 'hero_pose'].includes(scene.motion_tier)) {
         throw new Error(`scene lacks a locked v3 motion tier: ${scene.shot_id}`);
       }
+      if (isIan) {
+        const layered = scene.ian_layered_scene;
+        if (scene.internal_motion_contract != null || scene.internal_motion != null) {
+          throw new Error(`Ian whole-raster motion is retired: ${scene.shot_id}`);
+        }
+        if (scene.scene_type !== 'ian-layered'
+          || layered?.contract_version !== IAN_LAYERED_SCENE_RENDERER_VERSION
+          || !Array.isArray(layered.layers)
+          || layered.layers.length < 1
+          || images.length !== 1
+          || images[0].from !== 0
+          || images[0].duration_in_frames !== scene.duration_frames
+          || layered.final_composite?.asset !== images[0].asset
+          || layered.final_composite?.checksum_sha256 !== images[0].checksum_sha256) {
+          throw new Error(`Ian scene lacks its static layered package: ${scene.shot_id}`);
+        }
+      }
+      if (!isIan && scene.ian_layered_scene != null) {
+        throw new Error(`non-Ian scene carries an Ian layered-scene package: ${scene.shot_id}`);
+      }
       if (!isWhiteboard && !isLocalVideo && scene.motion_tier === 'layered' && images.length !== 1) {
         throw new Error(`layered scene must carry one master raster: ${scene.shot_id}`);
       }
-      if (scene.motion_tier === 'stateful' && (images.length < 2 || images.length > 4)) {
-        throw new Error(`stateful scene must carry 2–4 complete rasters: ${scene.shot_id}`);
+      const rich = scene.density_mode === 'rich';
+      const rhythmV2 = plan.qa_contract.storyboard_visual_rhythm?.contract_version
+        === 'storyboard-visual-rhythm-v2';
+      if (rhythmV2 && !['standard', 'rich'].includes(scene.density_mode)) {
+        throw new Error(`v2 rhythm scene lacks a valid density binding: ${scene.shot_id}`);
+      }
+      const statefulMaximum = rich ? 6 : 4;
+      if (scene.motion_tier === 'stateful' && (images.length < 2 || images.length > statefulMaximum)) {
+        throw new Error(`stateful scene must carry 2–${statefulMaximum} complete rasters: ${scene.shot_id}`);
       }
       if (scene.motion_tier === 'hero_pose') {
-        if (images.length < 4 || images.length > 6
+        const poseMaximum = rich ? 13 : 6;
+        if (images.length < 4 || images.length > poseMaximum
           || !scene.hero_pose_background?.asset
           || !SHA256.test(scene.hero_pose_background?.checksum_sha256 ?? '')
           || !/backgroundSrc/.test(source)) {
-          throw new Error(`hero_pose scene lacks its locked background and 4–6 poses: ${scene.shot_id}`);
+          throw new Error(`hero_pose scene lacks its locked background and 4–${poseMaximum} poses: ${scene.shot_id}`);
         }
       }
       if (['stateful', 'hero_pose'].includes(scene.motion_tier)) {
-        if (scene.action_state_schedule?.contract_version !== ACTION_STATE_SCHEDULE_V3_VERSION) {
-          throw new Error(`stateful or hero scene lacks action-state-schedule-v3: ${scene.shot_id}`);
+        const expectedScheduleVersion = rhythmV2
+          ? ACTION_STATE_SCHEDULE_V4_VERSION
+          : ACTION_STATE_SCHEDULE_V3_VERSION;
+        if (scene.action_state_schedule?.contract_version !== expectedScheduleVersion) {
+          throw new Error(`stateful or hero scene lacks ${expectedScheduleVersion}: ${scene.shot_id}`);
         }
         validateActionStateSchedule(scene.action_state_schedule, {
           totalFrames: scene.duration_frames,
           fps,
+          densityMode: rhythmV2 ? scene.density_mode : null,
+          densitySelectionSha256: rhythmV2 ? scene.visual_density_selection_sha256 : null,
         });
         if (scene.action_state_schedule.occurrences.length !== images.length
           || scene.action_state_schedule.occurrences.some((occurrence, index) => (
@@ -353,11 +455,17 @@ export const validateSceneTransitions = ({plan, source}) => {
         throw new Error(`whiteboard timing segments do not cover the scene: ${scene.shot_id}`);
       }
     }
-    if ((isIan || isInk) && scene.scene_type !== 'graphic') {
-      throw new Error(`structured raster is not routed to graphic: ${scene.shot_id}`);
+    if (isIan && scene.scene_type !== 'ian-layered') {
+      throw new Error(`Ian scene is not routed to IanLayeredScene: ${scene.shot_id}`);
     }
-    if (scene.scene_type === 'graphic' && !isIan && !isInk) {
+    if (isInk && scene.scene_type !== 'graphic') {
+      throw new Error(`Ink structured raster is not routed to GraphicScene: ${scene.shot_id}`);
+    }
+    if (scene.scene_type === 'graphic' && !isInk) {
       throw new Error(`graphic scene lacks an active structured generation marker: ${scene.shot_id}`);
+    }
+    if (scene.scene_type === 'ian-layered' && !isIan) {
+      throw new Error(`Ian layered scene lacks the Ian generation marker: ${scene.shot_id}`);
     }
     if ((isImagegen || isXuan) && !['narrative', 'gen-think'].includes(scene.scene_type)) {
       throw new Error(`imagegen raster is not routed to narrative: ${scene.shot_id}`);
@@ -478,9 +586,20 @@ export const validateSceneTransitions = ({plan, source}) => {
     && !/visualGenerationRoute=\{scene\.visual_generation_route\}/.test(source)) {
     throw new Error('composition does not bind visual generation routes to scene renderers');
   }
-  if (plan.scenes.some((scene) => ['ian-handdrawn-ppt', 'ink-doodle-knowledge-card']
-    .includes(scene.visual_generation_route)) && !/<GraphicScene\b/.test(source)) {
+  if (plan.scenes.some((scene) => scene.visual_generation_route === 'ink-doodle-knowledge-card')
+    && !/<GraphicScene\b/.test(source)) {
     throw new Error('composition does not register the shared GraphicScene renderer');
+  }
+  if (plan.scenes.some((scene) => scene.visual_generation_route === IAN_ROUTE)
+    && (!/<IanLayeredScene\b/.test(source)
+      || !/scene=\{scene\.ian_layered_scene!\}/.test(source)
+      || !/<CanvasImage\b/.test(source)
+      || !/useCurrentFrame/.test(source)
+      || !/interpolate/.test(source)
+      || !/layer\.entry_frame/.test(source)
+      || !/opacity/.test(source)
+      || /validateIanSceneMotion|translate3d/.test(source))) {
+    throw new Error('composition does not consume the static Ian layered-scene renderer');
   }
   if (plan.scenes.some((scene) => scene.visual_generation_route === 'comic-imagegen')) {
     if (!/<ComicScene\b/.test(source)
@@ -514,6 +633,9 @@ export const validateSceneTransitions = ({plan, source}) => {
     comic_scene_count: plan.scenes.filter(
       (scene) => scene.visual_generation_route === 'comic-imagegen',
     ).length,
+    ian_layered_scene_contract: sceneRoutingContract === 'explicit-visual-generation-route-v3'
+      ? ianLayeredSceneValidation.contract_version
+      : null,
     opening_contract_version: 'cover-only-v1',
     opening_hard_cut_exceptions: openingExceptions,
   };

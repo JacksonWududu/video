@@ -82,6 +82,12 @@ test('registers v3 action, visual rhythm, generic intra-shot transitions, routin
   const localVideo = registry.modules.find((module) => module.module_id === 'local-video-match');
   assert.equal(localVideo?.path, 'leverage-video/src/shared/local-video-match');
   assert.match(localVideo?.use_when ?? '', /Deferring.*exact source bytes.*exact shot frames/i);
+  const ianLayeredScene = registry.modules.find((module) => module.module_id === 'ian-layered-scene');
+  assert.equal(ianLayeredScene?.path, 'leverage-video/src/shared/ian-layered-scene');
+  assert.match(
+    ianLayeredScene?.use_when ?? '',
+    /static Ian .*transparent-layer scene packages/i,
+  );
 });
 
 test('requires one explicit decision for every registered shared module', () => {
@@ -173,8 +179,10 @@ test('accepts real source imports for mandatory shared modules', () => {
   fs.writeFileSync(sourcePath, [
     "import {buildKnowledgeVideoAssemblyPlan} from '../../shared/assembly-plan/build-assembly-plan.mjs';",
     "import {KnowledgeVideo} from '../../shared/video-scenes';",
+    "import {validateIanLayeredScenePlan} from '../../shared/ian-layered-scene/contract.mjs';",
     'void buildKnowledgeVideoAssemblyPlan;',
     'void KnowledgeVideo;',
+    'void validateIanLayeredScenePlan;',
     '',
   ].join('\n'));
   try {
@@ -194,6 +202,12 @@ test('accepts real source imports for mandatory shared modules', () => {
         path: consumerPath,
         checksum_sha256: sha256File(sourcePath),
         shared_import_marker: 'shared/video-scenes',
+      }],
+      'ian-layered-scene': [{
+        kind: 'source',
+        path: consumerPath,
+        checksum_sha256: sha256File(sourcePath),
+        shared_import_marker: 'shared/ian-layered-scene',
       }],
     };
     for (const item of decision.decisions) item.consumers = consumers[item.module_id] ?? [];
@@ -216,8 +230,10 @@ test('accepts an explicitly authorized legacy migration with an exact current sc
   fs.writeFileSync(sourcePath, [
     "import {buildKnowledgeVideoAssemblyPlan} from '../../shared/assembly-plan/build-assembly-plan.mjs';",
     "import {KnowledgeVideo} from '../../shared/video-scenes';",
+    "import {validateIanLayeredScenePlan} from '../../shared/ian-layered-scene/contract.mjs';",
     'void buildKnowledgeVideoAssemblyPlan;',
     'void KnowledgeVideo;',
+    'void validateIanLayeredScenePlan;',
     '',
   ].join('\n'));
   try {
@@ -237,6 +253,12 @@ test('accepts an explicitly authorized legacy migration with an exact current sc
         path: consumerPath,
         checksum_sha256: sha256File(sourcePath),
         shared_import_marker: 'shared/video-scenes',
+      }],
+      'ian-layered-scene': [{
+        kind: 'source',
+        path: consumerPath,
+        checksum_sha256: sha256File(sourcePath),
+        shared_import_marker: 'shared/ian-layered-scene',
       }],
     };
     for (const item of decision.decisions) item.consumers = consumers[item.module_id] ?? [];
@@ -265,8 +287,10 @@ test('legacy migration and consumption use the same bytewise inventory order', (
   fs.writeFileSync(openingPath, [
     "import {buildKnowledgeVideoAssemblyPlan} from '../../../../shared/assembly-plan/build-assembly-plan.mjs';",
     "import {KnowledgeVideo} from '../../../../shared/video-scenes';",
+    "import {validateIanLayeredScenePlan} from '../../../../shared/ian-layered-scene/contract.mjs';",
     'void buildKnowledgeVideoAssemblyPlan;',
     'void KnowledgeVideo;',
+    'void validateIanLayeredScenePlan;',
     '',
   ].join('\n'));
   fs.writeFileSync(demoPath, 'export const demo = true;\n');
@@ -295,6 +319,14 @@ test('legacy migration and consumption use the same bytewise inventory order', (
           path: consumerPath,
           checksum_sha256: sha256File(openingPath),
           shared_import_marker: 'shared/video-scenes',
+        }];
+      }
+      if (item.module_id === 'ian-layered-scene') {
+        item.consumers = [{
+          kind: 'source',
+          path: consumerPath,
+          checksum_sha256: sha256File(openingPath),
+          shared_import_marker: 'shared/ian-layered-scene',
         }];
       }
     }

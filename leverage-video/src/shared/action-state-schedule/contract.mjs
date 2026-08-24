@@ -16,6 +16,7 @@ import {
 
 export const ACTION_STATE_SCHEDULE_VERSION = 'action-state-schedule-v2';
 export const ACTION_STATE_SCHEDULE_V3_VERSION = 'action-state-schedule-v3';
+export const ACTION_STATE_SCHEDULE_V4_VERSION = 'action-state-schedule-v4';
 export const ACTION_STATE_FPS = 30;
 export const MIN_MULTI_STATE_HOLD_FRAMES = 18;
 export const MAX_STATE_HOLD_FRAMES = 75;
@@ -24,6 +25,11 @@ export const MAX_ACTION_STATE_COUNT = 5;
 export const TERMINAL_HOLD_EXTENSION_POLICY = 'first-shot-visual-inheritance-v1';
 export const ACTION_STATE_V3_MOTION_TIERS = Object.freeze(['stateful', 'hero_pose']);
 export const ACTION_STATE_CADENCE_ADVISORY_VERSION = 'action-state-cadence-advisory-v1';
+export const VISUAL_DENSITY_SELECTION_VERSION = 'visual-density-selection-v1';
+export const DENSITY_FALLBACK_REASON_CODES = Object.freeze([
+  'insufficient_semantic_beats',
+  'insufficient_clean_hold_capacity',
+]);
 
 const SHA256 = /^[a-f0-9]{64}$/;
 
@@ -341,34 +347,55 @@ const requireSha256 = (value, label) => {
   return value;
 };
 
-const v3StatePlanProjection = (schedule) => ({
-  contract_version: ACTION_STATE_SCHEDULE_V3_VERSION,
-  fps: schedule.fps,
-  motion_tier: schedule.motion_tier,
-  state_count_total: schedule.state_count_total,
-  state_count_rationale: schedule.state_count_rationale ?? null,
-  states: schedule.occurrences.map((occurrence) => ({
-    state_id: occurrence.state_id,
-    semantic_state: occurrence.semantic_state,
-    narration_byte_start: occurrence.narration_byte_start,
-    narration_byte_end: occurrence.narration_byte_end,
-    narration_text: occurrence.narration_text,
-  })),
-  intra_shot_transitions: schedule.intra_shot_transitions.map((transition) => ({
-    from_asset_id: transition.from_asset_id,
-    to_asset_id: transition.to_asset_id,
-    from_image_index: transition.from_image_index,
-    to_image_index: transition.to_image_index,
-    kind: transition.kind,
-    duration_seconds: transition.duration_seconds,
-    duration_in_frames: transition.duration_in_frames,
-    renderer: transition.renderer,
-  })),
-});
+const stateProjection = (schedule) => schedule.occurrences.map((occurrence) => ({
+  state_id: occurrence.state_id,
+  semantic_state: occurrence.semantic_state,
+  narration_byte_start: occurrence.narration_byte_start,
+  narration_byte_end: occurrence.narration_byte_end,
+  narration_text: occurrence.narration_text,
+}));
+
+const transitionProjection = (schedule) => schedule.intra_shot_transitions.map((transition) => ({
+  from_asset_id: transition.from_asset_id,
+  to_asset_id: transition.to_asset_id,
+  from_image_index: transition.from_image_index,
+  to_image_index: transition.to_image_index,
+  kind: transition.kind,
+  duration_seconds: transition.duration_seconds,
+  duration_in_frames: transition.duration_in_frames,
+  renderer: transition.renderer,
+}));
+
+const statePlanProjection = (schedule) => schedule.contract_version === ACTION_STATE_SCHEDULE_V4_VERSION
+  ? {
+    contract_version: schedule.contract_version,
+    fps: schedule.fps,
+    motion_tier: schedule.motion_tier,
+    state_count_total: schedule.state_count_total,
+    action_variant_count: schedule.action_variant_count,
+    background_asset_id: schedule.background_asset_id ?? null,
+    density_mode: schedule.density_mode ?? null,
+    visual_density_selection_sha256: schedule.visual_density_selection_sha256 ?? null,
+    density_fallback: schedule.density_fallback ?? null,
+    state_count_rationale: schedule.state_count_rationale ?? null,
+    quantity_rationale: schedule.quantity_rationale ?? null,
+    split_assessment: schedule.split_assessment ?? null,
+    states: stateProjection(schedule),
+    intra_shot_transitions: transitionProjection(schedule),
+  }
+  : {
+    contract_version: ACTION_STATE_SCHEDULE_V3_VERSION,
+    fps: schedule.fps,
+    motion_tier: schedule.motion_tier,
+    state_count_total: schedule.state_count_total,
+    state_count_rationale: schedule.state_count_rationale ?? null,
+    states: stateProjection(schedule),
+    intra_shot_transitions: transitionProjection(schedule),
+  };
 
 export const buildActionStatePlanSha256 = (schedule) => crypto
   .createHash('sha256')
-  .update(JSON.stringify(v3StatePlanProjection(schedule)))
+  .update(JSON.stringify(statePlanProjection(schedule)))
   .digest('hex');
 
 export const calculateActionStateCadenceAdvisory = (totalFrames) => {
@@ -720,12 +747,299 @@ const validateActionStateScheduleV3 = (
   };
 };
 
+const validateDensityFallback = ({motionTier, densityMode, stateCount, fallback}) => {
+  const assetTotal = motionTier === 'hero_pose' ? stateCount + 1 : stateCount;
+  const targetMinimum = motionTier === 'hero_pose' ? 10 : 4;
+  const requiresFallback = densityMode === 'rich' && assetTotal < targetMinimum;
+  if (!requiresFallback) {
+    if (fallback !== null) throw new Error('density_fallback is allowed only below the rich target range');
+    return;
+  }
+  if (!fallback || typeof fallback !== 'object' || Array.isArray(fallback)
+    || fallback.target_minimum !== targetMinimum
+    || fallback.actual_count !== assetTotal
+    || fallback.maximum_feasible_count !== assetTotal
+    || !DENSITY_FALLBACK_REASON_CODES.includes(fallback.reason_code)) {
+    throw new Error('rich density fallback must record target, actual maximum feasible count, and allowed reason code');
+  }
+  requireNonEmptyString(fallback.rationale, 'density_fallback.rationale');
+};
+
+const validateV4Count = (schedule) => {
+  if (!ACTION_STATE_V3_MOTION_TIERS.includes(schedule.motion_tier)) {
+    throw new Error('action-state-schedule-v4 motion_tier must be stateful or hero_pose');
+  }
+  if (!['standard', 'rich'].includes(schedule.density_mode)) {
+    throw new Error('action-state-schedule-v4 density_mode must be standard or rich');
+  }
+  requireSha256(schedule.visual_density_selection_sha256, 'visual_density_selection_sha256');
+  const count = schedule.state_count_total;
+  if (schedule.motion_tier === 'stateful') {
+    const maximum = schedule.density_mode === 'rich' ? 6 : 4;
+    if (!Number.isInteger(count) || count < 2 || count > maximum) {
+      throw new Error(`stateful ${schedule.density_mode} requires 2–${maximum} states`);
+    }
+    if (schedule.density_mode === 'standard' && count === 4) {
+      requireNonEmptyString(schedule.state_count_rationale, 'state_count_rationale');
+    }
+  } else {
+    const maximumPoses = schedule.density_mode === 'rich' ? 13 : 6;
+    if (!Number.isInteger(count) || count < 4 || count > maximumPoses) {
+      throw new Error(`hero_pose ${schedule.density_mode} requires 4–${maximumPoses} poses`);
+    }
+    requireNonEmptyString(schedule.background_asset_id, 'hero_pose background_asset_id');
+    if (schedule.density_mode === 'standard' && count === 6) {
+      if (schedule.split_assessment?.natural_semantic_pause_available !== false) {
+        throw new Error('standard sixth hero pose requires a no-split assessment');
+      }
+      requireNonEmptyString(schedule.split_assessment.rationale, 'split_assessment.rationale');
+    }
+    const assetTotal = count + 1;
+    if (schedule.density_mode === 'rich' && assetTotal >= 13) {
+      if (schedule.split_assessment?.natural_semantic_pause_available !== false) {
+        throw new Error('rich hero total 13–14 requires a no-split assessment');
+      }
+      requireNonEmptyString(schedule.split_assessment.rationale, 'split_assessment.rationale');
+      requireNonEmptyString(schedule.quantity_rationale, 'quantity_rationale');
+    }
+  }
+  validateDensityFallback({
+    motionTier: schedule.motion_tier,
+    densityMode: schedule.density_mode,
+    stateCount: count,
+    fallback: schedule.density_fallback,
+  });
+};
+
+const finalizeV4Schedule = ({
+  totalFrames,
+  fps,
+  sourceText,
+  motionTier,
+  states,
+  densityMode,
+  visualDensitySelectionSha256,
+  backgroundAssetId,
+  stateCountRationale,
+  densityFallback,
+  splitAssessment,
+  quantityRationale,
+  intraShotTransitions,
+}) => {
+  const frames = requireTotalFrames(totalFrames);
+  requireFps(fps);
+  const occurrences = normalizeV3States({states, totalFrames: frames, sourceText});
+  const imageSequence = occurrences.map((occurrence) => ({
+    state_id: occurrence.state_id,
+    at_frame: occurrence.at_frame,
+    duration_in_frames: occurrence.duration_in_frames,
+  }));
+  const transitions = intraShotTransitions === null || intraShotTransitions === undefined
+    ? buildDefaultIntraShotTransitions({imageSequence, fps})
+    : structuredClone(intraShotTransitions);
+  validateIntraShotTransitionSequence({imageSequence, transitions, fps});
+  occurrences.forEach((occurrence, index) => {
+    const transitionFrames = index === 0 ? 0 : transitions[index - 1].duration_in_frames;
+    occurrence.transition_in_frames = transitionFrames;
+    occurrence.clean_hold_in_frames = occurrence.duration_in_frames - transitionFrames;
+  });
+  const schedule = {
+    contract_version: ACTION_STATE_SCHEDULE_V4_VERSION,
+    fps,
+    total_frames: frames,
+    source_text: sourceText,
+    motion_tier: motionTier,
+    density_mode: densityMode,
+    visual_density_selection_sha256: visualDensitySelectionSha256,
+    background_asset_id: motionTier === 'hero_pose' ? backgroundAssetId : null,
+    state_count_total: occurrences.length,
+    action_variant_count: motionTier === 'hero_pose' ? occurrences.length : occurrences.length - 1,
+    state_count_rationale: stateCountRationale ?? null,
+    density_fallback: densityFallback ?? null,
+    split_assessment: splitAssessment ?? null,
+    quantity_rationale: quantityRationale ?? null,
+    cadence_advisory: calculateActionStateCadenceAdvisory(frames),
+    occurrences,
+    intra_shot_transitions: transitions,
+  };
+  validateV4Count(schedule);
+  return schedule;
+};
+
+export const buildActionStateScheduleV4 = ({
+  totalFrames,
+  fps = ACTION_STATE_FPS,
+  sourceText,
+  motionTier,
+  states,
+  densityMode,
+  visualDensitySelectionSha256,
+  backgroundAssetId = null,
+  stateCountRationale = null,
+  densityFallback = null,
+  splitAssessment = null,
+  quantityRationale = null,
+  intraShotTransitions = null,
+}) => finalizeV4Schedule({
+  totalFrames,
+  fps,
+  sourceText,
+  motionTier,
+  states,
+  densityMode,
+  visualDensitySelectionSha256,
+  backgroundAssetId,
+  stateCountRationale,
+  densityFallback,
+  splitAssessment,
+  quantityRationale,
+  intraShotTransitions,
+});
+
+export const retimeActionStateScheduleV4 = ({
+  parentSchedule,
+  totalFrames,
+  stateAtFrames,
+  fps = ACTION_STATE_FPS,
+}) => {
+  if (parentSchedule?.contract_version !== ACTION_STATE_SCHEDULE_V4_VERSION) {
+    throw new Error('v4 revoice requires a parent action-state-schedule-v4');
+  }
+  if (!Array.isArray(stateAtFrames) || stateAtFrames.length !== parentSchedule.occurrences.length) {
+    throw new Error('v4 revoice requires one aligned frame for every locked state');
+  }
+  const states = parentSchedule.occurrences.map((occurrence, index) => {
+    if (stateAtFrames[index]?.state_id !== occurrence.state_id) {
+      throw new Error('v4 revoice must preserve state IDs and order');
+    }
+    return {
+      state_id: occurrence.state_id,
+      semantic_state: occurrence.semantic_state,
+      narration_byte_start: occurrence.narration_byte_start,
+      narration_byte_end: occurrence.narration_byte_end,
+      narration_text: occurrence.narration_text,
+      at_frame: stateAtFrames[index].at_frame,
+      semantic_hold_reason: occurrence.semantic_hold_reason,
+    };
+  });
+  const transitions = parentSchedule.intra_shot_transitions.map((transition) => ({
+    ...transition,
+    at_frame: states[transition.to_image_index].at_frame,
+  }));
+  const schedule = finalizeV4Schedule({
+    totalFrames,
+    fps,
+    sourceText: parentSchedule.source_text,
+    motionTier: parentSchedule.motion_tier,
+    states,
+    densityMode: parentSchedule.density_mode,
+    visualDensitySelectionSha256: parentSchedule.visual_density_selection_sha256,
+    backgroundAssetId: parentSchedule.background_asset_id,
+    stateCountRationale: parentSchedule.state_count_rationale,
+    densityFallback: parentSchedule.density_fallback,
+    splitAssessment: parentSchedule.split_assessment,
+    quantityRationale: parentSchedule.quantity_rationale,
+    intraShotTransitions: transitions,
+  });
+  if (buildActionStatePlanSha256(schedule) !== buildActionStatePlanSha256(parentSchedule)) {
+    throw new Error('v4 revoice must preserve density, state count, order, semantics, and effects');
+  }
+  return schedule;
+};
+
+const validateActionStateScheduleV4 = (
+  schedule,
+  {totalFrames, fps = ACTION_STATE_FPS, densityMode = null, densitySelectionSha256 = null, revoiceLock = null} = {},
+) => {
+  const frames = requireTotalFrames(totalFrames);
+  requireFps(fps);
+  if (!schedule || typeof schedule !== 'object' || Array.isArray(schedule)
+    || schedule.contract_version !== ACTION_STATE_SCHEDULE_V4_VERSION
+    || schedule.fps !== fps || schedule.total_frames !== frames) {
+    throw new Error('action-state-schedule-v4 authority mismatch');
+  }
+  if (densityMode !== null && schedule.density_mode !== densityMode) {
+    throw new Error('action-state-schedule-v4 density mode binding is stale');
+  }
+  if (densitySelectionSha256 !== null
+    && schedule.visual_density_selection_sha256 !== densitySelectionSha256) {
+    throw new Error('action-state-schedule-v4 density selection hash is stale');
+  }
+  validateV4Count(schedule);
+  const expectedVariants = schedule.motion_tier === 'hero_pose'
+    ? schedule.state_count_total
+    : schedule.state_count_total - 1;
+  if (schedule.action_variant_count !== expectedVariants
+    || !Array.isArray(schedule.occurrences)
+    || schedule.occurrences.length !== schedule.state_count_total) {
+    throw new Error('action-state-schedule-v4 state or pose count is inconsistent');
+  }
+  validateUtf8Coverage(schedule.source_text, schedule.occurrences);
+  let expectedFrame = 0;
+  const ids = new Set();
+  const semantics = new Set();
+  schedule.occurrences.forEach((occurrence, index) => {
+    if (occurrence.state_index !== index
+      || typeof occurrence.state_id !== 'string' || occurrence.state_id.trim() === ''
+      || typeof occurrence.semantic_state !== 'string' || occurrence.semantic_state.trim() === ''
+      || ids.has(occurrence.state_id) || semantics.has(occurrence.semantic_state)
+      || occurrence.at_frame !== expectedFrame
+      || occurrence.end_frame !== occurrence.at_frame + occurrence.duration_in_frames) {
+      throw new Error('action-state-schedule-v4 occurrences must be unique and consecutive');
+    }
+    ids.add(occurrence.state_id);
+    semantics.add(occurrence.semantic_state);
+    expectedFrame = occurrence.end_frame;
+  });
+  if (expectedFrame !== frames) throw new Error('action-state-schedule-v4 must cover the complete shot');
+  const imageSequence = schedule.occurrences.map((occurrence) => ({
+    state_id: occurrence.state_id,
+    at_frame: occurrence.at_frame,
+    duration_in_frames: occurrence.duration_in_frames,
+  }));
+  validateIntraShotTransitionSequence({imageSequence, transitions: schedule.intra_shot_transitions, fps});
+  const transitionFrameTotal = schedule.intra_shot_transitions.reduce(
+    (total, transition) => total + transition.duration_in_frames,
+    0,
+  );
+  const minimumFrames = MIN_CLEAN_HOLD_FRAMES * schedule.state_count_total + transitionFrameTotal;
+  if (frames < minimumFrames) {
+    throw new Error(`action-state-schedule-v4 requires at least 15*N clean frames plus transition frames (${minimumFrames})`);
+  }
+  schedule.occurrences.forEach((occurrence, index) => {
+    const transitionFrames = index === 0 ? 0 : schedule.intra_shot_transitions[index - 1].duration_in_frames;
+    if (occurrence.transition_in_frames !== transitionFrames
+      || occurrence.clean_hold_in_frames !== occurrence.duration_in_frames - transitionFrames
+      || occurrence.clean_hold_in_frames < MIN_CLEAN_HOLD_FRAMES) {
+      throw new Error('action-state-schedule-v4 clean hold timing is stale or below 15 frames');
+    }
+  });
+  if (revoiceLock !== null) {
+    if (revoiceLock.state_plan_sha256 !== buildActionStatePlanSha256(schedule)
+      || revoiceLock.density_mode !== schedule.density_mode
+      || revoiceLock.visual_density_selection_sha256 !== schedule.visual_density_selection_sha256) {
+      throw new Error('v4 revoice must preserve density, counts, order, hashes, and effects');
+    }
+  }
+  return {
+    result: 'pass',
+    contract_version: ACTION_STATE_SCHEDULE_V4_VERSION,
+    state_count_total: schedule.state_count_total,
+    asset_total: schedule.motion_tier === 'hero_pose'
+      ? schedule.state_count_total + 1
+      : schedule.state_count_total,
+  };
+};
+
 export const validateActionStateSchedule = (schedule, context = {}) => {
   if (schedule?.contract_version === ACTION_STATE_SCHEDULE_VERSION) {
     return validateActionStateScheduleV2(schedule, context);
   }
   if (schedule?.contract_version === ACTION_STATE_SCHEDULE_V3_VERSION) {
     return validateActionStateScheduleV3(schedule, context);
+  }
+  if (schedule?.contract_version === ACTION_STATE_SCHEDULE_V4_VERSION) {
+    return validateActionStateScheduleV4(schedule, context);
   }
   throw new Error('unsupported action-state schedule contract_version');
 };

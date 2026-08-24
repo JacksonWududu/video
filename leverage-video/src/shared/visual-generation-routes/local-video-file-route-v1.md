@@ -23,7 +23,7 @@ remain unchanged. Record source and target durations, playback rate, media
 probe/full-decode evidence, checksum, selected external path, archived asset,
 and exact-byte approval.
 
-Treat the archived source as a strict `visual-asset-review-v2` item. Present a
+Treat the archived source as a strict manual `visual-asset-review-v2` item or a fully QA-passing one-click `visual-asset-review-v3` item. Present a
 matched-speed preview together with the source checksum and complete locked
 narration. A revoice variant may preserve the approved source bytes and
 recompute only `target_duration_frames`, `target_duration_seconds`, and

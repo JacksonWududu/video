@@ -13,6 +13,7 @@ from typing import Any
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
 GATE_PATH = REPOSITORY_ROOT / ".agents/skills/run-knowledge-video/scripts/validate_visual_approval_state.py"
+WHITE_CAT_HELPER_PATH = Path(__file__).with_name("record-generated-imagegen-strict.py")
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
@@ -44,6 +45,15 @@ def load_gate():
     return module
 
 
+def load_white_cat_helpers():
+    spec = importlib.util.spec_from_file_location("white_cat_imagegen_qa_helpers", WHITE_CAT_HELPER_PATH)
+    if spec is None or spec.loader is None:
+        raise ValueError("white-cat ImageGen QA helpers cannot be loaded")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def png_dimensions(file: Path) -> tuple[int, int]:
     header = file.read_bytes()[:24]
     if len(header) != 24 or header[:8] != b"\x89PNG\r\n\x1a\n" or header[12:16] != b"IHDR":
@@ -60,11 +70,28 @@ def checksum_bound_file(binding: dict[str, Any], label: str) -> Path:
     return file
 
 
+def validate_white_cat_qa(
+    item: dict[str, Any],
+    qa: dict[str, Any],
+    normalized: dict[str, Any],
+    normalized_file: Path,
+) -> None:
+    if item.get("white_cat_present") is not True:
+        return
+    helper = load_white_cat_helpers()
+    helper.validate_white_cat_identity_qa_v2(
+        qa.get("identity_qa", {}),
+        selected_source=normalized,
+        selected_source_file=normalized_file,
+    )
+
+
 def record(args: argparse.Namespace) -> dict[str, Any]:
     workspace = resolve_root_relative(args.episode_workspace, "episode workspace")
     state_file = workspace / "schema/episode-state.json"
     state = json.loads(state_file.read_text(encoding="utf-8"))
     gate = load_gate()
+    one_click = state.get("visual_asset_review", {}).get("mode") == "one_click_final_review_v1"
     item = gate.require_generation_allowed(state, args.asset_id)
     if (
         item.get("visual_generation_route") != "xuan-paper-diorama"
@@ -128,20 +155,18 @@ def record(args: argparse.Namespace) -> dict[str, Any]:
         checksum_bound_file(stage.get("output", {}), f"generation stage {index} output")
         for reference_index, reference in enumerate(stage.get("reference_inputs", [])):
             checksum_bound_file(reference, f"generation stage {index} reference {reference_index}")
-    for check in (
-        "semantic_qa",
-        "historical_identity_qa",
-        "visible_text_qa",
-        "style_qa",
-        "visual_qa",
-    ):
+    validate_white_cat_qa(item, qa, normalization["normalized"], normalized_file)
+    checks = ["semantic_qa", "visible_text_qa", "style_qa", "visual_qa"]
+    if item.get("white_cat_present") is not True:
+        checks.append("historical_identity_qa")
+    for check in checks:
         if qa.get(check, {}).get("result") != "pass":
             raise ValueError(f"{check} did not pass")
     if qa["visible_text_qa"].get("no_visible_text") is not True or qa["style_qa"].get("readable_depth_planes") not in range(4, 8):
         raise ValueError("Xuan Paper visual or text-free QA is incomplete")
 
     item.update(
-        status="awaiting_user_approval",
+        status="awaiting_batch_qa" if one_click else "awaiting_user_approval",
         generator=qa["generator"],
         path=normalization["normalized"]["path"],
         checksum_sha256=normalization["normalized"]["checksum_sha256"],
@@ -174,7 +199,6 @@ def record(args: argparse.Namespace) -> dict[str, Any]:
             "measured_dimensions": [1920, 1080],
         },
         semantic_qa=qa["semantic_qa"],
-        historical_identity_qa=qa["historical_identity_qa"],
         visible_text_qa=qa["visible_text_qa"],
         style_qa=qa["style_qa"],
         visual_qa=qa["visual_qa"],
@@ -184,8 +208,16 @@ def record(args: argparse.Namespace) -> dict[str, Any]:
             "现呈交 S02 主图精确 PNG，等待用户明确批准此精确字节后，方可生成其动作变体。"
         ),
     )
-    state["visual_asset_review"]["queue_generation_allowed"] = False
-    state["visual_asset_review"]["current_asset_id"] = args.asset_id
+    if item.get("white_cat_present") is True:
+        item["qa_contract_version"] = qa["contract_version"]
+        item["identity_qa"] = qa["identity_qa"]
+    else:
+        item["historical_identity_qa"] = qa["historical_identity_qa"]
+    if one_click:
+        gate.record_hybrid_qa_pass(state, args.asset_id, args.qa_time)
+    else:
+        state["visual_asset_review"]["queue_generation_allowed"] = False
+        state["visual_asset_review"]["current_asset_id"] = args.asset_id
 
     temporary = state_file.with_suffix(".json.xuan-strict.tmp")
     if temporary.exists():

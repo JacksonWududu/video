@@ -32,19 +32,28 @@ const nextVersionedRelativePath = ({episodeWorkspace, directory, basename, exten
   return `${episodeWorkspace}/${directory}/${basename}-v${next}.${extension}`;
 };
 
-export const finalizeStoryboardMarkdown = ({draftMarkdown, transitionRows}) => {
-  const draftTitle = draftMarkdown.match(/^# 《知行合一》知识视频分镜草案 v\d+\n/);
-  if (!draftTitle) {
+export const finalizeStoryboardMarkdown = ({
+  draftMarkdown,
+  transitionRows,
+  authorizationMode = 'manual',
+}) => {
+  if (!['manual', 'one_click'].includes(authorizationMode)) {
+    throw new Error('storyboard finalization authorization mode is invalid');
+  }
+  const draftTitle = draftMarkdown.match(/^# 《([^》\r\n]+)》知识视频分镜草案 v\d+\n/);
+  if (!draftTitle || draftTitle[1] !== draftTitle[1].trim()) {
     throw new Error('active storyboard draft title is unexpected');
   }
   const statusLines = [...draftMarkdown.matchAll(/^- 当前状态：.*$/gm)];
   if (statusLines.length !== 1) throw new Error('active storyboard draft must contain exactly one current-status line');
   let transitionIndex = 0;
   let markdown = draftMarkdown
-    .replace(draftTitle[0], '# 《知行合一》知识视频分镜 v1\n')
+    .replace(draftTitle[0], `# 《${draftTitle[1]}》知识视频分镜 v1\n`)
     .replace(
       statusLines[0][0],
-      '- 当前状态：视觉方向与 17 条普通 `scene-transition-v3` 边界均已明确批准；等待本文件的 Storyboard Review。',
+      authorizationMode === 'one_click'
+        ? `- 当前状态：视觉方向与 ${transitionRows.length} 条普通 \`scene-transition-v3\` 边界均已按一键策略授权；不表示用户已查看具体映射，等待本文件绑定同一策略。`
+        : `- 当前状态：视觉方向与 ${transitionRows.length} 条普通 \`scene-transition-v3\` 边界均已明确批准；等待本文件的 Storyboard Review。`,
     )
     .replaceAll('- 动态：候选 Ian 全幅遮罩扫入', '- 动态：锁定 Ian 全幅遮罩扫入')
     .replace(/^- 出场转场：待逐边界审核。$/gm, () => {
@@ -69,7 +78,26 @@ const buildArtifacts = ({episodeWorkspace, presentedAt}) => {
   const workspacePath = resolveRootRelative(episodeWorkspace, 'episode workspace');
   const statePath = path.join(workspacePath, 'schema/episode-state.json');
   const state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
-  if (state.current_phase !== 'transition_review_approved'
+  const oneClick = state.workflow_approval_mode?.approval_mode === 'one_click';
+  const freshOneClickReview = state.storyboard_review === null
+    || (state.storyboard_review?.status === 'not_started'
+      && state.storyboard_review.presented_path == null
+      && state.storyboard_review.approved_path == null);
+  if (oneClick) {
+    const policySha256 = state.one_click_approval_policy?.policy_sha256;
+    if (state.current_phase !== 'transition_policy_authorized'
+      || state.transition_review?.status !== 'policy_authorized'
+      || !/^[a-f0-9]{64}$/.test(policySha256 ?? '')
+      || state.one_click_approval_policy?.preauthorizations?.storyboard_review !== true
+      || state.one_click_approval_policy?.user_has_reviewed_specific_maps !== false
+      || state.transition_review.policy_sha256 !== policySha256
+      || state.transition_review.user_has_reviewed_specific_map !== false
+      || !freshOneClickReview
+      || state.storyboard_qa !== null
+      || state.active_storyboard?.prior_approved_storyboard != null) {
+      throw new Error('episode lacks fresh one-click storyboard policy authorization');
+    }
+  } else if (state.current_phase !== 'transition_review_approved'
     || state.storyboard_review?.status !== 'changes_requested') {
     throw new Error('episode is not ready to finalize a revised storyboard');
   }
@@ -95,6 +123,7 @@ const buildArtifacts = ({episodeWorkspace, presentedAt}) => {
   const finalBytes = Buffer.from(finalizeStoryboardMarkdown({
     draftMarkdown: sourceBytes.toString('utf8'),
     transitionRows: transitionReview.rows,
+    authorizationMode: oneClick ? 'one_click' : 'manual',
   }));
   const finalChecksum = sha256(finalBytes);
   const qaRelative = nextVersionedRelativePath({
@@ -103,7 +132,9 @@ const buildArtifacts = ({episodeWorkspace, presentedAt}) => {
     basename: 'storyboard-qa',
     extension: 'json',
   });
-  const presentationMessage = `现呈交 ${finalRelative}（SHA-256 ${finalChecksum}）及已验证旁白音频，等待用户明确批准此精确分镜版本。`;
+  const presentationMessage = oneClick
+    ? null
+    : `现呈交 ${finalRelative}（SHA-256 ${finalChecksum}）及已验证旁白音频，等待用户明确批准此精确分镜版本。`;
   const nextState = structuredClone(state);
   nextState.active_storyboard = {
     status: 'final_qa_pending_file_validation',
@@ -111,7 +142,9 @@ const buildArtifacts = ({episodeWorkspace, presentedAt}) => {
     checksum_sha256: finalChecksum,
     source_draft_path: sourceRelative,
     source_draft_checksum_sha256: sha256(sourceBytes),
-    prior_approved_storyboard: state.active_storyboard.prior_approved_storyboard,
+    prior_approved_storyboard: oneClick
+      ? state.active_storyboard.prior_approved_storyboard ?? null
+      : state.active_storyboard.prior_approved_storyboard,
   };
   nextState.storyboard_construction = {
     ...nextState.storyboard_construction,
@@ -128,6 +161,7 @@ const buildArtifacts = ({episodeWorkspace, presentedAt}) => {
     qaRelative,
     presentationMessage,
     presentedAt,
+    oneClick,
     state,
     provisionalState: {relative: `${episodeWorkspace}/schema/episode-state.json`, bytes: provisionalStateBytes},
   };
@@ -160,7 +194,9 @@ const applyArtifacts = (artifacts, episodeWorkspace) => {
     checksum_sha256: artifacts.final.checksum,
     source_draft_path: artifacts.sourceRelative,
     source_draft_checksum_sha256: artifacts.state.active_storyboard.checksum_sha256,
-    prior_approved_storyboard: artifacts.state.active_storyboard.prior_approved_storyboard,
+    prior_approved_storyboard: artifacts.oneClick
+      ? artifacts.state.active_storyboard.prior_approved_storyboard ?? null
+      : artifacts.state.active_storyboard.prior_approved_storyboard,
   };
   finalState.storyboard_construction = {
     ...finalState.storyboard_construction,
@@ -176,7 +212,9 @@ const applyArtifacts = (artifacts, episodeWorkspace) => {
     checksum_sha256: sha256(qaBytes),
     evaluated_at: artifacts.presentedAt,
     checks: qa.checks,
-    prior_result: artifacts.state.storyboard_qa.prior_result,
+    prior_result: artifacts.oneClick
+      ? artifacts.state.storyboard_qa?.prior_result ?? null
+      : artifacts.state.storyboard_qa.prior_result,
   };
   finalState.storyboard_review = {
     ...finalState.storyboard_review,
@@ -186,20 +224,26 @@ const applyArtifacts = (artifacts, episodeWorkspace) => {
     active_checksum_sha256: artifacts.final.checksum,
     presented_path: artifacts.final.relative,
     presented_checksum_sha256: artifacts.final.checksum,
-    presented_at: artifacts.presentedAt,
+    presented_at: artifacts.oneClick ? null : artifacts.presentedAt,
     exact_presentation_message: artifacts.presentationMessage,
     approved_path: null,
     approved_checksum_sha256: null,
     exact_decision_message: null,
     decided_at: null,
+    ...(artifacts.oneClick ? {
+      policy_sha256: artifacts.state.one_click_approval_policy.policy_sha256,
+      user_has_reviewed_specific_storyboard: false,
+    } : {}),
   };
   finalState.superseded_artifacts = [
     ...(finalState.superseded_artifacts ?? []),
     {
       record_type: 'superseded_storyboard_review_candidate',
-      reason: artifacts.state.storyboard_revision?.change_set_id
-        ? 'storyboard_visual_contract_revision_completed'
-        : 'visual_route_and_affected_transition_revision_completed',
+      reason: artifacts.oneClick
+        ? 'one_click_initial_storyboard_finalized_after_policy_authorized_mappings'
+        : (artifacts.state.storyboard_revision?.change_set_id
+          ? 'storyboard_visual_contract_revision_completed'
+          : 'visual_route_and_affected_transition_revision_completed'),
       superseded_at: artifacts.presentedAt,
       prior_artifact_path: artifacts.sourceRelative,
       prior_artifact_checksum_sha256: artifacts.state.active_storyboard.checksum_sha256,
@@ -207,12 +251,16 @@ const applyArtifacts = (artifacts, episodeWorkspace) => {
       replacement_artifact_checksum_sha256: artifacts.final.checksum,
     },
   ];
-  finalState.blockers = [{
-    type: 'awaiting_exact_storyboard_review_approval',
-    storyboard_path: artifacts.final.relative,
-    storyboard_checksum_sha256: artifacts.final.checksum,
-    recorded_at: artifacts.presentedAt,
-  }];
+  finalState.blockers = artifacts.oneClick
+    ? (artifacts.state.blockers ?? []).filter((blocker) => (
+        blocker?.type !== 'awaiting_exact_storyboard_review_approval'
+      ))
+    : [{
+        type: 'awaiting_exact_storyboard_review_approval',
+        storyboard_path: artifacts.final.relative,
+        storyboard_checksum_sha256: artifacts.final.checksum,
+        recorded_at: artifacts.presentedAt,
+      }];
   finalState.current_phase = 'awaiting_storyboard_review';
   fs.writeFileSync(stateTarget, jsonBytes(finalState));
   return {qa, qaChecksum: sha256(qaBytes), stateChecksum: sha256(jsonBytes(finalState))};

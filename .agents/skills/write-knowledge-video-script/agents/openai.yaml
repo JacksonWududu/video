@@ -1,0 +1,7 @@
+interface:
+  display_name: "知识口播创作"
+  short_description: "研究选题并生成默认 3–4 分钟、实质内容可延长至 10 分钟的口播包"
+  default_prompt: "使用 $write-knowledge-video-script 研究这个选题，优先结合中国大陆普通公众可识别、可核验的真实需求、具体痛点和可感知槽点，先给我三套方向，待我选择后生成默认 3–4 分钟的自然叙述型版本化中文口播创作包；内容有不可删的证据、机制、边界或方法时可延长，但最长不超过 10 分钟。"
+
+policy:
+  allow_implicit_invocation: false

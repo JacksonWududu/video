@@ -8,7 +8,10 @@ import {
   useVideoConfig,
 } from 'remotion';
 
-import {getFullFrameMaskSweepTiming} from './timing';
+import {
+  getFullFrameMaskSweepTiming,
+  shouldUseStaticFullFrame,
+} from './timing';
 
 export type FullFrameMaskSweepProps = {
   src: string;
@@ -30,7 +33,7 @@ export const FullFrameMaskSweep: React.FC<FullFrameMaskSweepProps> = ({
     fps,
   });
 
-  if (!shouldAnimate) {
+  if (shouldUseStaticFullFrame({shouldAnimate, frame, sweepFrames})) {
     return (
       <AbsoluteFill style={{backgroundColor, overflow: 'hidden'}}>
         <CanvasImage

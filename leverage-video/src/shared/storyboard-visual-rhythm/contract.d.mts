@@ -1,12 +1,13 @@
 export type MotionTier = 'layered' | 'stateful' | 'hero_pose';
 
 export type StoryboardVisualRhythmArtifact = Readonly<Record<string, unknown>> & {
-  readonly contract_version: 'storyboard-visual-rhythm-v1';
+  readonly contract_version: 'storyboard-visual-rhythm-v1' | 'storyboard-visual-rhythm-v2';
   readonly profile: 'medium_high_v1';
   readonly shots: readonly Readonly<Record<string, unknown>>[];
 };
 
 export const STORYBOARD_VISUAL_RHYTHM_VERSION: 'storyboard-visual-rhythm-v1';
+export const STORYBOARD_VISUAL_RHYTHM_V2_VERSION: 'storyboard-visual-rhythm-v2';
 export const MEDIUM_HIGH_VISUAL_RHYTHM_PROFILE: 'medium_high_v1';
 export const MOTION_TIERS: readonly MotionTier[];
 export const MEANINGFUL_CHANGE_MAX_GAP_FRAMES: 120;

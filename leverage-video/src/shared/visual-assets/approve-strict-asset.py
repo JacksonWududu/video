@@ -51,6 +51,15 @@ def approve(args: argparse.Namespace) -> dict[str, Any]:
         args.decision_time,
         repository_root=REPOSITORY_ROOT,
     )
+    if review.get("user_takeover_asset_id") == args.asset_id:
+        control = item.get("white_cat_generation_attempt_control")
+        if isinstance(control, dict):
+            control["automatic_retry_status"] = "resolved_by_user_approved_takeover_image"
+            control["resolved_at"] = args.decision_time
+            control["resolution"] = "user-supplied-takeover-image-approved"
+        review.pop("user_takeover_required", None)
+        review.pop("user_takeover_asset_id", None)
+        review.pop("user_takeover_message", None)
     review["queue_generation_allowed"] = True
     queue = [
         candidate
@@ -67,6 +76,7 @@ def approve(args: argparse.Namespace) -> dict[str, Any]:
         None,
     )
     review["current_asset_id"] = next_item.get("asset_id") if next_item else None
+    state["phase"] = "visual_production"
     state["current_phase"] = "visual_production"
 
     temporary = state_file.with_suffix(".json.strict-approval.tmp")

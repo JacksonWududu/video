@@ -9,6 +9,7 @@ import {
   CATALOG_CHECKSUM_SHA256,
   LEGACY_CATALOG_CHECKSUM_SHA256,
   buildPresentedMapSha256,
+  authorizeVisualDirectionRecommendationsOneClick,
   resolveRouteVisibleTextPolicy,
   validateVisualDirectionReview,
 } from './contract.mjs';
@@ -516,6 +517,20 @@ const matchingV3Shots = (review) => matchingV2Shots(review).map((shot, index) =>
   visible_text_placement: review.rows[index].user_selection.visible_text_placement,
   local_video_source_path: review.rows[index].user_selection.local_video_source_path ?? null,
 }));
+
+test('one-click selects deterministic visual recommendations without claiming map review', () => {
+  const review = buildV3Review();
+  const authorized = authorizeVisualDirectionRecommendationsOneClick(review, {
+    policySha256: 'e'.repeat(64),
+    authorizedAt: approvedAt,
+  });
+  assert.equal(authorized.status, 'policy_authorized');
+  assert.equal(authorized.rows[0].user_selection.exact_message, null);
+  assert.equal(authorized.rows[0].user_selection.user_has_reviewed_specific_map, false);
+  assert.equal(validateVisualDirectionReview(authorized, {
+    shots: matchingV3Shots(authorized),
+  }).status, 'policy_authorized');
+});
 
 const legacyV3PresentedMapSha256 = (review) => {
   const canonicalize = (value) => {

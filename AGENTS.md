@@ -30,10 +30,10 @@
 
 - Every ordinary boundary must carry one registered, approved, verified semantic transition decision. `scene-transition-v3` may use zero-duration `cut`; visible transitions remain 0.3–0.6 seconds. Missing, `none`, unsupported, misconfigured, renderer fallback, or unapproved decisions fail. Only the opening hard cut and terminal clean hold are exemptions.
 - Before still, Studio, preview, render, or composition lock, validate transition coverage, catalog support, selection evidence, and renderer use. Otherwise provide an equivalent catalog, contract, renderer, and fail-closed validator.
-- Preserve knowledge-video phase order and every checkpoint: Gate 1, Gate 2, Per-Shot Visual Direction Review, Per-Boundary Transition Review, Storyboard Review, Visual Asset Review, and final Caption Delivery Choice. Never infer pending choices from `默认`, `继续`, `你看着办`, general authorization, or another review.
+- After Gate 2 require explicit density, then approval mode. Manual preserves checkpoints, including Per-Shot Visual Direction Review and final Caption Delivery Choice. One-click may preauthorize intermediate continuation, but must stop for exact-list visual approval and then caption choice before protected Remotion actions; never infer choices or bypass QA.
 - Before episode scripts, require shared-reuse pre-script validation. Before protected Remotion actions, require real consumer evidence and consumption validation. Legacy migration needs exact user authorization and unchanged baseline script bytes.
 - Approved narration, audio, storyboard, selections, images, timing, cover, caption mode, and delivery roles are immutable contract inputs. Missing, ambiguous, stale, unsupported, unapproved, or substituted inputs block work.
-- Workflow authorities define opening, transitions, captions, BGM, browser, opening QA, and delivery. Preserve `OPEN-00 -> S01`; deliver only selected full-master roles.
+- No opening brand/topic Gate. Preserve exact first sentence/end frame and `OPEN-00 -> S01`; authorities govern downstream delivery.
 - For narrated `paper-collage-video` work, confirm the requested Voicebox profile, synthesize every segment with Voicebox MCP, record every `generation_id`, retrieve the matching WAV files, convert them deterministically, measure real durations, update timing and subtitles, and only then render. If Voicebox MCP or the requested profile is unavailable, stop; never fall back to Edge TTS, macOS `say`, or another provider.
 
 ## Verification and completion

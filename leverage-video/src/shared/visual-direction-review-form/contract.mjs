@@ -12,6 +12,7 @@ import {
   VISUAL_LANGUAGE_CATALOG_CHECKSUM_SHA256,
   validateVisualLanguageSelection,
 } from '../visual-language/contract.mjs';
+import {validateConciseSummaryVisibleText} from '../visible-text-review/contract.mjs';
 
 export const FORM_MODEL_CONTRACT_VERSION = 'visual-direction-review-form-v3';
 export const SUBMISSION_CONTRACT_VERSION = 'visual-direction-form-submission-v3';
@@ -160,7 +161,13 @@ const decodeSummaryCell = (cell) => cell
 
 const splitSummaryRow = (line) => {
   if (!line.startsWith('|') || !line.endsWith('|')) return null;
-  return line.slice(1, -1).split('|').map((cell) => decodeSummaryCell(cell.trim()));
+  return line.slice(1, -1).split('|').map((cell) => {
+    const withoutLeadingPad = cell.startsWith(' ') ? cell.slice(1) : cell;
+    const withoutTablePadding = withoutLeadingPad.endsWith(' ')
+      ? withoutLeadingPad.slice(0, -1)
+      : withoutLeadingPad;
+    return decodeSummaryCell(withoutTablePadding);
+  });
 };
 
 export const parseStoryboardSummary = (storyboardMarkdown) => {
@@ -520,6 +527,7 @@ const validateVisibleText = (row, submittedRow) => {
   if (submittedRow.visible_text_mode === 'required') {
     requireNonEmptyString(submittedRow.exact_visible_text, `${row.shot_id} exact visible text`);
     requireNonEmptyString(submittedRow.visible_text_placement, `${row.shot_id} visible text placement`);
+    validateConciseSummaryVisibleText(submittedRow.exact_visible_text, {shotId: row.shot_id});
   } else if (submittedRow.exact_visible_text !== null || submittedRow.visible_text_placement !== null) {
     throw new Error(`${row.shot_id} visible text none requires null text and placement`);
   }

@@ -18,8 +18,14 @@ import {VISUAL_LANGUAGE_CATALOG_CHECKSUM_SHA256} from '../visual-language/contra
 import {
   buildActionStateSchedule,
   buildActionStateScheduleV3,
+  buildActionStateScheduleV4,
 } from '../action-state-schedule/contract.mjs';
 import {buildDefaultIntraShotTransitions} from '../intra-shot-transitions/contract.mjs';
+import {
+  buildVisualDensitySelectionSha256,
+  buildWorkflowApprovalModeSha256,
+} from '../workflow-approval/contract.mjs';
+import {sha256Canonical, sha256Text} from '../ian-layered-scene/contract.mjs';
 
 const buildVisualDirectionReview = () => {
   const review = {
@@ -329,9 +335,18 @@ const passingStoryboardVisualRhythmVerifier = (input) => ({
       motion_tier: shot.motion_tier,
       asset_plan: {
         main_image_count: shot.motion_tier === 'hero_pose' ? 1 : Math.max(1, shot.assets?.length ?? 0),
-        layer_count: shot.motion_tier === 'layered' ? 3 : 0,
+        layer_count: shot.visual_generation_route === 'ian-handdrawn-ppt'
+          ? 1
+          : shot.motion_tier === 'layered' ? 3 : 0,
         pose_count: shot.motion_tier === 'hero_pose' ? shot.assets.length : 0,
       },
+      meaningful_change_events: [{
+        at_frame: shot.start_frame,
+        kind: 'composition-change',
+        description: shot.visual_generation_route === 'ian-handdrawn-ppt'
+          ? 'knowledge-structure'
+          : 'initial-state',
+      }],
       intra_shot_transition_plan: (shot.intra_shot_transitions ?? []).map((transition) => ({
         from_asset_id: transition.from_asset_id,
         to_asset_id: transition.to_asset_id,
@@ -350,9 +365,116 @@ const passingStoryboardVisualRhythmVerifier = (input) => ({
   },
 });
 
+const buildIanLayeredPackage = (input, shot) => {
+  const sourceText = shot.narration_source_text;
+  const byteLength = Buffer.byteLength(sourceText);
+  const scenePlan = {
+    contract_version: 'ian-layered-scene-plan-v1',
+    shot_id: shot.shot_id,
+    narration_source_text_sha256: sha256Text(sourceText),
+    scene_renderer: 'ian-static-layered-scene-v1',
+    background_policy: 'static-paper-background-v1',
+    layer_asset_policy: 'full-canvas-transparent-png-v1',
+    layer_entry_transition: {
+      contract_version: 'ian-layer-entry-fade-v1', duration_frames: 8, easing: 'linear',
+    },
+    motion_policy: {
+      scene_transform: 'forbidden', layer_transform: 'forbidden',
+      mask_reveal: 'forbidden', internal_cut: 'forbidden',
+      opacity_animation: 'ian-layer-entry-fade-v1',
+    },
+    layer_count: 1,
+    layers: [{
+      layer_id: 'L01', z_index: 1, semantic_role: 'knowledge-structure',
+      source_text_start_byte: 0, source_text_end_byte_exclusive: byteLength,
+      source_text: sourceText, entry_frame: 0,
+    }],
+  };
+  const raster = (path, checksum, role, hasAlpha) => ({
+    path, checksum_sha256: checksum, width: 1920, height: 1080, role, has_alpha: hasAlpha,
+  });
+  return {
+    contract_version: 'ian-knowledge-video-layered-scene-v1',
+    episode_workspace: input.episodeWorkspace,
+    queue_item_id: shot.assets[0].asset_id,
+    shot_id: shot.shot_id,
+    visual_generation_route: 'ian-handdrawn-ppt',
+    treatment_profile_id: shot.treatment_profile_id,
+    storyboard_binding: structuredClone(input.visualDirectionReview.storyboard),
+    visual_direction_review: {
+      path: input.visualDirectionReview.path,
+      checksum_sha256: input.visualDirectionReview.checksum_sha256,
+      presented_map_sha256: input.visualDirectionReview.presented_map_sha256,
+    },
+    canvas: {width: 1920, height: 1080, fps: 30},
+    timing: {
+      shot_start_frame: shot.start_frame,
+      shot_end_frame: shot.end_frame,
+      duration_frames: shot.end_frame - shot.start_frame,
+    },
+    narration_source_text: sourceText,
+    narration_source_text_sha256: sha256Text(sourceText),
+    scene_plan: scenePlan,
+    scene_plan_sha256: sha256Canonical(scenePlan),
+    generation_constraints: {
+      background_raster_count: 1, final_composite_raster_count: 1,
+      layer_rasters_are_full_canvas_rgba: true,
+      scene_translation: false, scene_scaling: false,
+      layer_translation: false, layer_scaling: false, layer_rotation: false,
+      mask_reveal: false, internal_cut: false,
+      automatic_page_number: false, automatic_title: false,
+      automatic_subtitle: false, automatic_labels: false, signature: false,
+    },
+    background: raster(
+      `${input.episodeWorkspace}/assets/image/${shot.shot_id}-background.png`,
+      '4'.repeat(64), 'static-paper-background', false,
+    ),
+    layers: [{
+      ...scenePlan.layers[0],
+      ...raster(
+        `${input.episodeWorkspace}/assets/image/${shot.shot_id}-L01.png`,
+        '5'.repeat(64), 'transparent-semantic-element', true,
+      ),
+    }],
+    final_composite: raster(
+      `${input.episodeWorkspace}/assets/image/${shot.shot_id}-final.png`,
+      shot.assets[0].checksum_sha256, 'final-composite-review-raster', false,
+    ),
+    verified_visible_text: [],
+  };
+};
+
+const passingIanLayeredSceneVerifier = (input) => ({
+  contract_version: 'ian-layered-scene-consumption-evidence-v1',
+  result: 'pass',
+  records: input.shots
+    .filter((shot) => shot.visual_generation_route === 'ian-handdrawn-ppt')
+    .map((shot) => {
+      const packageValue = buildIanLayeredPackage(input, shot);
+      return {
+        shot_id: shot.shot_id,
+        storyboard_scene_plan_sha256: packageValue.scene_plan_sha256,
+        package_manifest: structuredClone(shot.ian_layered_scene.package_manifest),
+        package: packageValue,
+        render_assets: structuredClone(shot.ian_layered_scene.render_assets),
+      };
+    }),
+});
+
+const passingV2StoryboardVisualRhythmVerifier = (input) => {
+  const result = passingStoryboardVisualRhythmVerifier(input);
+  result.artifact.contract_version = 'storyboard-visual-rhythm-v2';
+  result.artifact.density_mode = input.workflowApproval.density.density_mode;
+  result.artifact.visual_density_selection_sha256 = input.workflowApproval.density.selection_sha256;
+  result.path = `${input.episodeWorkspace}/schema/storyboard-visual-rhythm-v2.json`;
+  result.validation.contract_version = 'storyboard-visual-rhythm-v2';
+  return result;
+};
+
 const buildKnowledgeVideoAssemblyPlan = (input, options = {}) => buildPlanWithVerification(input, {
   verifyVisualDirectionReviewEvidence: passingVisualDirectionVerifier,
   verifyStoryboardVisualRhythmEvidence: passingStoryboardVisualRhythmVerifier,
+  verifyIanLayeredScenePackageEvidence: passingIanLayeredSceneVerifier,
   ...options,
 });
 
@@ -453,6 +575,30 @@ const buildV3Input = ({characterSchedule = false} = {}) => {
   input.visualDirectionReview.rows.forEach((row) => {
     row.user_selection.presented_map_sha256 = input.visualDirectionReview.presented_map_sha256;
   });
+  const ianShot = input.shots[1];
+  ianShot.narration_source_text = '一次结果，不等于无法改变。';
+  ianShot.assets[0].checksum_sha256 = '6'.repeat(64);
+  ianShot.ian_layered_scene = {
+    package_manifest: {
+      path: `${input.episodeWorkspace}/schema/visual-assets/S02-ian-layered-scene-v1.json`,
+      checksum_sha256: '7'.repeat(64),
+    },
+    render_assets: {
+      background: {
+        asset: 'example/assets/image/S02-background.png',
+        checksum_sha256: '4'.repeat(64),
+      },
+      layers: [{
+        layer_id: 'L01',
+        asset: 'example/assets/image/S02-L01.png',
+        checksum_sha256: '5'.repeat(64),
+      }],
+      final_composite: {
+        asset: ianShot.assets[0].asset,
+        checksum_sha256: ianShot.assets[0].checksum_sha256,
+      },
+    },
+  };
   input.transitionSelectionReview.catalog_version = 'scene-transition-catalog-v3';
   input.shots[0].transition = {
     contract_version: 'scene-transition-v3',
@@ -799,6 +945,101 @@ test('v3 continuity cut adds no transition duration and records semantic boundar
   assert.deepEqual(plan.scenes[0].intra_shot_transitions.map(({kind}) => kind), ['cut']);
   assert.equal(plan.scenes[0].intra_shot_transition_contract, 'intra-shot-transition-v1');
   assert.equal(plan.qa_contract.intra_shot_transition_contract, 'intra-shot-transition-v1');
+  assert.equal(plan.scenes[0].ian_layered_scene, null);
+  assert.equal(plan.scenes[1].scene_type, 'ian-layered');
+  assert.equal(plan.scenes[1].ian_layered_scene.contract_version, 'ian-static-layered-scene-v1');
+  assert.equal(plan.scenes[1].ian_layered_scene.layers.length, 1);
+  assert.equal(plan.scenes[1].ian_layered_scene.layers[0].entry_frame, 0);
+  assert.equal(plan.scenes[1].ian_layered_scene.motion_policy.scene_transform, 'forbidden');
+  assert.equal(
+    plan.qa_contract.ian_layered_scene_packages.contract_version,
+    'ian-layered-scene-consumption-evidence-v1',
+  );
+  assert.deepEqual(plan.qa_contract.ian_layered_scene_packages.shot_ids, ['S02']);
+});
+
+test('v3 rejects retired Ian pan/zoom fields instead of translating the full raster', () => {
+  const input = buildV3Input();
+  input.shots[1].internal_motion_contract = 'ian-subtle-raster-motion-v1';
+  input.shots[1].internal_motion = {
+    mode: 'single_segment',
+    start: {scale: 1, x_px: 0, y_px: 0},
+    end: {scale: 1.04, x_px: 30, y_px: -18},
+    easing: 'ease-in-out',
+    origin: 'center',
+  };
+  assert.throws(
+    () => buildKnowledgeVideoAssemblyPlan(input, {verifySharedReuseEvidence: passingVerifier}),
+    /whole-raster motion is retired/i,
+  );
+});
+
+test('v3 assembly fails closed on missing, stale, or incomplete Ian layered packages', () => {
+  const missing = buildV3Input();
+  delete missing.shots[1].ian_layered_scene;
+  assert.throws(
+    () => buildKnowledgeVideoAssemblyPlan(missing, {
+      verifySharedReuseEvidence: passingVerifier,
+      verifyIanLayeredScenePackageEvidence: () => ({
+        contract_version: 'ian-layered-scene-consumption-evidence-v1',
+        result: 'pass',
+        records: [],
+      }),
+    }),
+    /does not cover/i,
+  );
+
+  const stale = buildV3Input();
+  assert.throws(
+    () => buildKnowledgeVideoAssemblyPlan(stale, {
+      verifySharedReuseEvidence: passingVerifier,
+      verifyIanLayeredScenePackageEvidence: (input) => {
+        const evidence = passingIanLayeredSceneVerifier(input);
+        evidence.records[0].package.scene_plan_sha256 = '0'.repeat(64);
+        return evidence;
+      },
+    }),
+    /stale storyboard scene-plan binding/i,
+  );
+
+  const transformed = buildV3Input();
+  assert.throws(
+    () => buildKnowledgeVideoAssemblyPlan(transformed, {
+      verifySharedReuseEvidence: passingVerifier,
+      verifyIanLayeredScenePackageEvidence: (input) => {
+        const evidence = passingIanLayeredSceneVerifier(input);
+        evidence.records[0].package.scene_plan.motion_policy.scene_transform = 'allowed';
+        return evidence;
+      },
+    }),
+    /forbid scene\/layer transforms/i,
+  );
+
+  const missingLayer = buildV3Input();
+  assert.throws(
+    () => buildKnowledgeVideoAssemblyPlan(missingLayer, {
+      verifySharedReuseEvidence: passingVerifier,
+      verifyIanLayeredScenePackageEvidence: (input) => {
+        const evidence = passingIanLayeredSceneVerifier(input);
+        evidence.records[0].render_assets.layers = [];
+        return evidence;
+      },
+    }),
+    /public render assets differ/i,
+  );
+
+  const staleRhythm = buildV3Input();
+  assert.throws(
+    () => buildKnowledgeVideoAssemblyPlan(staleRhythm, {
+      verifySharedReuseEvidence: passingVerifier,
+      verifyStoryboardVisualRhythmEvidence: (input) => {
+        const evidence = passingStoryboardVisualRhythmVerifier(input);
+        evidence.artifact.shots[1].meaningful_change_events[0].at_frame += 1;
+        return evidence;
+      },
+    }),
+    /narration-rhythm event/i,
+  );
 });
 
 test('real v3 assembly path requires a checksum-current storyboard visual rhythm artifact', () => {
@@ -1025,6 +1266,63 @@ test('v3 assembly validates the mechanical action-state schedule and exact asset
   );
 });
 
+test('new assembly binds explicit workflow selection, v2 rhythm, and v4 schedule', () => {
+  const input = buildV3Input({characterSchedule: true});
+  const gate2ScriptSha256 = '4'.repeat(64);
+  const density = {
+    contract_version: 'visual-density-selection-v1',
+    gate2_script_sha256: gate2ScriptSha256,
+    density_mode: 'standard',
+    decision: {
+      status: 'selected',
+      exact_message: '选择普通密度',
+      decided_at: '2026-08-22T10:00:00+08:00',
+    },
+  };
+  density.selection_sha256 = buildVisualDensitySelectionSha256(density);
+  const mode = {
+    contract_version: 'workflow-approval-mode-v1',
+    gate2_script_sha256: gate2ScriptSha256,
+    visual_density_selection_sha256: density.selection_sha256,
+    approval_mode: 'manual',
+    decision: {
+      status: 'selected',
+      exact_message: '选择手动审批',
+      decided_at: '2026-08-22T10:01:00+08:00',
+    },
+  };
+  mode.selection_sha256 = buildWorkflowApprovalModeSha256(mode);
+  input.workflowApproval = {gate2ScriptSha256, density, mode};
+  const shot = input.shots[0];
+  shot.density_mode = 'standard';
+  shot.visual_density_selection_sha256 = density.selection_sha256;
+  shot.action_state_schedule = buildActionStateScheduleV4({
+    totalFrames: 120,
+    fps: 30,
+    sourceText: '甲乙丙',
+    motionTier: 'stateful',
+    densityMode: 'standard',
+    visualDensitySelectionSha256: density.selection_sha256,
+    states: shot.assets.map((asset, index) => ({
+      state_id: asset.asset_id,
+      semantic_state: ['预备', '接触', '结果'][index],
+      narration_byte_start: index * 3,
+      narration_byte_end: (index + 1) * 3,
+      narration_text: ['甲', '乙', '丙'][index],
+      at_frame: asset.from,
+      semantic_hold_reason: null,
+    })),
+    intraShotTransitions: shot.intra_shot_transitions,
+  });
+  const plan = buildKnowledgeVideoAssemblyPlan(input, {
+    verifySharedReuseEvidence: passingVerifier,
+    verifyStoryboardVisualRhythmEvidence: passingV2StoryboardVisualRhythmVerifier,
+  });
+  assert.equal(plan.scenes[0].action_state_schedule.contract_version, 'action-state-schedule-v4');
+  assert.equal(plan.scenes[0].visual_density_selection_sha256, density.selection_sha256);
+  assert.equal(plan.qa_contract.workflow_approval.result, 'pass');
+});
+
 test('hero_pose carries one locked background behind four transparent pose occurrences', () => {
   const input = buildV3Input();
   const template = input.shots[0].assets[0];
@@ -1249,7 +1547,7 @@ test('rejects missing, pending, or stale visual direction review evidence', () =
   input.visualDirectionReview.rows[0].user_selection.status = 'pending';
   assert.throws(
     () => buildKnowledgeVideoAssemblyPlan(input, {verifySharedReuseEvidence: passingVerifier}),
-    /explicit approved selection/i,
+    /selection status|explicit approved selection/i,
   );
 
   input = structuredClone(baseInput);

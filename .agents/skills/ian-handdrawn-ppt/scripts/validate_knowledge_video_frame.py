@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime
 import hashlib
 import json
 import re
@@ -74,6 +75,76 @@ def _png_dimensions(path: Path) -> tuple[int, int]:
     return struct.unpack(">II", header[16:24])
 
 
+def _policy_timestamp(value: Any, label: str) -> str:
+    timestamp = _string(value, label)
+    try:
+        parsed = datetime.fromisoformat(timestamp)
+    except ValueError as error:
+        raise ContractError(f"{label} must be an ISO-8601 timestamp") from error
+    if parsed.utcoffset() is None:
+        raise ContractError(f"{label} must include an offset")
+    return timestamp
+
+
+def _validate_policy_authorized_selection(
+    *,
+    root: Path,
+    repository: Path,
+    review_path: Path,
+    review_sha: str,
+    presented_sha: str,
+    review: dict[str, Any],
+    selection: dict[str, Any],
+) -> None:
+    state_path = root / "schema" / "episode-state.json"
+    if state_path.is_symlink() or not state_path.is_file():
+        raise ContractError("policy-authorized Ian frame requires current episode state")
+    state = _read_json(state_path)
+    policy = state.get("one_click_approval_policy")
+    current = state.get("visual_direction_review")
+    workflow = state.get("workflow_approval_mode")
+    if not isinstance(policy, dict) or not isinstance(current, dict) or not isinstance(workflow, dict):
+        raise ContractError("Ian policy authorization is incomplete")
+    policy_sha = _sha(policy.get("policy_sha256"), "one_click_approval_policy.policy_sha256")
+    authorization = review.get("policy_authorization")
+    if not isinstance(authorization, dict):
+        raise ContractError("Ian visual direction policy authorization is missing")
+    authorized_at = _policy_timestamp(
+        authorization.get("authorized_at"),
+        "visual_direction_review.policy_authorization.authorized_at",
+    )
+    review_relative = review_path.relative_to(repository).as_posix()
+    if (
+        workflow.get("approval_mode") != "one_click"
+        or policy.get("contract_version") != "one-click-approval-policy-v1"
+        or policy.get("preauthorizations", {}).get(
+            "deterministic_visual_direction_recommendations"
+        )
+        is not True
+        or policy.get("preauthorizations", {}).get("continue_during_visual_production")
+        is not True
+        or policy.get("user_has_reviewed_specific_maps") is not False
+        or current.get("status") != "policy_authorized"
+        or current.get("path") != review_relative
+        or current.get("checksum_sha256") != review_sha
+        or current.get("presented_map_sha256") != presented_sha
+        or review.get("status") != "policy_authorized"
+        or authorization.get("policy_sha256") != policy_sha
+        or authorization.get("user_has_reviewed_specific_map") is not False
+        or authorization.get("presented_map_sha256") != presented_sha
+        or selection.get("policy_sha256") != policy_sha
+        or selection.get("presented_map_sha256") != presented_sha
+        or selection.get("deterministic_recommendation_selected") is not True
+        or selection.get("user_has_reviewed_specific_map") is not False
+        or selection.get("exact_message") is not None
+        or selection.get("decided_at") is not None
+        or selection.get("authorized_at") != authorized_at
+    ):
+        raise ContractError(
+            "Ian visual direction policy binding is stale or fabricates concrete-map review"
+        )
+
+
 def validate_manifest(manifest: dict[str, Any], *, episode_workspace: Path, repo_root: Path) -> dict[str, Any]:
     root = episode_workspace.resolve(strict=True)
     repository = repo_root.resolve(strict=True)
@@ -116,8 +187,20 @@ def validate_manifest(manifest: dict[str, Any], *, episode_workspace: Path, repo
         raise ContractError("Ian frame must resolve exactly one visual direction row")
     row = matches[0]
     selection = row.get("user_selection")
-    if not isinstance(selection, dict) or selection.get("status") != "approved":
-        raise ContractError("Ian visual direction row is not approved")
+    if not isinstance(selection, dict):
+        raise ContractError("Ian visual direction row authorization is missing")
+    if selection.get("status") == "policy_authorized":
+        _validate_policy_authorized_selection(
+            root=root,
+            repository=repository,
+            review_path=review_path,
+            review_sha=review_sha,
+            presented_sha=presented_sha,
+            review=review,
+            selection=selection,
+        )
+    elif selection.get("status") != "approved":
+        raise ContractError("Ian visual direction row is not approved or policy-authorized")
     if selection.get("presented_map_sha256") != presented_sha:
         raise ContractError("Ian row selection has stale presented-map evidence")
     if selection.get("visual_generation_route") != "ian-handdrawn-ppt":

@@ -7,6 +7,18 @@ const clampProgress = (progress) => {
 
 const pct = (value) => `${Number(value.toFixed(3))}%`;
 
+export const resolveTransitionTailProgress = ({tailFrame, durationInFrames}) => {
+  if (typeof tailFrame !== 'number' || !Number.isFinite(tailFrame)) {
+    throw new Error(`invalid transition tail frame: ${tailFrame}`);
+  }
+  if (typeof durationInFrames !== 'number'
+    || !Number.isFinite(durationInFrames)
+    || durationInFrames <= 0) {
+    throw new Error(`invalid transition duration: ${durationInFrames}`);
+  }
+  return clampProgress(tailFrame / durationInFrames);
+};
+
 const directionalTranslate = (direction, progress) => {
   const amount = progress * 100;
   if (direction === 'from-left') return `${pct(amount)} 0`;
@@ -30,12 +42,12 @@ export const resolveTransitionTailStyle = ({kind, options = {}, progress}) => {
   if (kind === 'dissolve' || kind === 'fade') return {opacity: 1 - value};
 
   if (kind === 'paper-wipe') {
-    const edge = -2 + value * 102;
-    const tooth = 1.4;
+    const translate = pct(value * 108);
     return {
-      opacity: 1 - value,
-      clipPath: `polygon(${edge}% 0, 100% 0, 100% 100%, ${edge}% 100%, ${edge + tooth}% 88%, ${edge - tooth}% 74%, ${edge + tooth}% 60%, ${edge - tooth}% 46%, ${edge + tooth}% 31%, ${edge - tooth}% 16%)`,
-      filter: `drop-shadow(-${Math.round(10 * (1 - value))}px 0 7px rgba(91, 64, 39, ${0.24 * (1 - value)}))`,
+      transform: `translate3d(${translate}, 0, 0)`,
+      borderLeft: '2px solid rgba(91, 64, 39, 0.22)',
+      boxShadow: '-12px 0 18px rgba(91, 64, 39, 0.28)',
+      willChange: 'transform',
     };
   }
 

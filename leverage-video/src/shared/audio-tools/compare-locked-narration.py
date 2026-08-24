@@ -17,7 +17,15 @@ def sha256_bytes(data: bytes) -> str:
 
 
 def strip_optional_archive_header(text: str) -> str:
-    return re.sub(r"^\[[^\n]+\][^\n]*\n+", "", text, count=1)
+    bracketed = re.sub(r"^\[[^\n]+\][^\n]*\n+", "", text, count=1)
+    if bracketed != text:
+        return bracketed
+    return re.sub(
+        r"^[^\r\n]*\S[^\r\n]*\r?\n(?:[ \t]*\r?\n)+",
+        "",
+        text,
+        count=1,
+    )
 
 
 def normalize_text(text: str) -> str:

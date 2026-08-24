@@ -104,6 +104,7 @@ Check:
 - Props such as books, screens, documents, and cards are blank or only contain line marks unless their text is explicitly listed.
 - If exact text fails, reduce text and regenerate.
 - If exact text remains wrong after simplification, use deterministic text overlay on the accepted generated base image, then re-check readability, alignment, and style consistency before delivery.
+- For a knowledge-video exact-text overlay, every rendered glyph bounding box must remain inside its human-verified intended card or diagram container with at least 8 px inset. Record checksum-bound `ian-text-container-qa-evidence-v1`; a visual claim such as “labels unobstructed” without measured glyph/container bounds does not pass.
 
 ## Contact Sheet Gate
 

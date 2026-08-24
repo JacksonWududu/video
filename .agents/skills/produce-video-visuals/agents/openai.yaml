@@ -1,4 +1,4 @@
 interface:
   display_name: "Produce Video Visuals"
   short_description: "Produce approved narrative and graphic visuals"
-  default_prompt: "Use $produce-video-visuals to consume the approved v3 direction and storyboard-visual-rhythm maps, generate and approve layered/stateful/hero_pose assets at their locked counts, preserve each exact intra-shot-transition-v1 entry with cut as default and watercolor only when explicitly approved, process generated/Whiteboard items before deferred local-video sources, reject retired routes, and review every exact output sequentially."
+  default_prompt: "Use $produce-video-visuals to consume v2 rhythm/v4 density-bound schedules, generate every locked asset sequentially, run all route and white-cat QA, preserve manual review or record one-click QA-passed-pending-final-review, unlock only true dependencies, and stop for the complete exact hash-list approval before assembly."

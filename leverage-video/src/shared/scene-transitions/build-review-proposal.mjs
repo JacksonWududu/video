@@ -12,6 +12,7 @@ import {
   resolveTransitionRecommendation,
 } from './contract.mjs';
 import {buildPresentedMapSha256 as buildVisualDirectionMapSha256} from '../visual-generation-routes/contract.mjs';
+import {validateApprovedVisibleTextReviewState} from '../visible-text-review/state-gate.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPOSITORY_ROOT = path.resolve(HERE, '../../../..');
@@ -142,15 +143,19 @@ const buildArtifacts = ({episodeWorkspace, classificationPath, presentedAt, over
   const workspacePath = resolveRootRelative(episodeWorkspace, 'episode workspace');
   const statePath = path.join(workspacePath, 'schema/episode-state.json');
   const state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+  const oneClick = state.workflow_approval_mode?.approval_mode === 'one_click';
+  const expectedDirectionStatus = oneClick ? 'policy_authorized' : 'approved';
   const replacingPendingProposal = state.current_phase === 'awaiting_transition_review';
-  const refreshingAffectedProposal = state.current_phase === 'visual_direction_review_approved'
+  const refreshingAffectedProposal = state.current_phase === 'visible_text_review_approved'
     && state.transition_review?.status === 'reopen_required_after_visual_direction_review';
   if (state.workspace_path !== episodeWorkspace
-    || !['visual_direction_review_approved', 'awaiting_transition_review'].includes(state.current_phase)) {
+    || !['visible_text_review_approved', 'awaiting_transition_review'].includes(state.current_phase)) {
     throw new Error('episode is not ready to build or replace a pending transition proposal');
   }
-  if (state.visual_direction_review?.status !== 'approved') {
-    throw new Error('visual direction review is not approved');
+  if (state.visual_direction_review?.status !== expectedDirectionStatus) {
+    throw new Error(oneClick
+      ? 'visual direction review is not policy-authorized'
+      : 'visual direction review is not approved');
   }
   const reviewPath = resolveRootRelative(state.visual_direction_review.path, 'visual direction review path');
   const reviewBytes = fs.readFileSync(reviewPath);
@@ -158,18 +163,48 @@ const buildArtifacts = ({episodeWorkspace, classificationPath, presentedAt, over
     throw new Error('visual direction review checksum is stale');
   }
   const review = JSON.parse(reviewBytes);
-  if (review.status !== 'approved'
+  const policySha256 = state.one_click_approval_policy?.policy_sha256;
+  const policyAuthorizationInvalid = oneClick && (
+    !/^[a-f0-9]{64}$/.test(policySha256 ?? '')
+    || state.one_click_approval_policy?.preauthorizations
+      ?.deterministic_visual_direction_recommendations !== true
+    || state.one_click_approval_policy?.preauthorizations
+      ?.deterministic_transition_recommendations !== true
+    || state.one_click_approval_policy?.user_has_reviewed_specific_maps !== false
+    || review.policy_authorization?.policy_sha256 !== policySha256
+    || review.policy_authorization?.user_has_reviewed_specific_map !== false
+    || review.policy_authorization?.presented_map_sha256 !== review.presented_map_sha256
+    || typeof review.policy_authorization?.authorized_at !== 'string'
+    || Number.isNaN(Date.parse(review.policy_authorization.authorized_at))
+    || review.rows.some((row) => row.user_selection?.policy_sha256 !== policySha256
+      || row.user_selection.deterministic_recommendation_selected !== true
+      || row.user_selection.user_has_reviewed_specific_map !== false
+      || row.user_selection.exact_message !== null
+      || row.user_selection.decided_at !== null
+      || row.user_selection.authorized_at !== review.policy_authorization.authorized_at)
+  );
+  if (review.status !== expectedDirectionStatus
     || review.presented_map_sha256 !== state.visual_direction_review.presented_map_sha256
     || review.presented_map_sha256 !== buildVisualDirectionMapSha256(review)
-    || review.rows.some((row) => row.user_selection?.status !== 'approved'
-      || row.user_selection.presented_map_sha256 !== review.presented_map_sha256)) {
-    throw new Error('visual direction approval evidence is incomplete or stale');
+    || review.rows.some((row) => row.user_selection?.status !== expectedDirectionStatus
+      || row.user_selection.presented_map_sha256 !== review.presented_map_sha256)
+    || policyAuthorizationInvalid) {
+    throw new Error(oneClick
+      ? 'visual direction policy authorization is incomplete, stale, or fabricates concrete-map review'
+      : 'visual direction approval evidence is incomplete or stale');
   }
   const storyboardPath = resolveRootRelative(review.storyboard.path, 'storyboard path');
   const storyboardBytes = fs.readFileSync(storyboardPath);
   if (sha256(storyboardBytes) !== review.storyboard.checksum_sha256) {
     throw new Error('storyboard checksum is stale');
   }
+  validateApprovedVisibleTextReviewState({
+    repositoryRoot: REPOSITORY_ROOT,
+    episodeWorkspace,
+    state,
+    visualDirectionReview: review,
+    storyboardMarkdown: storyboardBytes.toString('utf8'),
+  });
 
   const classificationBytes = fs.readFileSync(path.resolve(classificationPath));
   const classificationInput = JSON.parse(classificationBytes);
@@ -452,11 +487,18 @@ const buildArtifacts = ({episodeWorkspace, classificationPath, presentedAt, over
     available_catalog_entries: TRANSITION_CATALOG,
     rows,
     presentation: {
-      presented_at: presentedAt,
-      exact_message: refreshingAffectedProposal
-        ? `已按 ${diversified.policy.rule_id} 重建 ${affectedBoundaryIds.length} 条受视觉路线变化影响的 scene-transition-v3 边界；其余 ${rows.length - affectedBoundaryIds.length} 条批准选择在边界视觉上下文与选择均未变化且整期多样性复验通过后机械重绑；等待用户明确批准受影响边界。`
-        : `已按 ${diversified.policy.rule_id} 呈现完整 ${rows.length} 条普通边界的 scene-transition-v3 推荐映射及全部注册目录项；白猫 ImageGen 边界优先 watercolor-bloom；同种可见动画连续不超过 ${diversified.policy.max_consecutive_identical_visible_kind_uses} 次，整期不超过 ${diversified.policy.max_identical_visible_kind_absolute_uses} 次且占可见转场不超过 ${Math.round(diversified.policy.max_identical_visible_kind_share * 100)}%；等待用户逐条选择或明确确认全部推荐。`,
-      approval_phrase_after_complete_presentation: '确认全部推荐',
+      presented_at: oneClick ? null : presentedAt,
+      exact_message: oneClick
+        ? null
+        : (refreshingAffectedProposal
+          ? `已按 ${diversified.policy.rule_id} 重建 ${affectedBoundaryIds.length} 条受视觉路线变化影响的 scene-transition-v3 边界；其余 ${rows.length - affectedBoundaryIds.length} 条批准选择在边界视觉上下文与选择均未变化且整期多样性复验通过后机械重绑；等待用户明确批准受影响边界。`
+          : `已按 ${diversified.policy.rule_id} 呈现完整 ${rows.length} 条普通边界的 scene-transition-v3 推荐映射及全部注册目录项；白猫 ImageGen 边界优先 watercolor-bloom；同种可见动画连续不超过 ${diversified.policy.max_consecutive_identical_visible_kind_uses} 次，整期不超过 ${diversified.policy.max_identical_visible_kind_absolute_uses} 次且占可见转场不超过 ${Math.round(diversified.policy.max_identical_visible_kind_share * 100)}%；等待用户逐条选择或明确确认全部推荐。`),
+      approval_phrase_after_complete_presentation: oneClick ? null : '确认全部推荐',
+      ...(oneClick ? {
+        generated_at: presentedAt,
+        policy_sha256: policySha256,
+        user_has_reviewed_specific_map: false,
+      } : {}),
     },
   };
   proposal.presented_map_sha256 = buildTransitionReviewPresentedMapSha256(proposal);
@@ -475,8 +517,12 @@ const buildArtifacts = ({episodeWorkspace, classificationPath, presentedAt, over
   const nextState = structuredClone(state);
   nextState.storyboard_construction = {
     ...nextState.storyboard_construction,
-    status: 'visual_direction_approved_awaiting_transition_review',
-    ordinary_transition_status: 'awaiting_explicit_per_boundary_review',
+    status: oneClick
+      ? 'visual_direction_policy_authorized_awaiting_transition_policy_binding'
+      : 'visual_direction_approved_awaiting_transition_review',
+    ordinary_transition_status: oneClick
+      ? 'awaiting_deterministic_policy_authorization'
+      : 'awaiting_explicit_per_boundary_review',
   };
   if (priorTransitionReview) {
     const priorBinding = refreshingAffectedProposal
@@ -519,8 +565,13 @@ const buildArtifacts = ({episodeWorkspace, classificationPath, presentedAt, over
       unaffected_boundary_evidence_preserved: true,
     } : {}),
     diversity_policy: diversified.policy,
-    presented_at: presentedAt,
+    presented_at: oneClick ? null : presentedAt,
     exact_presentation_message: proposal.presentation.exact_message,
+    ...(oneClick ? {
+      generated_at: presentedAt,
+      policy_sha256: policySha256,
+      user_has_reviewed_specific_map: false,
+    } : {}),
   };
   nextState.current_phase = 'awaiting_transition_review';
   const nextStateBytes = jsonBytes(nextState);

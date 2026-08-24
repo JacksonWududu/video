@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 import os
 import re
+import stat
 import sys
 from pathlib import Path
+from typing import Any
 
 
 REQUIRED_TOP = {"assets", "script", "schema", "docs"}
@@ -56,6 +60,75 @@ NARRATION_TEXT_MARKERS = (
     "分镜",
     "转写",
 )
+SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+WHITE_CAT_PENDING_QA_STATUSES = {
+    "awaiting_user_approval",
+    "awaiting_batch_qa",
+    "qa_passed_pending_batch_review",
+    "qa_passed_pending_final_review",
+}
+WHITE_CAT_IMAGEGEN_QA_CONTRACTS = {
+    "base/master": "ordinary-imagegen-white-cat-master-qa-v2",
+    "action": "ordinary-imagegen-white-cat-action-qa-v2",
+}
+WHITE_CAT_XUAN_QA_CONTRACTS = {
+    "base/master": "xuan-paper-diorama-asset-qa-v1",
+    "action": "xuan-paper-diorama-action-qa-v1",
+}
+WHITE_CAT_ANATOMY_QA_CONTRACT = "white-cat-anatomy-qa-v2"
+IAN_LAYERED_PACKAGE_REQUIRED_STATUSES = {
+    "awaiting_batch_qa",
+    "qa_passed_pending_batch_review",
+    "qa_passed_pending_final_review",
+    "awaiting_user_approval",
+    "approved",
+}
+VISIBLE_TEXT_APPROVAL_REQUIRED_PHASES = {
+    "visible_text_review_approved",
+    "awaiting_transition_review",
+    "transition_review_approved",
+    "transition_policy_authorized",
+    "storyboard_qa_passed",
+    "awaiting_storyboard_review",
+    "storyboard_review_approved",
+    "storyboard_policy_authorized",
+    "visual_production",
+    "awaiting_visual_asset_review",
+    "awaiting_precomposition_visual_review",
+    "visual_assets_locked",
+    "awaiting_caption_delivery_choice",
+    "assembly_preflight",
+    "composition_locked",
+    "final_rendering",
+}
+VISIBLE_TEXT_ROW_APPROVAL_FIELDS = {
+    "approval",
+    "status",
+    "exact_message",
+    "decided_at",
+}
+VISIBLE_TEXT_COLLOQUIAL_MARKERS = (
+    "你看",
+    "你会发现",
+    "你可以",
+    "我们",
+    "咱们",
+    "大家",
+    "其实",
+    "说白了",
+    "换句话说",
+    "也就是说",
+    "简单来说",
+    "然后呢",
+    "那么",
+    "所以说",
+    "这就是",
+    "有没有",
+    "怎么办",
+    "来看",
+    "想一想",
+    "别急",
+)
 
 
 def _expected_category(path: Path) -> tuple[str, ...] | None:
@@ -65,6 +138,619 @@ def _expected_category(path: Path) -> tuple[str, ...] | None:
     ):
         return ("assets", "narration")
     return EXTENSION_CATEGORIES.get(suffix)
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _resolve_bound_regular_file(
+    repo: Path,
+    path_value: Any,
+    checksum_value: Any,
+    label: str,
+) -> tuple[Path | None, list[str]]:
+    errors: list[str] = []
+    if not isinstance(path_value, str) or not path_value or Path(path_value).is_absolute():
+        return None, [f"{label} path must be root-relative"]
+    if not isinstance(checksum_value, str) or not SHA256_RE.fullmatch(checksum_value):
+        return None, [f"{label} checksum must be lowercase SHA-256"]
+
+    relative = Path(path_value)
+    if ".." in relative.parts:
+        return None, [f"{label} path must stay within the repository"]
+    candidate = repo / relative
+    try:
+        resolved = candidate.resolve(strict=True)
+        resolved.relative_to(repo)
+    except (FileNotFoundError, RuntimeError, ValueError, OSError):
+        return None, [f"{label} path is missing or outside the repository: {path_value}"]
+
+    current = repo
+    for part in relative.parts:
+        current = current / part
+        if current.is_symlink():
+            errors.append(f"{label} path must not contain a symlink: {path_value}")
+            break
+    try:
+        mode = candidate.stat(follow_symlinks=False).st_mode
+    except OSError:
+        return None, [f"{label} path is not readable: {path_value}"]
+    if not stat.S_ISREG(mode):
+        errors.append(f"{label} path must be a regular file: {path_value}")
+    if errors:
+        return None, errors
+    try:
+        actual_checksum = _sha256_file(candidate)
+    except OSError:
+        return None, [f"{label} path is not readable: {path_value}"]
+    if actual_checksum != checksum_value:
+        return None, [f"{label} checksum is stale: {path_value}"]
+    return candidate, []
+
+
+def _white_cat_role(item: dict[str, Any]) -> str | None:
+    role = item.get("role")
+    if role == "base/master":
+        return "base/master"
+    if isinstance(role, str) and role.startswith("action-"):
+        return "action"
+    return None
+
+
+def _validate_pending_white_cat_qa(
+    repo: Path,
+    item: dict[str, Any],
+) -> list[str]:
+    asset_id = item.get("asset_id")
+    label = f"White-cat asset {asset_id!r} QA evidence"
+    qa_file, errors = _resolve_bound_regular_file(
+        repo,
+        item.get("qa_evidence_path"),
+        item.get("qa_evidence_checksum_sha256"),
+        label,
+    )
+    if errors or qa_file is None:
+        return errors
+    try:
+        qa = json.loads(qa_file.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        return [f"{label} is not valid UTF-8 JSON: {error}"]
+    if not isinstance(qa, dict):
+        return [f"{label} must contain a JSON object"]
+
+    role = _white_cat_role(item)
+    route = item.get("visual_generation_route")
+    if role is None:
+        return [f"White-cat asset {asset_id!r} has an unsupported image role"]
+    contracts = (
+        WHITE_CAT_IMAGEGEN_QA_CONTRACTS
+        if route == "imagegen"
+        else WHITE_CAT_XUAN_QA_CONTRACTS
+    )
+    expected_contract = contracts[role]
+    if qa.get("contract_version") != expected_contract:
+        errors.append(
+            f"White-cat asset {asset_id!r} QA contract must be {expected_contract}"
+        )
+    if item.get("qa_contract_version") != expected_contract:
+        errors.append(
+            f"White-cat asset {asset_id!r} state QA contract must be {expected_contract}"
+        )
+    if qa.get("result") != "pass":
+        errors.append(f"White-cat asset {asset_id!r} top-level QA must pass")
+    if qa.get("asset_id") != asset_id:
+        errors.append(f"White-cat asset {asset_id!r} QA asset_id is stale")
+
+    identity = qa.get("identity_qa")
+    if not isinstance(identity, dict) or identity.get("result") != "pass":
+        errors.append(f"White-cat asset {asset_id!r} identity_qa must pass")
+        return errors
+    anatomy = identity.get("anatomy_evidence")
+    if not isinstance(anatomy, dict):
+        errors.append(f"White-cat asset {asset_id!r} anatomy evidence is missing")
+        return errors
+    if anatomy.get("contract_version") != WHITE_CAT_ANATOMY_QA_CONTRACT:
+        errors.append(
+            f"White-cat asset {asset_id!r} anatomy contract must be "
+            f"{WHITE_CAT_ANATOMY_QA_CONTRACT}"
+        )
+    if anatomy.get("result") != "pass":
+        errors.append(f"White-cat asset {asset_id!r} anatomy QA must pass")
+    expected_source = {
+        "path": item.get("path"),
+        "checksum_sha256": item.get("checksum_sha256"),
+    }
+    if anatomy.get("source_image") != expected_source:
+        errors.append(
+            f"White-cat asset {asset_id!r} anatomy source binding is stale"
+        )
+    inspection = anatomy.get("inspection_evidence")
+    if not isinstance(inspection, dict):
+        errors.append(
+            f"White-cat asset {asset_id!r} numbered limb map evidence is missing"
+        )
+        return errors
+    if inspection.get("methods") != ["full_resolution", "numbered_limb_map"]:
+        errors.append(
+            f"White-cat asset {asset_id!r} numbered limb map methods are invalid"
+        )
+    _, map_errors = _resolve_bound_regular_file(
+        repo,
+        inspection.get("numbered_limb_map_path"),
+        inspection.get("numbered_limb_map_checksum_sha256"),
+        f"White-cat asset {asset_id!r} numbered limb map",
+    )
+    errors.extend(map_errors)
+    if inspection.get("numbered_limb_map_source_checksum_sha256") != expected_source[
+        "checksum_sha256"
+    ]:
+        errors.append(
+            f"White-cat asset {asset_id!r} numbered limb map source binding is stale"
+        )
+    if inspection.get("numbered_limb_map_limb_ids") != ["F1", "F2", "H1", "H2"]:
+        errors.append(
+            f"White-cat asset {asset_id!r} numbered limb map limb IDs are invalid"
+        )
+    return errors
+
+
+def _validate_approved_white_cat_history(
+    repo: Path,
+    item: dict[str, Any],
+) -> list[str]:
+    asset_id = item.get("asset_id")
+    checksum = item.get("checksum_sha256")
+    errors: list[str] = []
+    if (
+        not isinstance(checksum, str)
+        or not SHA256_RE.fullmatch(checksum)
+        or item.get("approved_checksum_sha256") != checksum
+        or item.get("presented_checksum_sha256") != checksum
+    ):
+        errors.append(f"Approved historical white-cat asset {asset_id!r} checksum evidence is invalid")
+    if not isinstance(item.get("decision_message"), str) or not item["decision_message"].strip():
+        errors.append(f"Approved historical white-cat asset {asset_id!r} decision message is missing")
+    if not isinstance(item.get("decision_time"), str) or not item["decision_time"].strip():
+        errors.append(f"Approved historical white-cat asset {asset_id!r} decision time is missing")
+    _, source_errors = _resolve_bound_regular_file(
+        repo,
+        item.get("path"),
+        checksum,
+        f"Approved historical white-cat asset {asset_id!r}",
+    )
+    errors.extend(source_errors)
+
+    qa_file, qa_errors = _resolve_bound_regular_file(
+        repo,
+        item.get("qa_evidence_path"),
+        item.get("qa_evidence_checksum_sha256"),
+        f"Approved historical white-cat asset {asset_id!r} QA evidence",
+    )
+    errors.extend(qa_errors)
+    if qa_file is None:
+        return errors
+    try:
+        qa = json.loads(qa_file.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        errors.append(
+            f"Approved historical white-cat asset {asset_id!r} QA is not valid UTF-8 JSON: {error}"
+        )
+        return errors
+    if not isinstance(qa, dict):
+        errors.append(f"Approved historical white-cat asset {asset_id!r} QA must be a JSON object")
+        return errors
+
+    role = _white_cat_role(item)
+    route = item.get("visual_generation_route")
+    if role is None:
+        errors.append(f"Approved historical white-cat asset {asset_id!r} has an unsupported role")
+        return errors
+    if route == "imagegen":
+        suffix = "master" if role == "base/master" else "action"
+        allowed_contracts = {
+            f"ordinary-imagegen-white-cat-{suffix}-qa-v1",
+            f"ordinary-imagegen-white-cat-{suffix}-qa-v2",
+        }
+    else:
+        allowed_contracts = {WHITE_CAT_XUAN_QA_CONTRACTS[role]}
+    contract = qa.get("contract_version")
+    if contract not in allowed_contracts:
+        errors.append(f"Approved historical white-cat asset {asset_id!r} QA contract is invalid")
+    if qa.get("result") != "pass" or qa.get("asset_id") != asset_id:
+        errors.append(f"Approved historical white-cat asset {asset_id!r} QA identity is stale")
+    recorded_contract = item.get("qa_contract_version")
+    if recorded_contract is not None and recorded_contract != contract:
+        errors.append(f"Approved historical white-cat asset {asset_id!r} state QA contract is stale")
+    if contract in {
+        "ordinary-imagegen-white-cat-master-qa-v2",
+        "ordinary-imagegen-white-cat-action-qa-v2",
+    } or (route == "xuan-paper-diorama" and recorded_contract is not None):
+        errors.extend(_validate_pending_white_cat_qa(repo, item))
+    return errors
+
+
+def _validate_white_cat_pending_qa(
+    repo: Path,
+    workspace: Path,
+) -> list[str]:
+    state_file = workspace / "schema" / "episode-state.json"
+    if not state_file.exists():
+        return []
+    if state_file.is_symlink() or not state_file.is_file():
+        return [
+            "Episode state must be a regular non-symlink file: "
+            f"{state_file.relative_to(repo)}"
+        ]
+    try:
+        state = json.loads(state_file.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        return [f"Episode state is not valid UTF-8 JSON: {error}"]
+    if not isinstance(state, dict):
+        return ["Episode state must contain a JSON object"]
+
+    review = state.get("visual_asset_review")
+    if review is None:
+        return []
+    if not isinstance(review, dict):
+        return ["Episode visual_asset_review must be a JSON object"]
+    if "queue" not in review:
+        return []
+    queue = review["queue"]
+    if not isinstance(queue, list):
+        return ["Episode visual_asset_review.queue must be a JSON array"]
+
+    errors: list[str] = []
+    for index, item in enumerate(queue):
+        if not isinstance(item, dict):
+            errors.append(f"Episode visual_asset_review.queue[{index}] must be a JSON object")
+            continue
+        if (
+            item.get("active_for_current_storyboard") is False
+            or item.get("status") == "superseded"
+            or item.get("white_cat_present") is not True
+            or item.get("visual_generation_route") not in {"imagegen", "xuan-paper-diorama"}
+        ):
+            continue
+        if item.get("status") in WHITE_CAT_PENDING_QA_STATUSES:
+            errors.extend(_validate_pending_white_cat_qa(repo, item))
+        elif item.get("status") == "approved":
+            errors.extend(_validate_approved_white_cat_history(repo, item))
+    return errors
+
+
+def _canonical_sha256(value: Any) -> str:
+    return hashlib.sha256(
+        json.dumps(
+            value,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+
+
+def _validate_active_ian_layered_scene_queue(
+    repo: Path,
+    workspace: Path,
+) -> list[str]:
+    state_file = workspace / "schema" / "episode-state.json"
+    if not state_file.exists() or state_file.is_symlink() or not state_file.is_file():
+        return []
+    try:
+        state = json.loads(state_file.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return []
+    if not isinstance(state, dict) or state.get("current_phase") == "delivered":
+        return []
+    queue = state.get("visual_asset_review", {}).get("queue", [])
+    if not isinstance(queue, list):
+        return []
+
+    errors: list[str] = []
+    for index, item in enumerate(queue):
+        if not isinstance(item, dict):
+            continue
+        if (
+            item.get("active_for_current_storyboard") is False
+            or item.get("status") == "superseded"
+            or item.get("visual_generation_route") != "ian-handdrawn-ppt"
+        ):
+            continue
+        label = f"Active Ian asset {item.get('asset_id')!r}"
+        plan = item.get("ian_scene_plan")
+        if (
+            not isinstance(plan, dict)
+            or plan.get("contract_version") != "ian-layered-scene-plan-v1"
+            or plan.get("shot_id") != item.get("shot_id")
+            or plan.get("scene_renderer") != "ian-static-layered-scene-v1"
+            or plan.get("layer_asset_policy") != "full-canvas-transparent-png-v1"
+            or not isinstance(plan.get("layers"), list)
+            or not plan["layers"]
+            or plan.get("layer_count") != len(plan["layers"])
+            or item.get("ian_scene_plan_sha256") != _canonical_sha256(plan)
+        ):
+            errors.append(
+                f"{label} must migrate from a flattened raster to a checksum-bound "
+                "ian-layered-scene-plan-v1"
+            )
+            continue
+        motion = plan.get("motion_policy")
+        if motion != {
+            "scene_transform": "forbidden",
+            "layer_transform": "forbidden",
+            "mask_reveal": "forbidden",
+            "internal_cut": "forbidden",
+            "opacity_animation": "ian-layer-entry-fade-v1",
+        }:
+            errors.append(f"{label} layered plan permits retired motion or masking")
+        if item.get("status") not in IAN_LAYERED_PACKAGE_REQUIRED_STATUSES:
+            continue
+        manifest_file, manifest_errors = _resolve_bound_regular_file(
+            repo,
+            item.get("scene_package_manifest_path"),
+            item.get("scene_package_manifest_checksum_sha256"),
+            f"{label} layered-scene manifest",
+        )
+        errors.extend(manifest_errors)
+        members = item.get("ian_scene_package_members")
+        lineage = item.get("generation_lineage")
+        if (
+            item.get("qa_contract_version") != "ian-layered-scene-qa-v1"
+            or not isinstance(members, list)
+            or len(members) != len(plan["layers"]) + 2
+            or [member.get("member_role") for member in members]
+            != ["background"]
+            + ["semantic-layer"] * len(plan["layers"])
+            + ["final-composite"]
+            or not isinstance(lineage, list)
+            or len(lineage) != len(plan["layers"]) + 1
+            or any(not isinstance(stage, dict) for stage in lineage)
+            or [stage.get("member_role") for stage in lineage]
+            != ["background"] + ["semantic-layer"] * len(plan["layers"])
+        ):
+            errors.append(f"{label} layered package QA/member projection is incomplete")
+        if manifest_file is None:
+            continue
+        try:
+            manifest = json.loads(manifest_file.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            errors.append(f"{label} layered-scene manifest is not valid UTF-8 JSON")
+            continue
+        if (
+            not isinstance(manifest, dict)
+            or manifest.get("contract_version")
+            != "ian-knowledge-video-layered-scene-v1"
+            or manifest.get("queue_item_id") != item.get("asset_id")
+            or manifest.get("scene_plan") != plan
+            or manifest.get("scene_plan_sha256") != item.get("ian_scene_plan_sha256")
+        ):
+            errors.append(f"{label} layered-scene manifest is stale")
+    return errors
+
+
+def _validate_concise_visible_text(value: Any, label: str) -> list[str]:
+    if not isinstance(value, str) or not value.strip():
+        return [f"{label} concise visible text must be non-empty"]
+    errors: list[str] = []
+    if value != value.strip() or "\r" in value:
+        errors.append(f"{label} concise visible text has invalid outer whitespace or line breaks")
+    lines = value.split("\n")
+    if len(lines) > 2 or any(not line.strip() for line in lines):
+        errors.append(f"{label} concise visible text permits at most two non-empty lines")
+    if sum(not character.isspace() for character in value) > 28:
+        errors.append(f"{label} concise visible text exceeds 28 non-whitespace characters")
+    if re.search(r"[。！？!?；;]", value) or any(
+        marker in value for marker in VISIBLE_TEXT_COLLOQUIAL_MARKERS
+    ) or re.match(r"^[我你](?!国)", value) or re.search(r"[吧嘛呢呀啊哦啦呗]$", value):
+        errors.append(f"{label} contains spoken or prose-like visible text")
+    return errors
+
+
+def _validate_visible_text_batch_review(
+    repo: Path,
+    workspace: Path,
+) -> list[str]:
+    state_file = workspace / "schema" / "episode-state.json"
+    if not state_file.exists() or state_file.is_symlink() or not state_file.is_file():
+        return []
+    try:
+        state = json.loads(state_file.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return []
+    if not isinstance(state, dict) or state.get("current_phase") in {
+        "delivered",
+        "revoice_variant_delivered",
+    }:
+        return []
+    direction_binding = state.get("visual_direction_review")
+    if not isinstance(direction_binding, dict) or state.get(
+        "current_phase"
+    ) not in VISIBLE_TEXT_APPROVAL_REQUIRED_PHASES:
+        return []
+
+    review_binding = state.get("visible_text_review")
+    if not isinstance(review_binding, dict):
+        return ["complete visible-text batch approval is missing"]
+
+    errors: list[str] = []
+    if (
+        review_binding.get("contract_version") != "visible-text-batch-review-v1"
+        or review_binding.get("status") != "approved"
+        or review_binding.get("approval_scope") != "complete_presented_map"
+        or review_binding.get("user_has_reviewed_complete_map") is not True
+        or review_binding.get("row_by_row_approval_performed") is not False
+    ):
+        errors.append("complete visible-text batch approval is missing")
+
+    direction_file, direction_errors = _resolve_bound_regular_file(
+        repo,
+        direction_binding.get("path"),
+        direction_binding.get("checksum_sha256"),
+        "Visual-direction review",
+    )
+    review_file, review_errors = _resolve_bound_regular_file(
+        repo,
+        review_binding.get("path"),
+        review_binding.get("checksum_sha256"),
+        "Visible-text batch review",
+    )
+    errors.extend(direction_errors)
+    errors.extend(review_errors)
+    if direction_file is None or review_file is None:
+        return errors
+    try:
+        direction = json.loads(direction_file.read_text(encoding="utf-8"))
+        review = json.loads(review_file.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        errors.append("Visible-text batch review evidence is not valid UTF-8 JSON")
+        return errors
+    if not isinstance(direction, dict) or not isinstance(review, dict):
+        errors.append("Visible-text batch review evidence must contain JSON objects")
+        return errors
+
+    workspace_relative = workspace.relative_to(repo).as_posix()
+    expected_direction_binding = {
+        "path": direction_binding.get("path"),
+        "checksum_sha256": direction_binding.get("checksum_sha256"),
+        "presented_map_sha256": direction_binding.get("presented_map_sha256"),
+        "status": direction.get("status"),
+    }
+    if (
+        direction.get("contract_version") != "per-shot-visual-direction-review-v3"
+        or direction.get("status") not in {"approved", "policy_authorized"}
+        or direction.get("presented_map_sha256")
+        != direction_binding.get("presented_map_sha256")
+    ):
+        errors.append("Visible-text batch review visual-direction binding is stale")
+    if (
+        review.get("contract_version") != "visible-text-batch-review-v1"
+        or review.get("episode_workspace") != workspace_relative
+        or review.get("status") != "approved"
+        or review.get("batch_scope")
+        != "complete_active_generated_shot_visible_text_map"
+        or review.get("row_approval_mode") != "forbidden_batch_only"
+        or review.get("text_style_contract")
+        != "concise-summary-visible-text-v1"
+        or review.get("storyboard") != direction.get("storyboard")
+        or review.get("visual_direction_review") != expected_direction_binding
+    ):
+        errors.append("Visible-text batch review scope or current-map binding is invalid")
+
+    rows = review.get("rows")
+    direction_rows = direction.get("rows")
+    if (
+        not isinstance(rows, list)
+        or not isinstance(direction_rows, list)
+        or len(rows) != len(direction_rows)
+        or any(
+            not isinstance(row, dict)
+            or not isinstance(direction_row, dict)
+            or row.get("shot_id") != direction_row.get("shot_id")
+            for row, direction_row in zip(
+                rows if isinstance(rows, list) else [],
+                direction_rows if isinstance(direction_rows, list) else [],
+            )
+        )
+    ):
+        errors.append("Visible-text batch review does not cover the complete active shot set")
+        rows = rows if isinstance(rows, list) else []
+        direction_rows = direction_rows if isinstance(direction_rows, list) else []
+
+    for index, row in enumerate(rows):
+        if not isinstance(row, dict):
+            errors.append(f"Visible-text row {index} must be a JSON object")
+            continue
+        shot_id = row.get("shot_id", index)
+        if any(field in row for field in VISIBLE_TEXT_ROW_APPROVAL_FIELDS):
+            errors.append(
+                f"Visible-text row {shot_id} must not carry per-shot approval evidence"
+            )
+        mode = row.get("visible_text_mode")
+        exact_text = row.get("exact_visible_text")
+        placement = row.get("visible_text_placement")
+        style_qa = row.get("text_style_qa")
+        if (
+            row.get("text_style_contract") != "concise-summary-visible-text-v1"
+            or not isinstance(style_qa, dict)
+            or style_qa.get("contract_version")
+            != "concise-summary-visible-text-v1"
+            or not SHA256_RE.fullmatch(str(row.get("source_text_sha256", "")))
+        ):
+            errors.append(f"Visible-text row {shot_id} style/source evidence is invalid")
+        if mode == "required":
+            errors.extend(_validate_concise_visible_text(exact_text, f"Visible-text row {shot_id}"))
+            if not isinstance(placement, str) or not placement.strip() or style_qa.get("result") != "pass":
+                errors.append(f"Visible-text row {shot_id} required-text evidence is invalid")
+        elif mode == "none":
+            if exact_text is not None or placement is not None or style_qa.get("result") != "not_applicable":
+                errors.append(f"Visible-text row {shot_id} no-text evidence is invalid")
+        else:
+            errors.append(f"Visible-text row {shot_id} mode must be none or required")
+        if index < len(direction_rows) and isinstance(direction_rows[index], dict):
+            selection = direction_rows[index].get("user_selection")
+            if not isinstance(selection, dict) or (
+                mode,
+                exact_text,
+                placement,
+            ) != (
+                selection.get("visible_text_mode"),
+                selection.get("exact_visible_text"),
+                selection.get("visible_text_placement"),
+            ):
+                errors.append(f"Visible-text row {shot_id} differs from visual direction")
+
+    projection = {
+        key: review.get(key)
+        for key in (
+            "contract_version",
+            "episode_workspace",
+            "storyboard",
+            "visual_direction_review",
+            "batch_scope",
+            "row_approval_mode",
+            "text_style_contract",
+            "rows",
+        )
+    }
+    expected_map_sha256 = _canonical_sha256(projection)
+    presentation = review.get("presentation")
+    approval = review.get("approval")
+    if (
+        review.get("presented_map_sha256") != expected_map_sha256
+        or not isinstance(presentation, dict)
+        or presentation.get("complete_map_presented") is not True
+        or not isinstance(presentation.get("exact_message"), str)
+        or not presentation["exact_message"].strip()
+        or not isinstance(presentation.get("presented_at"), str)
+        or not presentation["presented_at"].strip()
+    ):
+        errors.append("Visible-text complete-map presentation evidence is missing or stale")
+    if (
+        not isinstance(approval, dict)
+        or approval.get("status") != "approved"
+        or approval.get("scope") != "complete_presented_map"
+        or approval.get("presented_map_sha256") != expected_map_sha256
+        or approval.get("user_has_reviewed_complete_map") is not True
+        or approval.get("row_by_row_approval_performed") is not False
+        or not isinstance(approval.get("exact_message"), str)
+        or not approval["exact_message"].strip()
+        or not isinstance(approval.get("decided_at"), str)
+        or not approval["decided_at"].strip()
+    ):
+        errors.append("Visible-text batch review is not approved as one complete map")
+    if (
+        review_binding.get("presented_map_sha256") != expected_map_sha256
+        or not isinstance(approval, dict)
+        or review_binding.get("exact_decision_message") != approval.get("exact_message")
+        or review_binding.get("decided_at") != approval.get("decided_at")
+    ):
+        errors.append("Visible-text review state binding is stale")
+    return errors
 
 
 def validate_episode_workspace(repo_root: Path, workspace_arg: Path) -> list[str]:
@@ -138,6 +824,10 @@ def validate_episode_workspace(repo_root: Path, workspace_arg: Path) -> list[str
                     f"Misplaced artifact: {path.relative_to(repo)}; "
                     f"expected under {expected_text}/"
                 )
+
+    errors.extend(_validate_white_cat_pending_qa(repo, workspace))
+    errors.extend(_validate_active_ian_layered_scene_queue(repo, workspace))
+    errors.extend(_validate_visible_text_batch_review(repo, workspace))
 
     return sorted(set(errors))
 

@@ -6,6 +6,16 @@ import {fileURLToPath} from 'node:url';
 
 import {validateEpisodeTransitionReviewProposal} from '../scene-transitions/validate-review-proposal.mjs';
 import {parseStoryboardSummary} from '../visual-direction-review-form/contract.mjs';
+import {
+  buildActionStatePlanSha256,
+  validateActionStateSchedule,
+} from '../action-state-schedule/contract.mjs';
+import {
+  IAN_LAYERED_SCENE_PLAN_VERSION,
+  validateIanLayeredScenePlan,
+  validateIanLayeredSceneRhythmBinding,
+} from '../ian-layered-scene/contract.mjs';
+import {validateApprovedVisibleTextReviewState} from '../visible-text-review/state-gate.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPOSITORY_ROOT = path.resolve(HERE, '../../../..');
@@ -43,7 +53,7 @@ const parseSections = (markdown) => {
 };
 
 const parseSourceText = (section, shotId) => {
-  const match = section.match(/- 锁稿原文 source_text：\n```text\n([\s\S]*?)```/);
+  const match = section.match(/- 锁稿原文 source_text：\n```text\n([\s\S]*?)\n```/);
   if (!match) throw new Error(`${shotId} lacks exact source_text`);
   return match[1];
 };
@@ -62,6 +72,122 @@ const parseTiming = (section, shotId) => {
 const selectedVisibleText = (selection) => selection.visible_text_mode === 'none'
   ? '无'
   : selection.exact_visible_text;
+
+export const buildFinalStoryboardTitle = (topic) => {
+  const title = typeof topic === 'string' ? topic : topic?.title;
+  if (typeof title !== 'string' || title === '' || title !== title.trim() || /[\r\n》]/.test(title)) {
+    throw new Error('episode topic title is missing or invalid');
+  }
+  return `# 《${title}》知识视频分镜 v1\n`;
+};
+
+export const openingDetailCutMarker = (firstSentenceEndFrame) => {
+  if (!Number.isInteger(firstSentenceEndFrame) || firstSentenceEndFrame <= 0) {
+    throw new Error('first_sentence_end_frame must be a positive integer');
+  }
+  return `第 ${firstSentenceEndFrame} 帧固定零重叠硬切至 S01，不进入转场审核`;
+};
+
+export const openingWorkcardScheduleMarker = (firstSentenceEndFrame) => {
+  if (!Number.isInteger(firstSentenceEndFrame) || firstSentenceEndFrame <= 0) {
+    throw new Error('first_sentence_end_frame must be a positive integer');
+  }
+  return `OPEN-00 从第 0 帧同步承载首句，于第 ${firstSentenceEndFrame} 帧零重叠硬切到 S01`;
+};
+
+export const validateIanStoryboardLayeredSceneSection = (
+  section,
+  shotId,
+  {sourceText, durationFrames} = {},
+) => {
+  if (typeof section !== 'string' || typeof shotId !== 'string' || shotId === '') {
+    throw new Error('Ian storyboard section and shot id are required');
+  }
+  const match = section.match(
+    /Ian 分层场景计划：`ian-layered-scene-plan-v1`；精确计划 `([^`\n]+)`/,
+  );
+  if (!match) throw new Error(`${shotId} lacks the exact Ian layered-scene JSON plan`);
+  let scenePlan;
+  try {
+    scenePlan = JSON.parse(match[1]);
+  } catch {
+    throw new Error(`${shotId} Ian layered-scene JSON plan is invalid`);
+  }
+  if (scenePlan.contract_version !== IAN_LAYERED_SCENE_PLAN_VERSION) {
+    throw new Error(`${shotId} Ian layered-scene plan version is invalid`);
+  }
+  return validateIanLayeredScenePlan(scenePlan, {
+    shotId,
+    sourceText,
+    durationFrames,
+    fps: 30,
+  });
+};
+
+export const validateOpeningFirstSentenceRecord = ({
+  lockedBytes,
+  lockedChecksum,
+  evidence,
+  openSourceText,
+}) => {
+  if (!Buffer.isBuffer(lockedBytes)) throw new Error('locked narration bytes are missing');
+  const actualChecksum = sha256(lockedBytes);
+  if (lockedChecksum !== actualChecksum) throw new Error('locked narration checksum is stale');
+  if (evidence?.rule_id !== 'opening-first-sentence-record-v1' || evidence?.status !== 'pass') {
+    throw new Error('opening first-sentence evidence is missing or invalid');
+  }
+  const flatChecksum = evidence.candidate_checksum_sha256;
+  const nestedChecksum = evidence.candidate?.checksum_sha256;
+  const checksumPattern = /^[a-f0-9]{64}$/;
+  if ((flatChecksum !== undefined && !checksumPattern.test(flatChecksum))
+    || (nestedChecksum !== undefined && !checksumPattern.test(nestedChecksum))) {
+    throw new Error('opening first-sentence evidence candidate checksum is invalid');
+  }
+  if (flatChecksum !== undefined && nestedChecksum !== undefined && flatChecksum !== nestedChecksum) {
+    throw new Error('opening first-sentence evidence has conflicting candidate checksums');
+  }
+  const evidenceChecksum = nestedChecksum ?? flatChecksum;
+  if (evidenceChecksum !== actualChecksum) {
+    throw new Error('opening first-sentence evidence checksum is stale');
+  }
+  if (evidence.candidate?.byte_size !== undefined
+    && evidence.candidate.byte_size !== lockedBytes.length) {
+    throw new Error('opening first-sentence evidence byte size is stale');
+  }
+  const start = evidence.byte_start;
+  const end = evidence.byte_end_exclusive;
+  if (!Number.isInteger(start) || !Number.isInteger(end)
+    || start < 0 || end <= start || end > lockedBytes.length
+    || evidence.byte_length !== end - start) {
+    throw new Error('opening first-sentence byte range is invalid');
+  }
+  let exactSlice;
+  try {
+    exactSlice = new TextDecoder('utf-8', {fatal: true}).decode(lockedBytes.subarray(start, end));
+  } catch {
+    throw new Error('opening first-sentence byte range is not valid UTF-8');
+  }
+  if (typeof evidence.exact_first_sentence !== 'string'
+    || evidence.exact_first_sentence === ''
+    || exactSlice !== evidence.exact_first_sentence) {
+    throw new Error('opening first-sentence exact text does not match locked bytes');
+  }
+  if (openSourceText !== evidence.exact_first_sentence) {
+    throw new Error('OPEN-00 source_text does not match opening first-sentence evidence');
+  }
+  if (evidence.brand_prefix_validation !== 'not_applicable'
+    || evidence.topic_extraction !== 'not_performed') {
+    throw new Error('opening evidence must not enforce brand wording or extract a topic');
+  }
+  return {
+    rule_id: 'opening-first-sentence-record-v1',
+    result: 'pass',
+    checksum_sha256: actualChecksum,
+    byte_start: start,
+    byte_end_exclusive: end,
+    exact_first_sentence: exactSlice,
+  };
+};
 
 export const validateSummaryDurationSeconds = (summaryRow, timing, fps = 30) => {
   if (fps !== 30 || !Number.isInteger(timing.startFrame) || !Number.isInteger(timing.endFrame)
@@ -86,8 +212,10 @@ export const validateFinalStoryboard = (episodeWorkspace, storyboardRelativePath
     'storyboard_qa_passed',
     'awaiting_storyboard_review',
     'storyboard_review_approved',
+    'storyboard_policy_authorized',
     'visual_production',
     'awaiting_visual_asset_review',
+    'awaiting_precomposition_visual_review',
     'visual_assets_locked',
     'composition_locked',
     'awaiting_caption_delivery_choice',
@@ -101,15 +229,25 @@ export const validateFinalStoryboard = (episodeWorkspace, storyboardRelativePath
 
   const storyboardBytes = fs.readFileSync(storyboardPath);
   const markdown = storyboardBytes.toString('utf8');
-  if (!markdown.startsWith('# 《知行合一》知识视频分镜 v1\n') || markdown.includes('知识视频分镜草案')) {
+  if (!markdown.startsWith(buildFinalStoryboardTitle(state.topic)) || markdown.includes('知识视频分镜草案')) {
     throw new Error('final storyboard title is not locked');
   }
   const summary = parseStoryboardSummary(markdown);
   const sections = parseSections(markdown);
   const review = readChecksumBoundJson(state.visual_direction_review, 'visual direction review');
   const proposal = readChecksumBoundJson(state.transition_review, 'transition review');
-  if (review.status !== 'approved' || proposal.status !== 'approved') {
-    throw new Error('direction or transition approval is missing');
+  validateApprovedVisibleTextReviewState({
+    repositoryRoot: REPOSITORY_ROOT,
+    episodeWorkspace,
+    state,
+    visualDirectionReview: review,
+    storyboardMarkdown: markdown,
+  });
+  const expectedMappingStatus = state.workflow_approval_mode?.approval_mode === 'one_click'
+    ? 'policy_authorized'
+    : 'approved';
+  if (review.status !== expectedMappingStatus || proposal.status !== expectedMappingStatus) {
+    throw new Error('direction or transition authorization is missing');
   }
 
   const expectedShotIds = ['OPEN-00', ...review.rows.map((row) => row.shot_id)];
@@ -120,6 +258,9 @@ export const validateFinalStoryboard = (episodeWorkspace, storyboardRelativePath
 
   const sourceTexts = [];
   const timings = [];
+  const firstSentenceEndFrame = state.opening_first_sentence_boundary?.first_sentence_end_frame
+    ?? state.first_sentence_timing?.first_sentence_end_frame;
+  const detailCutMarker = openingDetailCutMarker(firstSentenceEndFrame);
   for (const [index, summaryRow] of summary.entries()) {
     const shotId = summaryRow.shot_id;
     const section = sections.get(shotId);
@@ -138,17 +279,17 @@ export const validateFinalStoryboard = (episodeWorkspace, storyboardRelativePath
       if (summaryRow.white_cat !== '不适用'
         || summaryRow.visual_generation_route !== '固定封面（cover-only-v1）'
         || summaryRow.visible_text !== '无'
-        || !section.includes('第 88 帧固定零重叠硬切至 S01，不进入转场审核')) {
+        || !section.includes(detailCutMarker)) {
         throw new Error('OPEN-00 fixed contract is invalid');
       }
       continue;
     }
     const decision = review.rows[index - 1]?.user_selection;
-    if (decision?.status !== 'approved'
+    if (decision?.status !== expectedMappingStatus
       || summaryRow.white_cat !== String(decision.white_cat_present)
       || summaryRow.visual_generation_route !== decision.visual_generation_route
       || summaryRow.visible_text !== selectedVisibleText(decision)) {
-      throw new Error(`${shotId} Summary does not match approved visual direction`);
+      throw new Error(`${shotId} Summary does not match authorized visual direction`);
     }
     if (!section.includes(`白猫 \`${decision.white_cat_present}\``)
       || !section.includes(decision.visual_generation_route)) {
@@ -168,9 +309,16 @@ export const validateFinalStoryboard = (episodeWorkspace, storyboardRelativePath
   }
 
   const lockedBytes = fs.readFileSync(resolveRootRelative(state.locked_script.path, 'locked narration path'));
-  if (sha256(lockedBytes) !== state.locked_script.checksum_sha256) throw new Error('locked narration checksum is stale');
+  validateOpeningFirstSentenceRecord({
+    lockedBytes,
+    lockedChecksum: state.locked_script.checksum_sha256,
+    evidence: state.opening_narration_evidence,
+    openSourceText: sourceTexts[0],
+  });
   const lockedLines = lockedBytes.toString('utf8').split(/\r?\n/);
-  if (lockedLines[1] !== '' || sourceTexts.join('') !== lockedLines.slice(2).join('\n')) {
+  const lockedBody = lockedLines.slice(2).join('\n');
+  const reconstructedBody = `${sourceTexts.join('\n')}${lockedBody.endsWith('\n') ? '\n' : ''}`;
+  if (lockedLines[1] !== '' || reconstructedBody !== lockedBody) {
     throw new Error('storyboard narration does not cover the locked body exactly once in order');
   }
 
@@ -184,11 +332,11 @@ export const validateFinalStoryboard = (episodeWorkspace, storyboardRelativePath
       throw new Error(`${timing.shotId} timing is not monotonic and contiguous`);
     }
   }
-  if (timings.at(-1).endFrame !== masterFrames || timings[0].endFrame !== state.first_sentence_timing.first_sentence_end_frame) {
+  if (timings.at(-1).endFrame !== masterFrames || timings[0].endFrame !== firstSentenceEndFrame) {
     throw new Error('opening or final master frame coverage is invalid');
   }
   if (!markdown.includes('画布：16:9，1920×1080，30 fps')
-    || !markdown.includes('OPEN-00 从第 0 帧同步承载首句，于第 88 帧零重叠硬切到 S01')) {
+    || !markdown.includes(openingWorkcardScheduleMarker(firstSentenceEndFrame))) {
     throw new Error('canvas or opening schedule workcard binding is missing');
   }
 
@@ -239,45 +387,77 @@ export const validateFinalStoryboard = (episodeWorkspace, storyboardRelativePath
     row.scene_class === 'narrative_illustration'
     && row.user_selection.visual_generation_route !== 'local-video-file'
   )).map((row) => row.shot_id);
+  const visualRhythm = readChecksumBoundJson(state.storyboard_visual_rhythm, 'storyboard visual rhythm');
+  if (!['storyboard-visual-rhythm-v1', 'storyboard-visual-rhythm-v2'].includes(
+    visualRhythm.contract_version,
+  )) {
+    throw new Error('storyboard visual rhythm version is unsupported');
+  }
+  const expectedScheduleVersion = visualRhythm.contract_version === 'storyboard-visual-rhythm-v2'
+    ? 'action-state-schedule-v4'
+    : 'action-state-schedule-v3';
+  const actionScheduleSet = readChecksumBoundJson({
+    path: state.storyboard_visual_rhythm?.action_state_schedule_set_path,
+    checksum_sha256: state.storyboard_visual_rhythm?.action_state_schedule_set_checksum_sha256,
+  }, 'action state schedule set');
+  if (actionScheduleSet.contract_version !== 'action-state-schedule-set-v1'
+    || actionScheduleSet.storyboard?.path !== review.storyboard.path
+    || actionScheduleSet.storyboard?.checksum_sha256 !== review.storyboard.checksum_sha256
+    || actionScheduleSet.visual_rhythm?.path !== state.storyboard_visual_rhythm.path
+    || actionScheduleSet.visual_rhythm?.checksum_sha256 !== state.storyboard_visual_rhythm.checksum_sha256
+    || !Array.isArray(actionScheduleSet.schedules)
+    || actionScheduleSet.schedule_count !== actionScheduleSet.schedules.length) {
+    throw new Error(`${expectedScheduleVersion} set is missing or stale`);
+  }
+  const actionScheduleByShotId = new Map(actionScheduleSet.schedules.map((entry) => [entry.shot_id, entry]));
+  if (!sameCanonical([...actionScheduleByShotId.keys()], narrativeIds)) {
+    throw new Error(`${expectedScheduleVersion} set does not cover every narrative shot exactly once`);
+  }
   for (const shotId of narrativeIds) {
     const section = sections.get(shotId);
     const timing = timings.find((entry) => entry.shotId === shotId);
-    const allocatedFamily = section.match(/- 动作族：(?:`action-state-schedule-v2`，)?(\d+) 状态、(\d+) 变体，帧分配 `([0-9/]+)`/);
-    const equalFamily = section.match(/- 动作族：(?:`action-state-schedule-v2`，)?(\d+) 状态、(\d+) 变体，各 (\d+) 帧/);
-    if (!allocatedFamily && !equalFamily) throw new Error(`${shotId} lacks a machine-checkable action family`);
-    const family = allocatedFamily ?? equalFamily;
-    const stateCount = Number(family[1]);
-    const variantCount = Number(family[2]);
-    const allocations = allocatedFamily
-      ? allocatedFamily[3].split('/').map(Number)
-      : Array(stateCount).fill(Number(equalFamily[3]));
-    if (variantCount !== stateCount - 1 || allocations.length !== stateCount) {
-      throw new Error(`${shotId} action family count mismatch`);
-    }
     const shotFrames = timing.endFrame - timing.startFrame;
-    if (shotId === 'S18') {
-      if (allocations.reduce((sum, value) => sum + value, 0) !== 158
-        || !section.includes('`first-shot-visual-inheritance-v1`')
-        || !section.includes('最终视觉态在 `[4543, 4969)` 保持 426 帧')) {
-        throw new Error('S18 merged action/hold exception is invalid');
-      }
-    } else {
-      const computed = Math.max(Math.min(Math.max(Math.floor(shotFrames / 45 + 0.5), 1), 5), Math.ceil(shotFrames / 75));
-      if (computed > 5 || stateCount !== computed
-        || allocations.reduce((sum, value) => sum + value, 0) !== shotFrames
-        || allocations.some((value) => value < 18 || value > 75)
-        || allocations.slice(1).some((value) => value - 18 < 15)) {
-        throw new Error(`${shotId} action cadence violates action-state-schedule-v2`);
-      }
+    const scheduleEntry = actionScheduleByShotId.get(shotId);
+    const schedule = scheduleEntry?.schedule;
+    const validation = validateActionStateSchedule(schedule, {
+      totalFrames: shotFrames,
+      fps,
+      densityMode: expectedScheduleVersion === 'action-state-schedule-v4'
+        ? visualRhythm.density_mode
+        : null,
+      densitySelectionSha256: expectedScheduleVersion === 'action-state-schedule-v4'
+        ? visualRhythm.visual_density_selection_sha256
+        : null,
+    });
+    if (schedule?.contract_version !== expectedScheduleVersion
+      || validation.result !== 'pass'
+      || scheduleEntry.shot_start_frame !== timing.startFrame
+      || scheduleEntry.shot_end_frame !== timing.endFrame
+      || schedule.source_text !== parseSourceText(section, shotId)
+      || scheduleEntry.state_plan_sha256 !== buildActionStatePlanSha256(schedule)
+      || !section.includes(`motion_tier: ${schedule.motion_tier}`)
+      || !section.includes('`intra-shot-transition-v1`')) {
+      throw new Error(`${shotId} ${expectedScheduleVersion} storyboard binding is stale`);
     }
-    const transitions = section.match(/图片 \/ 镜内转场：[^\n]*；(\d+) 组/)?.[1];
-    if (Number(transitions) !== variantCount) throw new Error(`${shotId} intra-shot transition count mismatch`);
   }
 
-  for (const row of review.rows.filter((candidate) => candidate.user_selection.visual_generation_route === 'ian-handdrawn-ppt')) {
-    if (!sections.get(row.shot_id).includes('锁定 Ian 全幅遮罩扫入')) {
-      throw new Error(`${row.shot_id} lacks ian-full-frame-mask-sweep-v1 planning`);
-    }
+  const ianRows = review.rows.filter(
+    (candidate) => candidate.user_selection.visual_generation_route === 'ian-handdrawn-ppt',
+  );
+  const rhythmShotById = new Map(
+    (visualRhythm.shots ?? []).map((rhythmShot) => [rhythmShot.shot_id, rhythmShot]),
+  );
+  for (const row of ianRows) {
+    const section = sections.get(row.shot_id);
+    const timing = timings.find((entry) => entry.shotId === row.shot_id);
+    const plan = validateIanStoryboardLayeredSceneSection(section, row.shot_id, {
+      sourceText: parseSourceText(section, row.shot_id),
+      durationFrames: timing.endFrame - timing.startFrame,
+    });
+    validateIanLayeredSceneRhythmBinding(plan, {
+      shotStartFrame: timing.startFrame,
+      rhythmShot: rhythmShotById.get(row.shot_id),
+    });
   }
 
   const result = {
@@ -295,11 +475,13 @@ export const validateFinalStoryboard = (episodeWorkspace, storyboardRelativePath
       summary_duration_seconds: 'pass_exact_frames_divided_by_30_three_decimals',
       transition_selection_binding: 'pass',
       narration_coverage: 'pass_exact_body_bytes_once_in_order',
+      opening_first_sentence_record: 'pass_checksum_utf8_byte_range_and_open_source_text',
       opening_schedule: 'pass',
       timing_source: 'pass_validated_master_and_dual_offline_word_timestamps',
       canvas: 'pass_1920x1080_30fps',
       subtitle_normalization: 'pass_source_text_spans_preserved',
       action_continuity_plan: 'pass',
+      ian_layered_scene_plan: 'pass_static_layers_exact_text_ranges_and_visual_rhythm_events',
     },
     generated_shot_count: review.rows.length,
     ordinary_boundary_count: proposal.rows.length,

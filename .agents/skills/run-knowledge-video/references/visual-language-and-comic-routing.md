@@ -62,6 +62,18 @@ Ian remains the default structured recommendation. `doodle-slides` is retired
 from new or modified knowledge-video work and remains readable only in
 unchanged historical evidence.
 
+For unfinished and new work, Ian production means
+`ian-knowledge-video-layered-scene-v1`, not one complete PNG. The approved
+`ian-layered-scene-plan-v1` maps contiguous exact narration UTF-8 byte ranges
+to ordered static semantic layers. Its count, semantic roles, and local entry
+frames exactly project the approved visual-rhythm `asset_plan.layer_count` and
+ordered `meaningful_change_events`; generation may not infer them.
+Production generates one opaque paper background, full-canvas transparent
+layers, and one deterministic final-composite review image. Assembly keeps all
+geometry fixed and applies only the fixed eight-frame opacity fade for each
+layer. Old single-raster/static/subtle Ian contracts are completed-history
+read-only.
+
 `local-video-file` is an explicit, never-default no-cat route for either scene
 class. It requires treatment `source-video-native`, no added visible text, and
 one checksum-bound absolute `.mp4` source path per shot. A route or path change
@@ -104,17 +116,21 @@ or experimental subject with the cat.
 Resolve visible text by the selected route. Ordinary `imagegen` with
 `white_cat_present: true` and every `xuan-paper-diorama` shot are always
 `visible_text_mode: none`, with null exact copy/placement and no top title.
-No-cat ordinary `imagegen`, Ian, Ink Doodle Knowledge Card,
-and Whiteboard follow their own raster or annotation text contracts. Local
-video preserves source pixels and permits no added route-owned text. These
-route decisions are final at v3 approval; visual production cannot add a
-second text approval, and assembly cannot create or remove a generic title.
+No-cat ordinary `imagegen`, Ian semantic layers, Ink Doodle Knowledge Card,
+and Whiteboard follow their own raster, layered-package, or annotation text contracts. Local
+video preserves source pixels and permits no added route-owned text. V3 resolves
+the route-compatible visible-text candidate only. Every `required` candidate must
+pass `concise-summary-visible-text-v1`, then all generated-shot candidates,
+including `none`, enter one `visible-text-batch-review-v1` complete-map approval.
+That approval is top-level and checksum-bound; per-shot text approval is forbidden,
+and one-click policy authorization cannot substitute for it. Visual production
+cannot add another text decision, and assembly cannot create or remove a generic title.
 
 ## Historical asset and assembly compatibility
 
 Every new/replanned multi-image v3 shot uses `intra-shot-transition-v1`: exactly
 `N - 1` entries, zero-frame `cut` by default, and `watercolor-bloom` only with
-explicit approval bound to the active `storyboard-visual-rhythm-v1` map. This
+manual approval or one-click policy authorization bound to the active `storyboard-visual-rhythm-v2` map. This
 rule is independent of visual treatment; a watercolor-rendered image does not
 imply a watercolor transition.
 

@@ -4,13 +4,13 @@
     {
       "module_id": "action-state-schedule",
       "path": "leverage-video/src/shared/action-state-schedule",
-      "use_when": "Computing or validating legacy v2 duration-driven states or v3 semantic action states, exact narration byte ranges, frame occurrences, and revoice locks.",
+      "use_when": "Computing or validating legacy v2 schedules, v3 semantic action states, density-bound v4 states, exact narration byte ranges, frame occurrences, and revoice locks.",
       "required_for_new_episode_script": false
     },
     {
       "module_id": "assembly-plan",
       "path": "leverage-video/src/shared/assembly-plan",
-      "use_when": "Building a knowledge-video assembly plan from locked timing, active approved rasters, approved whiteboard clips, and exact-frame matched local videos while rejecting retired Comic routes.",
+      "use_when": "Building a knowledge-video assembly plan from locked timing, active approved rasters, approved Ian layered-scene packages, approved whiteboard clips, and exact-frame matched local videos while rejecting retired Comic routes.",
       "required_for_new_episode_script": true
     },
     {
@@ -28,8 +28,14 @@
     {
       "module_id": "full-frame-mask-sweep",
       "path": "leverage-video/src/shared/full-frame-mask-sweep",
-      "use_when": "Rendering an approved Ian handdrawn full-frame raster.",
+      "use_when": "Reading or verifying historical completed-render lineage only; unfinished/new Ian rendering uses ian-knowledge-video-layered-scene-v1 through shared video-scenes and must not consume this module.",
       "required_for_new_episode_script": false
+    },
+    {
+      "module_id": "ian-layered-scene",
+      "path": "leverage-video/src/shared/ian-layered-scene",
+      "use_when": "Planning, validating, recompositing, approving, or assembling static Ian background-plus-transparent-layer scene packages bound to narration bytes and entry frames.",
+      "required_for_new_episode_script": true
     },
     {
       "module_id": "gen-think",
@@ -76,13 +82,13 @@
     {
       "module_id": "storyboard-visual-rhythm",
       "path": "leverage-video/src/shared/storyboard-visual-rhythm",
-      "use_when": "Locking v3 motion tiers, asset counts, action performance, continuity ledgers, meaningful visual changes, and medium_high_v1 QA warnings.",
+      "use_when": "Locking legacy v1 or density-bound v2 motion tiers, asset counts, fallbacks, action performance, continuity ledgers, meaningful visual changes, and QA warnings.",
       "required_for_new_episode_script": false
     },
     {
       "module_id": "video-scenes",
       "path": "leverage-video/src/shared/video-scenes",
-      "use_when": "Composing cover, narration, active imagegen/Ian/Ink GraphicScene/WhiteboardScene/LocalVideoScene output, with DoodleScene and ComicScene retained only for historical read-only parsing.",
+      "use_when": "Composing cover, narration, active imagegen/Ink GraphicScene/IanLayeredScene/WhiteboardScene/LocalVideoScene output, with DoodleScene and ComicScene retained only for historical read-only parsing.",
       "required_for_new_episode_script": true
     },
     {
@@ -107,6 +113,12 @@
       "module_id": "visual-assets",
       "path": "leverage-video/src/shared/visual-assets",
       "use_when": "Reconciling approved storyboard changes or recording exact-byte visual asset QA and approvals.",
+      "required_for_new_episode_script": false
+    },
+    {
+      "module_id": "workflow-approval",
+      "path": "leverage-video/src/shared/workflow-approval",
+      "use_when": "Validating post-Gate-2 density and approval-mode selections, one-click policy/final visual review, protected action gates, invalidation, and revoice density locks.",
       "required_for_new_episode_script": false
     },
     {

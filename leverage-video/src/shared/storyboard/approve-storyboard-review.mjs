@@ -50,7 +50,43 @@ export const buildApprovedStoryboardReviewState = ({state, storyboardChecksum, e
   return nextState;
 };
 
-const buildArtifacts = ({episodeWorkspace, exactMessage, decidedAt}) => {
+export const buildPolicyAuthorizedStoryboardReviewState = ({
+  state, storyboardChecksum, policySha256, authorizedAt,
+}) => {
+  if (state.current_phase !== 'awaiting_storyboard_review'
+    || state.storyboard_review?.status !== 'pending'
+    || !/^[a-f0-9]{64}$/.test(policySha256 ?? '')
+    || typeof authorizedAt !== 'string' || Number.isNaN(Date.parse(authorizedAt))
+    || storyboardChecksum !== state.storyboard_review.active_checksum_sha256
+    || storyboardChecksum !== state.storyboard_review.presented_checksum_sha256
+    || state.storyboard_review.active_path !== state.storyboard_review.presented_path) {
+    throw new Error('storyboard policy authorization is incomplete, stale, or targets another version');
+  }
+  const nextState = structuredClone(state);
+  nextState.active_storyboard = {
+    ...nextState.active_storyboard,
+    status: 'policy_authorized',
+    authorized_at: authorizedAt,
+    policy_sha256: policySha256,
+    user_has_reviewed_specific_storyboard: false,
+  };
+  nextState.storyboard_review = {
+    ...nextState.storyboard_review,
+    status: 'policy_authorized',
+    approved_path: state.storyboard_review.active_path,
+    approved_checksum_sha256: storyboardChecksum,
+    exact_decision_message: null,
+    decided_at: null,
+    policy_sha256: policySha256,
+    authorized_at: authorizedAt,
+    user_has_reviewed_specific_storyboard: false,
+  };
+  nextState.blockers = [];
+  nextState.current_phase = 'storyboard_policy_authorized';
+  return nextState;
+};
+
+const buildArtifacts = ({episodeWorkspace, exactMessage = null, decidedAt, policySha256 = null}) => {
   const workspacePath = resolveRootRelative(episodeWorkspace, 'episode workspace');
   const statePath = path.join(workspacePath, 'schema/episode-state.json');
   const state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
@@ -58,12 +94,13 @@ const buildArtifacts = ({episodeWorkspace, exactMessage, decidedAt}) => {
   const activeBytes = fs.readFileSync(activePath);
   const activeChecksum = sha256(activeBytes);
   validateFinalStoryboard(episodeWorkspace, state.storyboard_review.active_path);
-  const nextState = buildApprovedStoryboardReviewState({
-    state,
-    storyboardChecksum: activeChecksum,
-    exactMessage,
-    decidedAt,
-  });
+  const nextState = policySha256 === null
+    ? buildApprovedStoryboardReviewState({
+        state, storyboardChecksum: activeChecksum, exactMessage, decidedAt,
+      })
+    : buildPolicyAuthorizedStoryboardReviewState({
+        state, storyboardChecksum: activeChecksum, policySha256, authorizedAt: decidedAt,
+      });
   return {
     result: 'pass',
     storyboard: {path: state.storyboard_review.active_path, checksum_sha256: activeChecksum},
@@ -81,21 +118,28 @@ const writeArtifacts = (artifacts) => {
 
 const isCli = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (isCli) {
-  const [episodeWorkspace, exactMessage, decidedAt, mode] = process.argv.slice(2);
-  if (!episodeWorkspace || !exactMessage || !decidedAt || !['--dry-run', '--apply'].includes(mode)
+  const [episodeWorkspace, decisionOrPolicy, decidedAt, mode] = process.argv.slice(2);
+  const oneClick = ['--one-click-dry-run', '--one-click-apply'].includes(mode);
+  if (!episodeWorkspace || !decisionOrPolicy || !decidedAt
+    || !['--dry-run', '--apply', '--one-click-dry-run', '--one-click-apply'].includes(mode)
     || process.argv.length !== 6
     || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}$/.test(decidedAt)) {
-    console.error('usage: node approve-storyboard-review.mjs <episode-workspace> <exact-message> <ISO-8601-with-offset> <--dry-run|--apply>');
+    console.error('usage: node approve-storyboard-review.mjs <episode-workspace> <exact-message|policy-sha256> <ISO-8601-with-offset> <--dry-run|--apply|--one-click-dry-run|--one-click-apply>');
     process.exit(2);
   }
   try {
-    const artifacts = buildArtifacts({episodeWorkspace, exactMessage, decidedAt});
-    if (mode === '--apply') writeArtifacts(artifacts);
+    const artifacts = buildArtifacts({
+      episodeWorkspace,
+      exactMessage: oneClick ? null : decisionOrPolicy,
+      policySha256: oneClick ? decisionOrPolicy : null,
+      decidedAt,
+    });
+    if (['--apply', '--one-click-apply'].includes(mode)) writeArtifacts(artifacts);
     process.stdout.write(`${JSON.stringify({
       result: artifacts.result,
       storyboard: artifacts.storyboard,
       state_checksum_sha256: sha256(artifacts.state.bytes),
-      applied: mode === '--apply',
+      applied: ['--apply', '--one-click-apply'].includes(mode),
     }, null, 2)}\n`);
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));

@@ -6,7 +6,10 @@ import {
   buildTransitionReviewPresentedMapSha256,
   rebindUnaffectedTransitionApprovals,
 } from './build-review-proposal.mjs';
-import {approvePendingTransitionRows} from './approve-review-proposal.mjs';
+import {
+  approvePendingTransitionRows,
+  authorizePendingTransitionRowsOneClick,
+} from './approve-review-proposal.mjs';
 
 import {
   SCENE_TRANSITION_CATALOG_VERSION,
@@ -437,5 +440,22 @@ assert.throws(() => approvePendingTransitionRows({
   exactMessage: '批准这三条转场',
   decidedAt: '2026-08-17T21:20:00+08:00',
 }), /presented map is stale/);
+
+const policyAuthorized = authorizePendingTransitionRowsOneClick({
+  proposal: pendingApprovalProposal,
+  policySha256: 'e'.repeat(64),
+  authorizedAt: '2026-08-17T21:20:00+08:00',
+});
+assert.equal(policyAuthorized.proposal.status, 'policy_authorized');
+assert.ok(policyAuthorized.proposal.rows.every((row) => (
+  row.user_selection.status === 'policy_authorized'
+  && row.user_selection.user_has_reviewed_specific_map === false
+  && row.user_selection.exact_message === null
+)));
+assert.throws(() => authorizePendingTransitionRowsOneClick({
+  proposal: pendingApprovalProposal,
+  policySha256: 'forged',
+  authorizedAt: '2026-08-17T21:20:00+08:00',
+}), /input/);
 
 console.log('scene_transition_selection_v3=pass');

@@ -7,7 +7,10 @@ import {
   useCurrentFrame,
 } from 'remotion';
 import type {SceneTransitionContract} from './contract.mjs';
-import {resolveTransitionTailStyle} from './visual-state.mjs';
+import {
+  resolveTransitionTailProgress,
+  resolveTransitionTailStyle,
+} from './visual-state.mjs';
 
 type Props = {
   from: number;
@@ -39,7 +42,12 @@ const TransitionTail: React.FC<{
   const isTail = hasVisibleTail && frame >= durationInFrames;
   const progress = !hasVisibleTail
     ? 0
-    : interpolate(
+    : transition.kind === 'paper-wipe'
+      ? resolveTransitionTailProgress({
+          tailFrame: frame - durationInFrames,
+          durationInFrames: transition.duration_in_frames,
+        })
+      : interpolate(
         frame,
         [durationInFrames, durationInFrames + transition.duration_in_frames - 1],
         [0, 1],

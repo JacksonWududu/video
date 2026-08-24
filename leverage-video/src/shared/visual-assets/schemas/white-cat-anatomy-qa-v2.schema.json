@@ -1,0 +1,184 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "white-cat-anatomy-qa-v2.schema.json",
+  "title": "White Cat Anatomy QA v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract_version",
+    "result",
+    "source_image",
+    "canvas",
+    "limb_traces",
+    "forward_trace_ids",
+    "reverse_trace_ids",
+    "unassigned_paw_like_shapes",
+    "ambiguous_limb_regions",
+    "branched_or_fused_limb_regions",
+    "inspection_evidence"
+  ],
+  "properties": {
+    "contract_version": {
+      "const": "white-cat-anatomy-qa-v2"
+    },
+    "result": {
+      "const": "pass"
+    },
+    "source_image": {
+      "$ref": "#/$defs/fileBinding"
+    },
+    "canvas": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["width", "height"],
+      "properties": {
+        "width": {"type": "integer", "minimum": 1},
+        "height": {"type": "integer", "minimum": 1}
+      }
+    },
+    "limb_traces": {
+      "type": "array",
+      "minItems": 4,
+      "maxItems": 4,
+      "items": {"$ref": "#/$defs/limbTrace"},
+      "allOf": [
+        {"contains": {"properties": {"id": {"const": "F1"}}, "required": ["id"]}, "minContains": 1, "maxContains": 1},
+        {"contains": {"properties": {"id": {"const": "F2"}}, "required": ["id"]}, "minContains": 1, "maxContains": 1},
+        {"contains": {"properties": {"id": {"const": "H1"}}, "required": ["id"]}, "minContains": 1, "maxContains": 1},
+        {"contains": {"properties": {"id": {"const": "H2"}}, "required": ["id"]}, "minContains": 1, "maxContains": 1}
+      ]
+    },
+    "forward_trace_ids": {"$ref": "#/$defs/orderedLimbIds"},
+    "reverse_trace_ids": {"$ref": "#/$defs/orderedLimbIds"},
+    "unassigned_paw_like_shapes": {"const": 0},
+    "ambiguous_limb_regions": {"const": 0},
+    "branched_or_fused_limb_regions": {"const": 0},
+    "inspection_evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "methods",
+        "numbered_limb_map_path",
+        "numbered_limb_map_checksum_sha256",
+        "numbered_limb_map_source_checksum_sha256",
+        "numbered_limb_map_limb_ids"
+      ],
+      "properties": {
+        "methods": {
+          "const": ["full_resolution", "numbered_limb_map"]
+        },
+        "numbered_limb_map_path": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^(?!/)"
+        },
+        "numbered_limb_map_checksum_sha256": {"$ref": "#/$defs/sha256"},
+        "numbered_limb_map_source_checksum_sha256": {"$ref": "#/$defs/sha256"},
+        "numbered_limb_map_limb_ids": {"$ref": "#/$defs/orderedLimbIds"}
+      }
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "fileBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "checksum_sha256"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1, "pattern": "^(?!/)"},
+        "checksum_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "normalizedPoint": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "prefixItems": [
+        {"type": "number", "minimum": 0, "maximum": 1},
+        {"type": "number", "minimum": 0, "maximum": 1}
+      ],
+      "items": false
+    },
+    "normalizedBbox": {
+      "type": "array",
+      "minItems": 4,
+      "maxItems": 4,
+      "prefixItems": [
+        {"type": "number", "minimum": 0, "maximum": 1},
+        {"type": "number", "minimum": 0, "maximum": 1},
+        {"type": "number", "exclusiveMinimum": 0, "maximum": 1},
+        {"type": "number", "exclusiveMinimum": 0, "maximum": 1}
+      ],
+      "items": false
+    },
+    "orderedLimbIds": {
+      "type": "array",
+      "minItems": 4,
+      "maxItems": 4,
+      "prefixItems": [
+        {"const": "F1"},
+        {"const": "F2"},
+        {"const": "H1"},
+        {"const": "H2"}
+      ],
+      "items": false
+    },
+    "limbTrace": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "class",
+        "paw_region_id",
+        "paw_bbox_normalized",
+        "paw_visible",
+        "continuous_to_torso",
+        "torso_anchor",
+        "torso_anchor_point_normalized",
+        "trace_polyline_normalized",
+        "occlusion_status"
+      ],
+      "properties": {
+        "id": {"enum": ["F1", "F2", "H1", "H2"]},
+        "class": {"enum": ["forelimb", "hindlimb"]},
+        "paw_region_id": {"type": "string", "minLength": 1},
+        "paw_bbox_normalized": {"$ref": "#/$defs/normalizedBbox"},
+        "paw_visible": {"const": true},
+        "continuous_to_torso": {"const": true},
+        "torso_anchor": {"enum": ["shoulder", "hip"]},
+        "torso_anchor_point_normalized": {"$ref": "#/$defs/normalizedPoint"},
+        "trace_polyline_normalized": {
+          "type": "array",
+          "minItems": 3,
+          "items": {"$ref": "#/$defs/normalizedPoint"}
+        },
+        "occlusion_status": {"enum": ["none", "partial"]},
+        "occlusion_reason": {"type": "string", "minLength": 1}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"id": {"pattern": "^F"}}, "required": ["id"]},
+          "then": {
+            "properties": {
+              "class": {"const": "forelimb"},
+              "torso_anchor": {"const": "shoulder"}
+            }
+          },
+          "else": {
+            "properties": {
+              "class": {"const": "hindlimb"},
+              "torso_anchor": {"const": "hip"}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"occlusion_status": {"const": "partial"}}, "required": ["occlusion_status"]},
+          "then": {"required": ["occlusion_reason"]}
+        }
+      ]
+    }
+  }
+}

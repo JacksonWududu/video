@@ -35,15 +35,15 @@ class IanHanddrawnDefaultRouteContractTest(unittest.TestCase):
             "historical still or character-led narrative illustration keeps its existing route",
         )
 
-    def test_visual_skill_uses_the_generated_raster_as_the_production_visual(self) -> None:
+    def test_visual_skill_uses_a_static_layered_package(self) -> None:
         self.assert_file_contains(
             ".agents/skills/produce-video-visuals/SKILL.md",
             "per-shot-visual-direction-review-v3",
-            "`ian-handdrawn-ppt` creates the complete raster",
-            "accepted Ian or Ink Doodle PNG is the final production visual",
-            "Do not create an editable data/logic scene",
+            "ian-knowledge-video-layered-scene-v1",
+            "full-canvas transparent PNG",
+            "deterministic final-composite review PNG",
+            "fixed eight-frame entry fade",
             "shared opening cover",
-            "ian-knowledge-video-frame-v1",
         )
         self.assert_file_excludes(
             ".agents/skills/produce-video-visuals/SKILL.md",
@@ -52,13 +52,15 @@ class IanHanddrawnDefaultRouteContractTest(unittest.TestCase):
             "every active vector's declared canvas/viewBox",
         )
 
-    def test_data_contract_forbids_code_redraws_and_limits_remotion(self) -> None:
+    def test_data_contract_forbids_code_redraws_and_raster_motion(self) -> None:
         self.assert_file_contains(
             ".agents/skills/produce-video-visuals/references/cover-data-and-asset-lock.md",
             "visual-generation-route-catalog-v2",
             "approved `ink-doodle-knowledge-card` selection is exact-shot opt-out evidence",
             "ink-doodle-knowledge-card-route-v1",
-            "Remotion consumes only the approved PNG",
+            "one opaque 1920×1080 paper background",
+            "full-canvas transparent semantic layers",
+            "Pan, zoom, translation, rotation",
             "exact prompt/reference/style fingerprints",
         )
         self.assert_file_excludes(
@@ -68,12 +70,14 @@ class IanHanddrawnDefaultRouteContractTest(unittest.TestCase):
             "deterministic production derivative",
         )
 
-    def test_storyboard_plans_generated_rasters_not_editable_logic_scenes(self) -> None:
+    def test_storyboard_plans_generated_layers_not_editable_logic_scenes(self) -> None:
         self.assert_file_contains(
             ".agents/skills/build-video-storyboard/references/storyboard-contract.md",
             "ian-handdrawn-ppt-default-v1",
-            "complete 16:9 raster page",
-            "generated data/logic rasters",
+            "ian-knowledge-video-layered-scene-v1",
+            "Ian 分层场景计划",
+            "contiguous exact UTF-8 byte ranges",
+            "meaningful_change_events",
             "ink-doodle-knowledge-card",
             "`doodle-slides` is historical read-only",
         )
@@ -83,12 +87,13 @@ class IanHanddrawnDefaultRouteContractTest(unittest.TestCase):
             "Data visualizations are editable",
         )
 
-    def test_remotion_only_animates_approved_rasters(self) -> None:
+    def test_remotion_only_fades_approved_layers(self) -> None:
         self.assert_file_contains(
             ".agents/skills/assemble-video-master/references/remotion-assembly-and-render.md",
-            "animation effects only",
-            "must not redraw, recreate, or replace",
-            "approved raster",
+            "IanLayeredScene",
+            "only changing property is opacity",
+            "linear 0→1 over exactly eight local frames",
+            "Forbid scene and layer translation, scaling, rotation",
             "ComicScene",
             "legacy decoder/consumer implementation",
             "Do not invoke it for a new output or derivative",
@@ -98,33 +103,36 @@ class IanHanddrawnDefaultRouteContractTest(unittest.TestCase):
             "Keep data labels editable",
         )
 
-    def test_authoritative_state_machine_records_the_raster_only_route(self) -> None:
+    def test_authoritative_state_machine_records_the_layered_route(self) -> None:
         self.assert_file_contains(
             ".agents/skills/run-knowledge-video/references/workflow-state-machine.md",
             "ian-handdrawn-ppt-default-v1",
-            "final production visual",
-            "Remotion consumes only approved PNG bytes",
-            "no image-generation or redraw role",
-            "Regenerate each affected Ian or Ink data/logic raster only through its currently approved `ian-handdrawn-ppt` or `ink-doodle-knowledge-card` route",
-            "ian-knowledge-video-frame-v1",
+            "ian-knowledge-video-layered-scene-v1",
+            "opaque paper background",
+            "full-canvas transparent semantic layers",
+            "only layer opacity",
+            "completed-history evidence only",
         )
         self.assert_file_excludes(
             ".agents/skills/run-knowledge-video/references/workflow-state-machine.md",
             "Regenerate the AI source near 16:9 or recompose deterministic assets natively at 1920×1080",
         )
 
-    def test_ian_skill_publishes_v3_bound_single_frame_adapter(self) -> None:
+    def test_ian_skill_publishes_v3_bound_layered_adapter(self) -> None:
         self.assert_file_contains(
             ".agents/skills/ian-handdrawn-ppt/SKILL.md",
-            "ian-knowledge-video-frame-v1",
-            "exactly one 1920×1080 final PNG per queue item",
+            "ian-knowledge-video-layered-scene-v1",
+            "one opaque paper background",
+            "ordered full-canvas transparent semantic-element PNGs",
             "per-shot-visual-direction-review-v3",
         )
         self.assert_file_contains(
             ".agents/skills/ian-handdrawn-ppt/references/knowledge-video-frame.md",
-            "automatic page number, title, subtitle, label, signature",
+            "automatic page number, title, subtitle,",
+            "label, signature, watermark",
             "contact sheet is an outer Visual Asset Review artifact only",
-            "validate_knowledge_video_frame.py",
+            "validate_knowledge_video_layered_scene.mjs",
+            "eight-frame fade",
         )
 
 

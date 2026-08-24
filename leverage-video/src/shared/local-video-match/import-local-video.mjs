@@ -111,7 +111,8 @@ export const validateDeferredQueuePosition = (state, shotId) => {
   const queue = (review?.queue ?? []).filter((item) => (
     item.active_for_current_storyboard !== false && item.status !== 'superseded'
   ));
-  if (review?.mode !== 'hybrid_batch_v1' || review.active_batch != null
+  if (!['hybrid_batch_v1', 'one_click_final_review_v1'].includes(review?.mode)
+    || review.active_batch != null
     || review.queue_generation_allowed === false) {
     throw new Error('local video import requires an open hybrid visual-asset queue');
   }
@@ -120,16 +121,21 @@ export const validateDeferredQueuePosition = (state, shotId) => {
     if (item.visual_generation_route === LOCAL_VIDEO_ROUTE_ID) localSeen = true;
     else if (localSeen) throw new Error('local video queue items must follow every generated visual');
   }
-  const pending = queue.find((item) => !['approved', 'qa_passed_pending_batch_review'].includes(item.status));
+  const pending = queue.find((item) => ![
+    'approved', 'qa_passed_pending_batch_review', 'qa_passed_pending_final_review',
+  ].includes(item.status));
   if (!pending || pending.shot_id !== shotId
     || pending.visual_generation_route !== LOCAL_VIDEO_ROUTE_ID
     || !['pending_generation', 'changes_requested'].includes(pending.status)) {
     throw new Error(`${shotId} is not the next deferred local-video import target`);
   }
+  const generatedReadyStatuses = review.mode === 'one_click_final_review_v1'
+    ? new Set(['approved', 'qa_passed_pending_final_review'])
+    : new Set(['approved']);
   if (queue.some((item) => (
-    item.visual_generation_route !== LOCAL_VIDEO_ROUTE_ID && item.status !== 'approved'
+    item.visual_generation_route !== LOCAL_VIDEO_ROUTE_ID && !generatedReadyStatuses.has(item.status)
   ))) {
-    throw new Error('all generated visual assets must be approved before local video import');
+    throw new Error('all generated visual assets must pass their mode-specific review boundary before local video import');
   }
   return pending;
 };
@@ -151,14 +157,14 @@ export const buildImportPlan = ({episodeWorkspace, shotId, selectedPath, targetD
   const state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
   if (state.workspace_path !== episodeWorkspace
     || !['visual_production', 'awaiting_visual_asset_review'].includes(state.current_phase)
-    || state.storyboard_review?.status !== 'approved'
+    || !['approved', 'policy_authorized'].includes(state.storyboard_review?.status)
     || state.storyboard_review.active_checksum_sha256 !== state.storyboard_review.approved_checksum_sha256
     || state.storyboard_review.presented_checksum_sha256 !== state.storyboard_review.approved_checksum_sha256) {
     throw new Error('local video import requires the exact approved storyboard and visual-production phase');
   }
   const review = readBoundJson(state.visual_direction_review, 'visual direction review');
   const row = review.rows?.find((candidate) => candidate.shot_id === shotId);
-  if (row?.user_selection?.status !== 'approved'
+  if (!['approved', 'policy_authorized'].includes(row?.user_selection?.status)
     || row.user_selection.visual_generation_route !== LOCAL_VIDEO_ROUTE_ID
     || path.resolve(row.user_selection.local_video_source_path ?? '') !== path.resolve(selectedPath)) {
     throw new Error(`${shotId} local video path is not the exact approved visual-direction selection`);
@@ -226,7 +232,8 @@ export const applyImportPlan = (plan) => {
     throw new Error('archived local video checksum mismatch');
   }
   fs.writeFileSync(manifestPath, `${JSON.stringify(plan, null, 2)}\n`, {flag: 'wx'});
-  queueItem.status = 'awaiting_user_approval';
+  const oneClick = state.visual_asset_review?.mode === 'one_click_final_review_v1';
+  queueItem.status = oneClick ? 'qa_passed_pending_final_review' : 'awaiting_user_approval';
   queueItem.strict_review = true;
   queueItem.role = 'local-video-source';
   queueItem.path = plan.archived_asset;
@@ -256,7 +263,10 @@ export const applyImportPlan = (plan) => {
     checksum_sha256: sha256File(manifestPath),
   };
   queueItem.processing_order = plan.processing_order;
-  state.current_phase = 'awaiting_visual_asset_review';
+  state.current_phase = oneClick
+    ? 'awaiting_precomposition_visual_review'
+    : 'awaiting_visual_asset_review';
+  state.phase = state.current_phase;
   atomicWriteJson(statePath, state);
 };
 

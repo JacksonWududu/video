@@ -18,15 +18,23 @@ test('shared narrative scenes consume v3 transition maps while retaining legacy 
   assert.doesNotMatch(source, /Math\.floor\(frame\s*\/\s*45\)/);
 });
 
-test('shared graphic routing accepts Ian and Ink but applies mask sweep only to Ian', () => {
-  const source = read('GraphicScene.tsx');
-  assert.match(source, /'ian-handdrawn-ppt', 'ink-doodle-knowledge-card'/);
-  assert.match(source, /visualGenerationRoute === 'ian-handdrawn-ppt'/);
-  assert.match(source, /FullFrameMaskSweep/);
-  assert.match(source, /IntraShotImageSequence/);
-  assert.match(source, /WatercolorImageSequence/);
-  assert.match(source, /imageSequence\.map/);
-  assert.match(source, /durationInFrames: occurrence\.duration_in_frames/);
+test('Ian renders a static background and checksum-bound semantic layers on narration frames', () => {
+  const source = read('IanLayeredScene.tsx');
+  assert.match(source, /visualGenerationRoute !== 'ian-handdrawn-ppt'/);
+  assert.match(source, /ian-static-layered-scene-v1/);
+  assert.match(source, /IAN_LAYER_ENTRY_TRANSITION_VERSION/);
+  assert.match(source, /useCurrentFrame/);
+  assert.match(source, /interpolate/);
+  assert.match(source, /layer\.entry_frame/);
+  assert.match(source, /opacity/);
+  assert.match(source, /<CanvasImage/);
+  assert.match(source, /width=\{1920\}/);
+  assert.match(source, /height=\{1080\}/);
+  assert.match(source, /fit="fill"/);
+  assert.doesNotMatch(source, /FullFrameMaskSweep|full-frame-mask-sweep|translate3d|scale\(|transform:|clipPath/);
+  const graphic = read('GraphicScene.tsx');
+  assert.match(graphic, /ink-doodle-knowledge-card/);
+  assert.doesNotMatch(graphic, /ian-handdrawn-ppt|ian-static|ian-subtle|translate3d|scale\(/);
 });
 
 test('shared Doodle routing consumes approved PNGs without Ian mask sweep', () => {
@@ -60,6 +68,10 @@ test('shared video consumes the inter-shot transition renderer', () => {
   assert.match(source, /<WhiteboardScene/);
   assert.match(source, /scene\.scene_type === 'local-video'/);
   assert.match(source, /<LocalVideoScene/);
+  assert.match(source, /scene\.scene_type === 'ian-layered'/);
+  assert.match(source, /<IanLayeredScene/);
+  assert.match(source, /scene=\{scene\.ian_layered_scene!\}/);
+  assert.doesNotMatch(source, /internalMotionContract|internalMotion/);
   assert.match(source, /comic-imagegen is historical read-only/);
   assert.doesNotMatch(source, /<ComicScene/);
 });
