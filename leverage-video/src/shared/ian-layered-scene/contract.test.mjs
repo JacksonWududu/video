@@ -9,10 +9,10 @@ import sharp from 'sharp';
 
 import {
   composeIanLayeredSceneBytes,
-  inspectIanLayeredScenePackage,
+  inspectLegacyIanLayeredScenePackageV1,
   sha256Canonical,
   sha256Text,
-  validateIanLayeredScenePackage,
+  validateLegacyIanLayeredScenePackageV1,
   validateIanLayeredScenePlan,
   validateIanLayeredSceneRhythmBinding,
 } from './contract.mjs';
@@ -190,7 +190,7 @@ test('plan binds every semantic layer to one approved narration-rhythm event', (
 });
 
 test('package structure binds the plan, background, transparent layers, and review raster', () => {
-  const value = validateIanLayeredScenePackage(manifest(), {
+  const value = validateLegacyIanLayeredScenePackageV1(manifest(), {
     episodeWorkspace: 'leverage-video/src/topic-test',
     queueItemId: 'S17-ian-v01',
     shotId: 'S17',
@@ -228,7 +228,7 @@ test('disk inspection rejects opaque element layers and verifies deterministic c
     const file = path.join(root, item.path);
     item.checksum_sha256 = checksum(fs.readFileSync(file));
   }
-  const inspected = await inspectIanLayeredScenePackage(value, {
+  const inspected = await inspectLegacyIanLayeredScenePackageV1(value, {
     repositoryRoot: root,
     episodeWorkspace: value.episode_workspace,
     sourceText,
@@ -240,7 +240,7 @@ test('disk inspection rejects opaque element layers and verifies deterministic c
   await sharp({create: {width: 1920, height: 1080, channels: 4, background: '#334455ff'}})
     .png().toFile(layer1Path);
   value.layers[0].checksum_sha256 = checksum(fs.readFileSync(layer1Path));
-  await assert.rejects(() => inspectIanLayeredScenePackage(value, {
+  await assert.rejects(() => inspectLegacyIanLayeredScenePackageV1(value, {
     repositoryRoot: root,
     episodeWorkspace: value.episode_workspace,
     sourceText,

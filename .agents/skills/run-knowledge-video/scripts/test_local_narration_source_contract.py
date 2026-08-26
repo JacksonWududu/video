@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
-"""Contract checks for the local-only narration source workflow."""
+"""Contract checks for locked local scripts and selected narration-audio sources."""
 
 from pathlib import Path
+import json
+import subprocess
+import tempfile
 import unittest
 
 
@@ -129,6 +132,61 @@ class LocalNarrationSourceContractTest(unittest.TestCase):
             ".agents/skills/run-knowledge-video/SKILL.md",
             "hand the already resolved topic folder and locked script",
         )
+
+    def test_standard_route_supports_explicit_edge_tts_source(self) -> None:
+        state_machine = (
+            ".agents/skills/run-knowledge-video/references/"
+            "workflow-state-machine.md"
+        )
+        self.assert_file_contains(
+            state_machine,
+            "narration-audio-source-selection-v1",
+            "`colocated_voice` or `edge_tts`",
+            "zh-CN-YunjianNeural",
+            "`+20%`",
+            "never silently fall back",
+        )
+        self.assert_file_contains(
+            ".agents/skills/validate-video-narration/SKILL.md",
+            "scripts/synthesize_edge_tts.py",
+            "zh-CN-YunjianNeural",
+            "`+20%`",
+        )
+
+    def test_edge_tts_adapter_has_deterministic_dry_run(self) -> None:
+        adapter = ROOT / ".agents/skills/validate-video-narration/scripts/synthesize_edge_tts.py"
+        self.assertTrue(adapter.is_file())
+        with tempfile.TemporaryDirectory() as temp_dir:
+            text_path = Path(temp_dir) / "locked.txt"
+            output_path = Path(temp_dir) / "voice.mp3"
+            metadata_path = Path(temp_dir) / "word-boundaries.jsonl"
+            text_path.write_text("第一句。\n第二句。", encoding="utf-8")
+            result = subprocess.run(
+                [
+                    "python3",
+                    str(adapter),
+                    "--text-file",
+                    str(text_path),
+                    "--output",
+                    str(output_path),
+                    "--metadata-output",
+                    str(metadata_path),
+                    "--voice",
+                    "zh-CN-YunjianNeural",
+                    "--rate=+20%",
+                    "--dry-run",
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            record = json.loads(result.stdout)
+            self.assertEqual(record["provider"], "edge-tts")
+            self.assertEqual(record["voice"], "zh-CN-YunjianNeural")
+            self.assertEqual(record["rate"], "+20%")
+            self.assertEqual(record["metadata_output"], str(metadata_path.resolve()))
+            self.assertFalse(output_path.exists())
+            self.assertFalse(metadata_path.exists())
 
     def test_audit_records_c01_as_resolved(self) -> None:
         self.assert_file_contains(

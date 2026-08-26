@@ -25,6 +25,7 @@
   ],
   "treatment_profiles": [
     {"treatment_profile_id": "imagegen-watercolor-narrative", "family": "illustration", "compatible_routes": ["imagegen"]},
+    {"treatment_profile_id": "imagegen-twilight-neon-narrative", "family": "cinematic-animation", "compatible_routes": ["imagegen"]},
     {"treatment_profile_id": "xuan-paper-diorama", "family": "paper-diorama", "compatible_routes": ["xuan-paper-diorama"]},
     {"treatment_profile_id": "ian-handdrawn-technical", "family": "handdrawn", "compatible_routes": ["ian-handdrawn-ppt"]},
     {"treatment_profile_id": "doodle-playful-explainer", "family": "doodle", "compatible_routes": ["doodle-slides"]},
@@ -49,6 +50,7 @@
   ],
   "treatment_layout_compatibility": [
     {"treatment_profile_id": "imagegen-watercolor-narrative", "source_style_anchor": "fresh", "recommended": ["sparse", "balanced", "flow"], "supported": ["dense", "list", "comparison", "mindmap", "quadrant"], "avoid": []},
+    {"treatment_profile_id": "imagegen-twilight-neon-narrative", "source_style_anchor": "twilight-neon-animation-v1", "recommended": ["sparse", "balanced", "comparison", "flow"], "supported": ["dense", "list", "mindmap", "quadrant"], "avoid": []},
     {"treatment_profile_id": "xuan-paper-diorama", "source_style_anchor": "xuan-paper-diorama-v1.0", "recommended": ["sparse", "flow"], "supported": ["balanced", "comparison"], "avoid": ["dense", "list", "mindmap", "quadrant"]},
     {"treatment_profile_id": "ian-handdrawn-technical", "source_style_anchor": "notion", "recommended": ["sparse", "balanced", "dense", "list", "comparison", "flow", "mindmap", "quadrant"], "supported": [], "avoid": []},
     {"treatment_profile_id": "doodle-playful-explainer", "source_style_anchor": "sketch-notes", "recommended": ["balanced", "dense", "list", "flow", "mindmap"], "supported": ["sparse", "comparison", "quadrant"], "avoid": []},

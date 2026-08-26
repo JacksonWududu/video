@@ -11,7 +11,7 @@ description: "Use only when a knowledge-video shot has the explicitly approved v
 
 - 已解析唯一 episode workspace，且活动分镜、旁白、逐镜视觉方向和路线选择均已锁定。
 - 当前镜头须为 `white_cat_present: false`，`scene_class` 仅可为 `narrative_illustration` 或 `structured_graphic`，且 `visual_generation_route` 精确为 `srt-whiteboard-animation`。
-- 源图由 ImageGen 生成：暖米黄纸张、深灰线条、少量红橙蓝点缀、横版，距 16:9 的相对误差不超过 `0.5%`。批准后按共享栅格规则归一化为 `1920×1080`。
+- 源图由 ImageGen 生成：仅对新生成提示词应用 `soft-visual-cohesion-v1`，使用暖白纸底、深灰细线、浅蓝/灰紫/浅桃点色与适量留白；默认避免无内容理由的霓虹、暗黑电影调色、写实摄影感、塑料 3D 与重海报大色块。横版距 16:9 的相对误差不超过 `0.5%`，批准后按共享栅格规则归一化为 `1920×1080`。此软约束不得覆盖已批准路线、treatment、文字或构图，亦不得改动已生成/已批准资产或换音色素材；逐笔标注与渲染机制保持不变。
 - 叙事白板禁止可见文字。新建或修改的结构白板直接使用上游同名枚举 `visible_text_mode: required`，只可使用 v3 分镜已批准的精确中文与位置，并须先经 `whiteboard-exact-text-overlay-v2` 和 `overlay_exact_text.py` 确定性叠加，再把所得 PNG 作为源图审批对象；禁止图像模型自行拼写。
 
 ## 单项三级审批

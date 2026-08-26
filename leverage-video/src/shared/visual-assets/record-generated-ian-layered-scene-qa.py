@@ -15,6 +15,10 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
 GATE_PATH = REPOSITORY_ROOT / ".agents/skills/run-knowledge-video/scripts/validate_visual_approval_state.py"
 VALIDATOR_PATH = REPOSITORY_ROOT / ".agents/skills/ian-handdrawn-ppt/scripts/validate_knowledge_video_layered_scene.mjs"
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+IAN_CANONICAL_STYLE_ANCHOR_PATH = (
+    ".agents/skills/ian-handdrawn-ppt/assets/"
+    "reference-handdrawn-article-illustration-style.png"
+)
 
 
 def sha256_file(file: Path) -> str:
@@ -29,10 +33,12 @@ def resolve_root_relative(value: str, label: str) -> Path:
     candidate = Path(value)
     if candidate.is_absolute() or not value or ".." in candidate.parts:
         raise ValueError(f"{label} must be root-relative")
-    resolved = (REPOSITORY_ROOT / candidate).resolve(strict=True)
+    unresolved = REPOSITORY_ROOT / candidate
+    if unresolved.is_symlink():
+        raise ValueError(f"{label} must be a regular non-symlink non-empty file")
+    resolved = unresolved.resolve(strict=True)
     resolved.relative_to(REPOSITORY_ROOT.resolve())
-    status = resolved.lstat()
-    if status.is_symlink() or not status.is_file() or status.st_size == 0:
+    if not resolved.is_file() or resolved.stat().st_size == 0:
         raise ValueError(f"{label} must be a regular non-symlink non-empty file")
     return resolved
 
@@ -74,6 +80,10 @@ def expected_reference_inputs(
         raise ValueError(
             "Ian layered revisions may not use a prior flattened raster as a generation input"
         )
+    if profile.get("style_anchor_path") != IAN_CANONICAL_STYLE_ANCHOR_PATH:
+        raise ValueError("Ian layered scenes require the canonical Ian style anchor")
+    if not SHA256_RE.fullmatch(str(profile.get("style_anchor_checksum_sha256", ""))):
+        raise ValueError("Ian canonical style anchor checksum must be a SHA-256")
     style = {
         "role": "visual_style_reference_only",
         "path": profile["style_anchor_path"],
@@ -123,14 +133,42 @@ def run_package_validator(episode_workspace: str, manifest_path: str) -> dict[st
             + (result.stderr.strip() or result.stdout.strip())
         )
     value = json.loads(result.stdout)
-    if value.get("result") != "pass" or value.get("deterministic_composite_match") is not True:
+    observation = value.get("model_provenance_observation", {})
+    if (
+        value.get("result") != "pass"
+        or observation
+        != {
+            "contract_version": "embedded-c2pa-software-agent-observation-v1",
+            "evidence_kind": "observation-not-signature-verification",
+            "software_agent_name": "gpt-image",
+            "software_agent_version": "2.0",
+        }
+        or value.get("deterministic_master_normalization_match") is not True
+        or value.get("deterministic_semantic_split_match") is not True
+        or value.get("deterministic_text_overlay_match") is not True
+        or value.get("deterministic_composite_match") is not True
+    ):
         raise ValueError("Ian layered-scene package validation is incomplete")
     return value
 
 
 def package_members(manifest: dict[str, Any]) -> list[dict[str, Any]]:
     values = [
+        {
+            "member_role": "source-master",
+            "layer_id": "source-master",
+            **manifest["master_generation"]["source_master"],
+        },
+        {
+            "member_role": "normalized-master",
+            "layer_id": "normalized-master",
+            **manifest["normalized_master"],
+        },
         {"member_role": "background", "layer_id": "background", **manifest["background"]},
+        *[
+            {"member_role": "pre-text-layer", **layer}
+            for layer in manifest["pre_text_layers"]
+        ],
         *[
             {"member_role": "semantic-layer", **layer}
             for layer in manifest["layers"]
@@ -160,43 +198,98 @@ def validate_member_generation_lineage(
     manifest: dict[str, Any],
     reference_inputs: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    expected = [
-        {
-            "member_role": "background",
-            "layer_id": "background",
-            "binding": manifest["background"],
-        },
-        *[
-            {
-                "member_role": "semantic-layer",
-                "layer_id": layer["layer_id"],
-                "binding": layer,
-            }
-            for layer in manifest["layers"]
-        ],
-    ]
-    if not isinstance(lineage, list) or len(lineage) != len(expected):
-        raise ValueError("Ian generation lineage must contain one independent stage per source member")
-    for index, (stage, expected_stage) in enumerate(zip(lineage, expected, strict=True)):
-        if (
-            not isinstance(stage, dict)
-            or stage.get("stage") != "independent-member-generation"
-            or stage.get("generation_mode")
-            != "codex-native-imagegen-independent-member-v1"
-            or stage.get("member_role") != expected_stage["member_role"]
-            or stage.get("layer_id") != expected_stage["layer_id"]
-            or stage.get("selection_status") != "selected"
-            or stage.get("reference_inputs") != reference_inputs
-            or stage.get("output")
-            != {
-                "path": expected_stage["binding"]["path"],
-                "checksum_sha256": expected_stage["binding"]["checksum_sha256"],
-            }
-        ):
-            raise ValueError(f"Ian generation stage {index} is not independently member-bound")
-        checksum_bound_file(stage.get("prompt", {}), f"Ian generation stage {index} prompt")
-        checksum_bound_file(stage["output"], f"Ian generation stage {index} output")
+    master_generation = manifest.get("master_generation", {})
+    source_master = master_generation.get("source_master", {})
+    expected_output = {
+        "path": source_master.get("path"),
+        "checksum_sha256": source_master.get("checksum_sha256"),
+    }
+    expected_keys = {
+        "stage",
+        "generation_mode",
+        "model_id",
+        "prompt",
+        "reference_inputs",
+        "output",
+        "selection_status",
+    }
+    if not isinstance(lineage, list) or len(lineage) != 1:
+        raise ValueError("Ian generation lineage must contain exactly one complete master stage")
+    stage = lineage[0]
+    if not isinstance(stage, dict) or set(stage) != expected_keys:
+        raise ValueError("Ian generation lineage must contain exactly one complete master stage")
+    if (
+        master_generation.get("contract_version")
+        != "ian-gpt-image-2-text-free-master-v1"
+        or master_generation.get("generator") != "codex-native-imagegen"
+        or master_generation.get("model_id") != "gpt-image-2"
+        or stage.get("stage") != "complete-master-generation"
+        or stage.get("generation_mode")
+        != "codex-native-imagegen-gpt-image-2-text-free-master-v1"
+        or stage.get("model_id") != "gpt-image-2"
+        or stage.get("prompt") != master_generation.get("prompt")
+        or stage.get("reference_inputs") != reference_inputs
+        or master_generation.get("reference_inputs") != reference_inputs
+        or stage.get("output") != expected_output
+        or stage.get("selection_status") != "selected"
+    ):
+        raise ValueError("Ian generation stage is not bound to the selected GPT Image 2 complete master")
+    checksum_bound_file(stage["prompt"], "Ian complete-master generation prompt")
+    checksum_bound_file(stage["output"], "Ian complete-master generation output")
     return lineage
+
+
+def validate_layer_text_containment_evidence(
+    containment: dict[str, Any],
+    manifest_binding: dict[str, Any],
+    manifest: dict[str, Any],
+    exact_visible_text: str,
+) -> None:
+    overlay = manifest.get("text_overlay", {})
+    labels = overlay.get("labels")
+    final_composite = manifest.get("final_composite", {})
+    final_projection = {
+        "path": final_composite.get("path"),
+        "checksum_sha256": final_composite.get("checksum_sha256"),
+    }
+    if (
+        manifest.get("contract_version") != "ian-knowledge-video-layered-scene-v2"
+        or overlay.get("contract_version") != "ian-deterministic-layer-text-overlay-v1"
+        or overlay.get("mode") != "required"
+        or not isinstance(labels, list)
+        or not labels
+        or containment.get("repair_mode") != "v2-deterministic-owning-layer-overlay"
+        or containment.get("scene_package_manifest") != manifest_binding
+        or containment.get("raster") != final_projection
+    ):
+        raise ValueError("Ian containment does not bind the v2 final composite and owning layers")
+    if "｜".join(label.get("text", "") for label in labels) != exact_visible_text:
+        raise ValueError("Ian containment labels do not equal the approved visible text")
+    layer_ids = {layer.get("layer_id") for layer in manifest.get("layers", [])}
+    if any(label.get("layer_id") not in layer_ids for label in labels):
+        raise ValueError("Ian containment label is not bound to an owning layer")
+    expected_overlays = [
+        {
+            "layer_id": label["layer_id"],
+            "text": label["text"],
+            "container_bbox": label["container_bbox"],
+        }
+        for label in labels
+    ]
+    if containment.get("layer_overlays") != expected_overlays:
+        raise ValueError("Ian containment owning layer overlays are stale")
+    regions = containment.get("inspection", {}).get("regions")
+    if not isinstance(regions, list) or len(regions) != len(labels):
+        raise ValueError("Ian containment regions do not equal the deterministic labels")
+    for label, region in zip(labels, regions, strict=True):
+        if (
+            region.get("layer_id") != label["layer_id"]
+            or region.get("text") != label["text"]
+            or region.get("container_bbox") != label["container_bbox"]
+            or region.get("min_inset_px") != overlay.get("minimum_inset_px")
+            or region.get("result") != "pass"
+        ):
+            raise ValueError("Ian containment region is not bound to its owning layer")
 
 
 def record(args: argparse.Namespace) -> dict[str, Any]:
@@ -228,7 +321,7 @@ def record(args: argparse.Namespace) -> dict[str, Any]:
     qa_file = resolve_root_relative(args.qa_path, "QA evidence path")
     qa = json.loads(qa_file.read_text(encoding="utf-8"))
     if (
-        qa.get("contract_version") != "ian-layered-scene-qa-v1"
+        qa.get("contract_version") != "ian-layered-scene-qa-v2"
         or qa.get("result") != "pass"
         or qa.get("asset_id") != args.asset_id
         or qa.get("generator") != "codex-native-imagegen"
@@ -253,8 +346,14 @@ def record(args: argparse.Namespace) -> dict[str, Any]:
         "checksum_sha256": item.get("visual_direction_review_checksum_sha256"),
         "presented_map_sha256": item.get("visual_direction_presented_map_sha256"),
     }
+    text_overlay = manifest.get("text_overlay", {})
+    overlay_labels = text_overlay.get("labels", [])
+    expected_text_mode = item.get("visible_text_mode")
+    expected_overlay_text = (
+        "" if expected_text_mode == "none" else item.get("exact_visible_text")
+    )
     if (
-        manifest.get("contract_version") != "ian-knowledge-video-layered-scene-v1"
+        manifest.get("contract_version") != "ian-knowledge-video-layered-scene-v2"
         or manifest.get("episode_workspace") != args.episode_workspace
         or manifest.get("queue_item_id") != args.asset_id
         or manifest.get("shot_id") != item.get("shot_id")
@@ -271,19 +370,30 @@ def record(args: argparse.Namespace) -> dict[str, Any]:
         or manifest.get("visual_direction_review") != expected_direction
         or manifest.get("scene_plan") != item.get("ian_scene_plan")
         or manifest.get("scene_plan_sha256") != item.get("ian_scene_plan_sha256")
+        or text_overlay.get("mode") != expected_text_mode
+        or "｜".join(label.get("text", "") for label in overlay_labels)
+        != expected_overlay_text
         or manifest.get("verified_visible_text") != expected_visible_text
-        or validation.get("member_count") != len(manifest.get("layers", [])) + 2
+        or validation.get("member_count") != 4 + (2 * len(manifest.get("layers", [])))
     ):
         raise ValueError("Ian layered-scene manifest does not match the queue item")
 
+    if qa.get("prompt") != manifest.get("master_generation", {}).get("prompt"):
+        raise ValueError("production prompt is not the selected complete-master prompt")
     prompt_file = checksum_bound_file(qa["prompt"], "production prompt")
     prompt_text = prompt_file.read_text(encoding="utf-8")
     if "16:9 landscape composition" not in prompt_text:
         raise ValueError("production prompt lacks exact 16:9 phrase")
+    normalized_prompt = prompt_text.lower()
+    if not any(
+        phrase in normalized_prompt
+        for phrase in ("no visible text", "text: none", "no written characters")
+    ):
+        raise ValueError("production prompt lacks an explicit text-free master phrase")
     for label in expected_visible_text:
         for segment in label.split("｜"):
-            if segment not in prompt_text:
-                raise ValueError("production prompt omits approved visible text")
+            if segment and segment in prompt_text:
+                raise ValueError("text-free complete-master prompt includes approved visible text")
 
     profile = qa["style_profile"]
     skill_file = resolve_root_relative(profile.get("skill_path", ""), "Ian skill path")
@@ -298,7 +408,11 @@ def record(args: argparse.Namespace) -> dict[str, Any]:
     if qa.get("revision_source") is not None:
         raise ValueError("Ian layered QA may not reference a prior flattened raster")
     expected_references = expected_reference_inputs(profile)
-    if qa["actual_reference_inputs"] != expected_references:
+    if (
+        qa["actual_reference_inputs"] != expected_references
+        or manifest.get("master_generation", {}).get("reference_inputs")
+        != expected_references
+    ):
         raise ValueError("Ian generation must bind the exact style anchor")
     generation_lineage = validate_member_generation_lineage(
         qa["generation_lineage"],
@@ -334,6 +448,14 @@ def record(args: argparse.Namespace) -> dict[str, Any]:
             }
         ):
             raise ValueError("Ian text-container QA is not bound to the final composite")
+        validate_layer_text_containment_evidence(
+            containment,
+            qa["scene_package_manifest"],
+            manifest,
+            item["exact_visible_text"],
+        )
+    elif qa.get("text_container_qa") is not None:
+        raise ValueError("text-free Ian scenes may not carry containment evidence")
 
     members = package_members(manifest)
     final_composite = manifest["final_composite"]
@@ -353,6 +475,9 @@ def record(args: argparse.Namespace) -> dict[str, Any]:
         style_anchor_checksum_sha256=profile["style_anchor_checksum_sha256"],
         actual_reference_inputs=qa["actual_reference_inputs"],
         generation_lineage=generation_lineage,
+        model_id=manifest["master_generation"]["model_id"],
+        model_provenance=manifest["model_provenance"],
+        model_provenance_observation=validation["model_provenance_observation"],
         rejected_attempts=qa.get("rejected_attempts", []),
         scene_package_manifest_path=qa["scene_package_manifest"]["path"],
         scene_package_manifest_checksum_sha256=qa["scene_package_manifest"][
@@ -363,13 +488,27 @@ def record(args: argparse.Namespace) -> dict[str, Any]:
         state_visible_text=item.get("exact_visible_text"),
         qa_evidence_path=args.qa_path,
         qa_evidence_checksum_sha256=sha256_file(qa_file),
-        qa_contract_version="ian-layered-scene-qa-v1",
+        qa_contract_version="ian-layered-scene-qa-v2",
         technical_qa={
             "result": "pass",
-            "rule_id": "ian-knowledge-video-layered-scene-v1",
+            "rule_id": "ian-knowledge-video-layered-scene-v2",
             "measured_dimensions": [1920, 1080],
             "layer_count": len(manifest["layers"]),
-            "deterministic_composite_match": True,
+            "model_provenance_observation": validation[
+                "model_provenance_observation"
+            ],
+            "deterministic_master_normalization_match": validation[
+                "deterministic_master_normalization_match"
+            ],
+            "deterministic_semantic_split_match": validation[
+                "deterministic_semantic_split_match"
+            ],
+            "deterministic_text_overlay_match": validation[
+                "deterministic_text_overlay_match"
+            ],
+            "deterministic_composite_match": validation[
+                "deterministic_composite_match"
+            ],
         },
         semantic_qa=qa["semantic_qa"],
         visible_text_qa=qa["visible_text_qa"],

@@ -69,6 +69,7 @@ const presentedProjection = (proposal) => ({
     next_visual_generation_route: row.next_visual_generation_route,
     source_white_cat_present: row.source_white_cat_present,
     next_white_cat_present: row.next_white_cat_present,
+    white_cat_visual_style_id: row.white_cat_visual_style_id,
     recommended_transition: row.recommended_transition,
     recommendation_source: row.recommendation_source,
     user_requested_transition: row.user_requested_transition ?? null,
@@ -84,6 +85,32 @@ const presentedProjection = (proposal) => ({
 
 export const buildTransitionReviewPresentedMapSha256 = (proposal) =>
   sha256Canonical(presentedProjection(proposal));
+
+const TRANSITION_REVIEW_FILENAME = /^per-boundary-transition-review-v(\d+)\.json$/;
+
+export const nextTransitionReviewVersion = ({
+  existingFilenames,
+  versionSourcePath,
+  replacingOrRefreshing,
+}) => {
+  if (!Array.isArray(existingFilenames)
+    || existingFilenames.some((filename) => typeof filename !== 'string')) {
+    throw new Error('existing transition review filenames are invalid');
+  }
+  const existingVersions = existingFilenames
+    .map((filename) => Number(filename.match(TRANSITION_REVIEW_FILENAME)?.[1]))
+    .filter((version) => Number.isInteger(version) && version >= 0);
+  let sourceVersion = 0;
+  if (replacingOrRefreshing) {
+    sourceVersion = Number(
+      path.posix.basename(versionSourcePath ?? '').match(TRANSITION_REVIEW_FILENAME)?.[1],
+    );
+    if (!Number.isInteger(sourceVersion) || sourceVersion < 0) {
+      throw new Error('current transition review path is not versioned');
+    }
+  }
+  return Math.max(0, sourceVersion, ...existingVersions) + 1;
+};
 
 export const rebindUnaffectedTransitionApprovals = ({
   rows,
@@ -111,6 +138,7 @@ export const rebindUnaffectedTransitionApprovals = ({
       next_visual_generation_route: row.next_visual_generation_route,
       source_white_cat_present: row.source_white_cat_present,
       next_white_cat_present: row.next_white_cat_present,
+      white_cat_visual_style_id: row.white_cat_visual_style_id,
       boundary_change_class: row.boundary_change_class,
       source_intent: row.source_intent,
     };
@@ -379,12 +407,15 @@ const buildArtifacts = ({episodeWorkspace, classificationPath, presentedAt, over
     const nextRoute = nextSelection.visual_generation_route;
     const sourceWhiteCatPresent = sourceSelection.white_cat_present;
     const nextWhiteCatPresent = nextSelection.white_cat_present;
+    const whiteCatVisualStyleId = review.white_cat_visual_style_binding?.style_id
+      ?? 'loose-line-vivid-watercolor';
     const resolved = resolveTransitionRecommendation({
       boundaryChangeClass: input.boundary_change_class,
       sourceVisualGenerationRoute: sourceRoute,
       nextVisualGenerationRoute: nextRoute,
       sourceWhiteCatPresent,
       nextWhiteCatPresent,
+      whiteCatVisualStyleId,
     });
     const userRequestedTransition = overrideByBoundary.get(
       `${input.source_shot_id}\u0000${input.next_shot_id}`,
@@ -399,6 +430,7 @@ const buildArtifacts = ({episodeWorkspace, classificationPath, presentedAt, over
       next_visual_generation_route: nextRoute,
       source_white_cat_present: sourceWhiteCatPresent,
       next_white_cat_present: nextWhiteCatPresent,
+      white_cat_visual_style_id: whiteCatVisualStyleId,
       recommended_transition: resolved.recommended_transition,
       recommendation_source: resolved.recommendation_source,
       ...(userRequestedTransition ? {user_requested_transition: userRequestedTransition} : {}),
@@ -433,13 +465,12 @@ const buildArtifacts = ({episodeWorkspace, classificationPath, presentedAt, over
   const versionSourcePath = refreshingAffectedProposal
     ? state.transition_review.prior_approval.path
     : state.transition_review?.path;
-  const currentProposalVersion = (replacingPendingProposal || refreshingAffectedProposal)
-    ? Number(versionSourcePath.match(/per-boundary-transition-review-v(\d+)\.json$/)?.[1])
-    : 0;
-  if (!Number.isInteger(currentProposalVersion) || currentProposalVersion < 0) {
-    throw new Error('current transition review path is not versioned');
-  }
-  const proposalRelative = `${episodeWorkspace}/schema/per-boundary-transition-review-v${currentProposalVersion + 1}.json`;
+  const proposalVersion = nextTransitionReviewVersion({
+    existingFilenames: fs.readdirSync(path.join(workspacePath, 'schema')),
+    versionSourcePath,
+    replacingOrRefreshing: replacingPendingProposal || refreshingAffectedProposal,
+  });
+  const proposalRelative = `${episodeWorkspace}/schema/per-boundary-transition-review-v${proposalVersion}.json`;
   const proposal = {
     contract_version: 'per-boundary-transition-review-v1',
     status: 'awaiting_user_selection',

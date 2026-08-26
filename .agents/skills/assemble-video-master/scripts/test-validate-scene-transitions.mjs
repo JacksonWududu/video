@@ -1,6 +1,10 @@
 #!/usr/bin/env node
 import assert from 'node:assert/strict';
 import {validateSceneTransitions} from './validate-scene-transitions.mjs';
+import {
+  IAN_LAYERED_ENTRY_EFFECTS_POLICY_SHA256,
+  buildIanLayeredEntryEffectsMapSha256,
+} from '../../../../leverage-video/src/shared/ian-layered-entry-effects/contract.mjs';
 
 const transition = (kind = 'slide') => ({
   contract_version: 'scene-transition-v2',
@@ -113,6 +117,24 @@ assert.equal(
   'pass',
 );
 
+const oneClickDirectionPlan = structuredClone(goodPlan);
+oneClickDirectionPlan.qa_contract.visual_direction_review.status = 'policy_authorized';
+oneClickDirectionPlan.qa_contract.workflow_approval = {
+  result: 'pass',
+  density_mode: 'standard',
+  approval_mode: 'one_click',
+};
+assert.equal(
+  validateSceneTransitions({plan: oneClickDirectionPlan, source: goodSource}).source_binding,
+  'pass',
+);
+const unboundPolicyDirectionPlan = structuredClone(oneClickDirectionPlan);
+delete unboundPolicyDirectionPlan.qa_contract.workflow_approval;
+assert.throws(
+  () => validateSceneTransitions({plan: unboundPolicyDirectionPlan, source: goodSource}),
+  /visual direction review/i,
+);
+
 const v3Plan = structuredClone(goodPlan);
 v3Plan.qa_contract.scene_transition_contract = 'scene-transition-v3';
 v3Plan.qa_contract.transition_selection_review.catalog_version = 'scene-transition-catalog-v3';
@@ -214,7 +236,7 @@ ianPlan.scenes.forEach((scene) => {
     visible_text_policy: 'approved-exact-text-raster-v1',
     ian_layered_scene: {
       contract_version: 'ian-static-layered-scene-v1',
-      package_contract_version: 'ian-knowledge-video-layered-scene-v1',
+      package_contract_version: 'ian-knowledge-video-layered-scene-v2',
       package_manifest: {
         path: `leverage-video/src/example/schema/${scene.shot_id}-ian-layered.json`,
         checksum_sha256: '1'.repeat(64),
@@ -249,7 +271,7 @@ ianPlan.qa_contract.ian_layered_scene_packages = {
     shot_id: scene.shot_id,
     package_manifest: structuredClone(scene.ian_layered_scene.package_manifest),
     package: {
-      contract_version: 'ian-knowledge-video-layered-scene-v1',
+      contract_version: 'ian-knowledge-video-layered-scene-v2',
       scene_plan_sha256: scene.ian_layered_scene.scene_plan_sha256,
       layers: scene.ian_layered_scene.layers.map((layer) => ({
         layer_id: layer.layer_id,
@@ -262,6 +284,79 @@ ianPlan.qa_contract.ian_layered_scene_packages = {
 assert.equal(
   validateSceneTransitions({plan: ianPlan, source: goodSource}).ian_layered_scene_contract,
   'ian-static-layered-scene-v1',
+);
+const animatedIanPlan = structuredClone(ianPlan);
+animatedIanPlan.scenes.forEach((scene, index) => {
+  const record = animatedIanPlan.qa_contract.ian_layered_scene_packages.records[index];
+  const entryEffects = {
+    contract_version: 'ian-layered-entry-effects-v2',
+    shot_id: scene.shot_id,
+    scene_plan_sha256: scene.ian_layered_scene.scene_plan_sha256,
+    package_manifest: structuredClone(scene.ian_layered_scene.package_manifest),
+    fps: 30,
+    duration_frames: scene.end_frame - scene.start_frame,
+    policy_authorization: {
+      status: 'policy_authorized',
+      policy_sha256: IAN_LAYERED_ENTRY_EFFECTS_POLICY_SHA256,
+      user_has_reviewed_specific_map: false,
+    },
+    sound_effect_library: {
+      path: 'leverage-video/src/shared/sound-effects/manifest.json',
+      checksum_sha256: '7'.repeat(64),
+    },
+    mix_policy: {
+      narration_gain: 1, normalize: false, peak_ceiling_dbfs: -1,
+      narration_mean_loudness_change_max_db: 0.5,
+      overflow_action: 'lower-sfx-bus-uniformly',
+    },
+    language_families: ['soft-settle-v1'],
+    layer_count: 1,
+    layers: [{
+      layer_id: 'L01', entry_frame: 0, element_class: 'paper_card',
+      language_family: 'soft-settle-v1',
+      effect: {
+        contract_version: 'soft-settle-v1', duration_frames: 8,
+        opacity_easing: 'linear', translation_profile: 'fixed-damped-v1',
+        axis: 'x', direction: 1, max_displacement_px: 10, edge_margin_px: 24,
+      },
+      sound_effect: {
+        contract_version: 'ian-layer-entry-sfx-cue-v2', role: 'paper_slide',
+        selection_reason: '关键纸卡入场',
+        source: {
+          asset_id: 'paper-slide-mixkit-1530',
+          path: 'leverage-video/src/shared/sound-effects/assets/paper-slide-mixkit-1530.wav',
+          checksum_sha256: '8'.repeat(64),
+          trim_start_sample: 0, trim_end_sample_exclusive: 8820,
+        },
+        derived_asset: {
+          asset: `${scene.shot_id}-entry.wav`, checksum_sha256: '9'.repeat(64),
+          sample_rate_hz: 44100, channels: 2,
+        },
+        cue_frame: 0, cue_sample: 0, gain_multiplier: 0.17,
+      },
+    }],
+    presented_map_sha256: '',
+  };
+  entryEffects.presented_map_sha256 = buildIanLayeredEntryEffectsMapSha256(entryEffects);
+  scene.ian_layered_scene.contract_version = 'ian-layered-entry-effects-renderer-v2';
+  delete scene.ian_layered_scene.layer_entry_transition;
+  delete scene.ian_layered_scene.motion_policy;
+  scene.ian_layered_scene.entry_effects = entryEffects;
+  record.entry_effects = structuredClone(entryEffects);
+});
+assert.equal(
+  validateSceneTransitions({
+    plan: animatedIanPlan,
+    source: `${goodSource}\n<Audio volume={entry.sound_effect.gain_multiplier} />; strokeDasharray; strokeDashoffset; <mask />; softSettleOffset;`,
+  }).ian_layered_scene_contract,
+  'ian-layered-entry-effects-renderer-v2',
+);
+assert.throws(
+  () => validateSceneTransitions({
+    plan: animatedIanPlan,
+    source: `${goodSource}\n<Audio volume={entry.sound_effect.gain_multiplier} />; strokeDasharray; strokeDashoffset; <mask />; softSettleOffset; const AnimatedLayer = () => scale(1); export const IanLayeredScene = AnimatedLayer;`,
+  }),
+  /does not consume the approved Ian entry motion/i,
 );
 const retiredMotionPlan = structuredClone(ianPlan);
 retiredMotionPlan.scenes[1].internal_motion_contract = 'ian-subtle-raster-motion-v1';

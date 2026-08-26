@@ -77,6 +77,19 @@ test('single comic-styled illustration remains imagegen without a comic plan', (
   }).result, 'pass');
 });
 
+test('twilight-neon animation is an ordinary imagegen narrative treatment', () => {
+  const result = validateVisualLanguageSelection({
+    scene_class: 'narrative_illustration',
+    visual_structure_id: 'single-scene',
+    treatment_profile_id: 'imagegen-twilight-neon-narrative',
+    visual_generation_route: 'imagegen',
+    white_cat_present: true,
+    comic_plan: null,
+  });
+  assert.equal(result.result, 'pass');
+  assert.equal(result.treatment_layout_compatibility, 'recommended');
+});
+
 test('xuan-paper-diorama accepts sparse narrative structures and rejects mismatched treatments', () => {
   assert.equal(validateVisualLanguageSelection({
     scene_class: 'narrative_illustration',

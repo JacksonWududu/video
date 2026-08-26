@@ -4,3 +4,4 @@ out/
 src/topic*/
 src/shared/gen-think/assets/
 src/shared/visual-assets/__pycache__/
+src/shared/sound-effects/

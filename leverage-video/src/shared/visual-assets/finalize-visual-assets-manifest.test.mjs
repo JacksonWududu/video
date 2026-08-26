@@ -14,12 +14,13 @@ import {
 } from '../action-state-schedule/contract.mjs';
 import {coverGeometry} from '../episode-tooling/raster-contract.mjs';
 import {
+  IAN_CANONICAL_STYLE_ANCHOR_PATH,
   IAN_LAYERED_SCENE_PACKAGE_VERSION,
   IAN_LAYERED_SCENE_PLAN_VERSION,
   IAN_LAYERED_SCENE_RENDERER_VERSION,
   IAN_LAYER_ENTRY_DURATION_FRAMES,
   IAN_LAYER_ENTRY_TRANSITION_VERSION,
-  composeIanLayeredSceneBytes,
+  deriveIanLayeredSceneV2Bytes,
   sha256Canonical as sha256IanCanonical,
   sha256Text,
 } from '../ian-layered-scene/contract.mjs';
@@ -39,6 +40,71 @@ const NOW = '2026-08-22T10:00:00+08:00';
 const sha256 = (bytes) => crypto.createHash('sha256').update(bytes).digest('hex');
 const jsonBytes = (value) => Buffer.from(`${JSON.stringify(value, null, 2)}\n`);
 const canonicalSha256 = (value) => sha256(Buffer.from(canonicalJson(value)));
+const crc32Table = Array.from({length: 256}, (_, value) => {
+  let crc = value;
+  for (let bit = 0; bit < 8; bit += 1) {
+    crc = (crc >>> 1) ^ ((crc & 1) ? 0xedb88320 : 0);
+  }
+  return crc >>> 0;
+});
+const crc32 = (bytes) => {
+  let crc = 0xffffffff;
+  for (const byte of bytes) crc = crc32Table[(crc ^ byte) & 0xff] ^ (crc >>> 8);
+  return (crc ^ 0xffffffff) >>> 0;
+};
+const pngChunk = (type, payload) => {
+  const typeBytes = Buffer.from(type, 'ascii');
+  const chunk = Buffer.alloc(12 + payload.length);
+  chunk.writeUInt32BE(payload.length, 0);
+  typeBytes.copy(chunk, 4);
+  payload.copy(chunk, 8);
+  chunk.writeUInt32BE(crc32(Buffer.concat([typeBytes, payload])), 8 + payload.length);
+  return chunk;
+};
+const isoBox = (type, payload) => {
+  const box = Buffer.alloc(8 + payload.length);
+  box.writeUInt32BE(box.length, 0);
+  box.write(type, 4, 4, 'ascii');
+  payload.copy(box, 8);
+  return box;
+};
+const jumd = (label, contentType = 'cbor') => isoBox('jumd', Buffer.concat([
+  Buffer.from(`${contentType}\u0000\u0011\u0000\u0010\u0080\u0000\u0000\u00aa\u00008\u009bq`, 'latin1'),
+  Buffer.from([3]),
+  Buffer.from(`${label}\u0000`, 'utf8'),
+]));
+const jumb = (label, children, contentType = 'cbor') => isoBox('jumb', Buffer.concat([
+  jumd(label, contentType),
+  ...children,
+]));
+const cborText = (value) => {
+  const bytes = Buffer.from(value, 'utf8');
+  assert.ok(bytes.length < 24);
+  return Buffer.concat([Buffer.from([0x60 + bytes.length]), bytes]);
+};
+const c2paObservationPayload = () => {
+  const actions = Buffer.concat([
+    Buffer.from([0xa1]), cborText('actions'), Buffer.from([0x81, 0xa2]),
+    cborText('action'), cborText('c2pa.created'),
+    cborText('softwareAgent'), Buffer.from([0xa2]),
+    cborText('name'), cborText('gpt-image'),
+    cborText('version'), cborText('2.0'),
+  ]);
+  return jumb('c2pa', [
+    jumb('c2pa.actions.v2', [isoBox('cbor', actions)]),
+    jumb('c2pa.claim.v2', [isoBox('cbor', Buffer.from([0xa0]))]),
+    jumb('c2pa.signature', [isoBox('cbor', Buffer.from([0xa0]))]),
+  ], 'c2pa');
+};
+const withGptImage2Observation = (png) => {
+  const iend = png.lastIndexOf(Buffer.from('IEND', 'ascii')) - 4;
+  assert.ok(iend >= 8);
+  return Buffer.concat([
+    png.subarray(0, iend),
+    pngChunk('caBX', c2paObservationPayload()),
+    png.subarray(iend),
+  ]);
+};
 
 const write = (root, relative, bytes) => {
   const target = path.join(root, relative);
@@ -53,12 +119,6 @@ const readJson = (root, relative) => JSON.parse(fs.readFileSync(path.join(root, 
 const makeRaster = (width, height, background) => sharp({
   create: {width, height, channels: 3, background},
 }).png({compressionLevel: 9, adaptiveFiltering: false, palette: false}).toBuffer();
-
-const makeTransparentLayer = ({x, y, width, height, fill}) => sharp({
-  create: {width: 1920, height: 1080, channels: 4, background: {r: 0, g: 0, b: 0, alpha: 0}},
-}).composite([{
-  input: Buffer.from(`<svg width="1920" height="1080"><rect x="${x}" y="${y}" width="${width}" height="${height}" rx="24" fill="${fill}"/></svg>`),
-}]).png({compressionLevel: 9, adaptiveFiltering: false, palette: false}).toBuffer();
 
 const normalize = (bytes) => sharp(bytes, {failOn: 'error'})
   .resize(1920, 1080, {
@@ -171,6 +231,7 @@ const makeFixture = async () => {
     coverEvidence: `${prefix}/schema/cover-normalization-v1.json`,
     normalizationDirectory: `${prefix}/schema/normalization`,
     reference: `${prefix}/assets/reference/style-reference.txt`,
+    ianReference: '.agents/skills/ian-handdrawn-ppt/assets/reference-handdrawn-article-illustration-style.png',
   };
 
   const storyboardBytes = Buffer.from([
@@ -196,10 +257,12 @@ const makeFixture = async () => {
   const draftBytes = Buffer.from('# source draft\n');
   const narrationBytes = Buffer.from('fixture narration bytes\n');
   const referenceBytes = Buffer.from('locked style reference\n');
+  const ianReferenceBytes = await makeRaster(1920, 1080, '#fdfcf9');
   write(repositoryRoot, paths.storyboard, storyboardBytes);
   write(repositoryRoot, paths.draft, draftBytes);
   write(repositoryRoot, paths.narration, narrationBytes);
   write(repositoryRoot, paths.reference, referenceBytes);
+  write(repositoryRoot, paths.ianReference, ianReferenceBytes);
 
   const storyboardChecksum = sha256(storyboardBytes);
   const draftChecksum = sha256(draftBytes);
@@ -229,9 +292,9 @@ const makeFixture = async () => {
           visual_generation_route: 'ian-handdrawn-ppt',
           visual_structure_id: 'timeline',
           treatment_profile_id: 'ian-handdrawn-technical',
-          visible_text_mode: 'required',
-          exact_visible_text: '测试',
-          visible_text_placement: '中央',
+          visible_text_mode: 'none',
+          exact_visible_text: null,
+          visible_text_placement: null,
           exact_message: '批准 S01 方向。',
           decided_at: NOW,
           presented_map_sha256: '3'.repeat(64),
@@ -436,35 +499,111 @@ const makeFixture = async () => {
   writeJson(repositoryRoot, paths.transitions, transitions);
   const transitionsChecksum = sha256(fs.readFileSync(path.join(repositoryRoot, paths.transitions)));
 
-  const ianBackground = await makeRaster(1920, 1080, '#f4f0e7');
-  const ianLayerOne = await makeTransparentLayer({
-    x: 260,
-    y: 250,
-    width: 560,
-    height: 260,
-    fill: '#587ea8',
-  });
-  const ianLayerTwo = await makeTransparentLayer({
-    x: 1080,
-    y: 570,
-    width: 580,
-    height: 250,
-    fill: '#bd7358',
-  });
+  const ianSourceMasterPng = await sharp({
+    create: {
+      width: 1920,
+      height: 1080,
+      channels: 3,
+      background: {r: 244, g: 240, b: 231},
+    },
+  }).composite([{
+    input: Buffer.from('<svg width="1920" height="1080"><rect x="260" y="250" width="560" height="260" rx="24" fill="#587ea8"/><rect x="1080" y="570" width="580" height="250" rx="24" fill="#bd7358"/></svg>'),
+  }]).removeAlpha().png({compressionLevel: 9, adaptiveFiltering: false, palette: false}).toBuffer();
+  const ianSourceMaster = withGptImage2Observation(ianSourceMasterPng);
+  const ianSplitSpec = {
+    contract_version: 'ian-semantic-region-alpha-split-v1',
+    normalization: {
+      fit: 'cover',
+      position: 'centre',
+      kernel: 'lanczos3',
+      stretch: false,
+      padding: false,
+    },
+    matte_rgb: [244, 240, 231],
+    alpha_distance_low: 6,
+    alpha_distance_high: 24,
+    blur_sigma_px: 0.8,
+    paper_background_rgba: [244, 240, 231, 255],
+    minimum_inter_layer_gutter_px: 24,
+    outside_union_max_visible_pixels: 1024,
+    layers: [
+      {layer_id: 'L01', bbox: {x: 220, y: 210, width: 640, height: 340}},
+      {layer_id: 'L02', bbox: {x: 1040, y: 530, width: 660, height: 330}},
+    ],
+  };
+  const ianTextOverlay = {
+    contract_version: 'ian-deterministic-layer-text-overlay-v1',
+    mode: 'none',
+    font: null,
+    minimum_inset_px: 8,
+    labels: [],
+  };
+  const ianSourceMasterPath = `${prefix}/assets/image/ian/S01/source-master-v01.png`;
+  const ianNormalizedMasterPath = `${prefix}/assets/image/ian/S01/normalized-master-v01.png`;
   const ianBackgroundPath = `${prefix}/assets/image/ian/S01/background-v01.png`;
+  const ianPreTextLayerOnePath = `${prefix}/assets/image/ian/S01/pre-text-layer-L01-v01.png`;
+  const ianPreTextLayerTwoPath = `${prefix}/assets/image/ian/S01/pre-text-layer-L02-v01.png`;
   const ianLayerOnePath = `${prefix}/assets/image/ian/S01/layer-L01-v01.png`;
   const ianLayerTwoPath = `${prefix}/assets/image/ian/S01/layer-L02-v01.png`;
   const ianFinalCompositePath = `${prefix}/assets/image/ian/S01/final-composite-v01.png`;
+  write(repositoryRoot, ianSourceMasterPath, ianSourceMaster);
+  const ianScenePlan = {
+    contract_version: IAN_LAYERED_SCENE_PLAN_VERSION,
+    shot_id: 'S01',
+    narration_source_text_sha256: sha256Text('测试图解'),
+    scene_renderer: IAN_LAYERED_SCENE_RENDERER_VERSION,
+    background_policy: 'static-paper-background-v1',
+    layer_asset_policy: 'full-canvas-transparent-png-v1',
+    layer_entry_transition: {
+      contract_version: IAN_LAYER_ENTRY_TRANSITION_VERSION,
+      duration_frames: IAN_LAYER_ENTRY_DURATION_FRAMES,
+      easing: 'linear',
+    },
+    motion_policy: {
+      scene_transform: 'forbidden',
+      layer_transform: 'forbidden',
+      mask_reveal: 'forbidden',
+      internal_cut: 'forbidden',
+      opacity_animation: IAN_LAYER_ENTRY_TRANSITION_VERSION,
+    },
+    layer_count: 2,
+    layers: [
+      {
+        layer_id: 'L01',
+        z_index: 1,
+        semantic_role: '核心概念',
+        source_text_start_byte: 0,
+        source_text_end_byte_exclusive: 6,
+        source_text: '测试',
+        entry_frame: 0,
+      },
+      {
+        layer_id: 'L02',
+        z_index: 2,
+        semantic_role: '解释图解',
+        source_text_start_byte: 6,
+        source_text_end_byte_exclusive: 12,
+        source_text: '图解',
+        entry_frame: 30,
+      },
+    ],
+  };
+  const ianDerived = await deriveIanLayeredSceneV2Bytes({
+    sourceMasterBytes: ianSourceMaster,
+    splitSpec: ianSplitSpec,
+    textOverlay: ianTextOverlay,
+    scenePlan: ianScenePlan,
+  });
+  const ianBackground = ianDerived.background;
+  const [ianPreTextLayerOne, ianPreTextLayerTwo] = ianDerived.preTextLayers;
+  const [ianLayerOne, ianLayerTwo] = ianDerived.layers;
+  const ianFinalComposite = ianDerived.finalComposite;
+  write(repositoryRoot, ianNormalizedMasterPath, ianDerived.normalizedMaster);
   write(repositoryRoot, ianBackgroundPath, ianBackground);
+  write(repositoryRoot, ianPreTextLayerOnePath, ianPreTextLayerOne);
+  write(repositoryRoot, ianPreTextLayerTwoPath, ianPreTextLayerTwo);
   write(repositoryRoot, ianLayerOnePath, ianLayerOne);
   write(repositoryRoot, ianLayerTwoPath, ianLayerTwo);
-  const ianFinalComposite = await composeIanLayeredSceneBytes({
-    backgroundPath: path.join(repositoryRoot, ianBackgroundPath),
-    layerPaths: [
-      path.join(repositoryRoot, ianLayerOnePath),
-      path.join(repositoryRoot, ianLayerTwoPath),
-    ],
-  });
   write(repositoryRoot, ianFinalCompositePath, ianFinalComposite);
   const imageMaster = await makeRaster(1600, 900, '#afc7d8');
   const imageAction = await makeRaster(1600, 900, '#d8c3af');
@@ -643,49 +782,23 @@ const makeFixture = async () => {
     }),
   ];
 
-  const ianScenePlan = {
-    contract_version: IAN_LAYERED_SCENE_PLAN_VERSION,
-    shot_id: queue[0].shot_id,
-    narration_source_text_sha256: sha256Text(queue[0].narration_source_text),
-    scene_renderer: IAN_LAYERED_SCENE_RENDERER_VERSION,
-    background_policy: 'static-paper-background-v1',
-    layer_asset_policy: 'full-canvas-transparent-png-v1',
-    layer_entry_transition: {
-      contract_version: IAN_LAYER_ENTRY_TRANSITION_VERSION,
-      duration_frames: IAN_LAYER_ENTRY_DURATION_FRAMES,
-      easing: 'linear',
-    },
-    motion_policy: {
-      scene_transform: 'forbidden',
-      layer_transform: 'forbidden',
-      mask_reveal: 'forbidden',
-      internal_cut: 'forbidden',
-      opacity_animation: IAN_LAYER_ENTRY_TRANSITION_VERSION,
-    },
-    layer_count: 2,
-    layers: [
-      {
-        layer_id: 'L01',
-        z_index: 1,
-        semantic_role: '核心概念',
-        source_text_start_byte: 0,
-        source_text_end_byte_exclusive: 6,
-        source_text: '测试',
-        entry_frame: 0,
-      },
-      {
-        layer_id: 'L02',
-        z_index: 2,
-        semantic_role: '解释图解',
-        source_text_start_byte: 6,
-        source_text_end_byte_exclusive: 12,
-        source_text: '图解',
-        entry_frame: 30,
-      },
-    ],
-  };
   const ianScenePlanSha256 = sha256IanCanonical(ianScenePlan);
-  const ianScenePackagePath = `${prefix}/schema/ian/s01-layered-scene-v1.json`;
+  const ianScenePackagePath = `${prefix}/schema/ian/s01-layered-scene-v2.json`;
+  const ianMasterPromptPath = `${prefix}/assets/prompts/s01-ian-master.txt`;
+  const ianMasterPromptBytes = Buffer.from(
+    '16:9 landscape composition\nno visible text\nclean non-overlapping semantic zones\n',
+  );
+  write(repositoryRoot, ianMasterPromptPath, ianMasterPromptBytes);
+  const ianMasterPrompt = {
+    path: ianMasterPromptPath,
+    checksum_sha256: sha256(ianMasterPromptBytes),
+  };
+  const ianReferences = [{
+    role: 'visual_style_reference_only',
+    path: paths.ianReference,
+    checksum_sha256: sha256(ianReferenceBytes),
+  }];
+  queue[0].actual_reference_inputs = structuredClone(ianReferences);
   const ianScenePackage = {
     contract_version: IAN_LAYERED_SCENE_PACKAGE_VERSION,
     episode_workspace: episodeWorkspace,
@@ -709,6 +822,12 @@ const makeFixture = async () => {
     scene_plan: ianScenePlan,
     scene_plan_sha256: ianScenePlanSha256,
     generation_constraints: {
+      imagegen_call_count: 1,
+      text_free_complete_master: true,
+      independent_member_generation: false,
+      deterministic_master_normalization: true,
+      deterministic_semantic_region_split: true,
+      deterministic_layer_text_overlay: true,
       background_raster_count: 1,
       final_composite_raster_count: 1,
       layer_rasters_are_full_canvas_rgba: true,
@@ -725,6 +844,46 @@ const makeFixture = async () => {
       automatic_labels: false,
       signature: false,
     },
+    master_generation: {
+      contract_version: 'ian-gpt-image-2-text-free-master-v1',
+      generator: 'codex-native-imagegen',
+      model_id: 'gpt-image-2',
+      prompt: ianMasterPrompt,
+      reference_inputs: structuredClone(ianReferences),
+      selection_status: 'selected',
+      visible_text_mode: 'none',
+      source_master: {
+        path: ianSourceMasterPath,
+        checksum_sha256: sha256(ianSourceMaster),
+        width: 1920,
+        height: 1080,
+        role: 'text-free-complete-master-source',
+        has_alpha: false,
+      },
+      visual_qa: {
+        result: 'pass',
+        inspection: 'human-original-resolution-v1',
+        observed_visible_text: [],
+        observed_pseudo_text: false,
+      },
+    },
+    model_provenance: {
+      contract_version: 'codex-native-imagegen-gpt-image-2-provenance-v1',
+      generator: 'codex-native-imagegen',
+      canonical_model: 'gpt-image-2',
+      evidence_kind: 'embedded-c2pa-software-agent-observation-v1',
+      source_master_checksum_sha256: sha256(ianSourceMaster),
+      expected_software_agent: {name: 'gpt-image', version: '2.0'},
+    },
+    normalized_master: {
+      path: ianNormalizedMasterPath,
+      checksum_sha256: sha256(ianDerived.normalizedMaster),
+      width: 1920,
+      height: 1080,
+      role: 'text-free-complete-master-normalized',
+      has_alpha: false,
+    },
+    split_spec: ianSplitSpec,
     background: {
       path: ianBackgroundPath,
       checksum_sha256: sha256(ianBackground),
@@ -733,6 +892,16 @@ const makeFixture = async () => {
       role: 'static-paper-background',
       has_alpha: false,
     },
+    pre_text_layers: ianScenePlan.layers.map((layer, index) => ({
+      ...layer,
+      path: [ianPreTextLayerOnePath, ianPreTextLayerTwoPath][index],
+      checksum_sha256: sha256([ianPreTextLayerOne, ianPreTextLayerTwo][index]),
+      width: 1920,
+      height: 1080,
+      role: 'transparent-semantic-element-pre-text',
+      has_alpha: true,
+    })),
+    text_overlay: ianTextOverlay,
     layers: ianScenePlan.layers.map((layer, index) => ({
       ...layer,
       path: [ianLayerOnePath, ianLayerTwoPath][index],
@@ -750,11 +919,22 @@ const makeFixture = async () => {
       role: 'final-composite-review-raster',
       has_alpha: false,
     },
-    verified_visible_text: ['测试'],
+    verified_visible_text: [],
   };
   writeJson(repositoryRoot, ianScenePackagePath, ianScenePackage);
   const ianScenePackageMembers = [
+    {
+      member_role: 'source-master',
+      layer_id: 'source-master',
+      ...ianScenePackage.master_generation.source_master,
+    },
+    {
+      member_role: 'normalized-master',
+      layer_id: 'normalized-master',
+      ...ianScenePackage.normalized_master,
+    },
     {member_role: 'background', layer_id: 'background', ...ianScenePackage.background},
+    ...ianScenePackage.pre_text_layers.map((layer) => ({member_role: 'pre-text-layer', ...layer})),
     ...ianScenePackage.layers.map((layer) => ({member_role: 'semantic-layer', ...layer})),
     {member_role: 'final-composite', layer_id: 'final-composite', ...ianScenePackage.final_composite},
   ].map((member) => ({
@@ -766,24 +946,20 @@ const makeFixture = async () => {
     height: member.height,
     has_alpha: member.has_alpha,
   }));
-  const ianGeneratedMembers = ianScenePackageMembers.slice(0, -1);
-  const ianGenerationLineage = ianGeneratedMembers.map((member, index) => {
-    const promptPath = `${prefix}/assets/prompts/s01-ian-member-${index + 1}.txt`;
-    const promptBytes = Buffer.from(`16:9 landscape composition\nIan member ${member.layer_id}\n`);
-    write(repositoryRoot, promptPath, promptBytes);
-    return {
-      stage: 'independent-member-generation',
-      generation_mode: 'codex-native-imagegen-independent-member-v1',
-      member_role: member.member_role,
-      layer_id: member.layer_id,
-      prompt: {path: promptPath, checksum_sha256: sha256(promptBytes)},
-      reference_inputs: structuredClone(queue[0].actual_reference_inputs),
-      output: {path: member.path, checksum_sha256: member.checksum_sha256},
-      selection_status: 'selected',
-    };
-  });
+  const ianGenerationLineage = [{
+    stage: 'complete-master-generation',
+    generation_mode: 'codex-native-imagegen-gpt-image-2-text-free-master-v1',
+    model_id: 'gpt-image-2',
+    prompt: ianMasterPrompt,
+    reference_inputs: structuredClone(ianReferences),
+    output: {
+      path: ianScenePackage.master_generation.source_master.path,
+      checksum_sha256: ianScenePackage.master_generation.source_master.checksum_sha256,
+    },
+    selection_status: 'selected',
+  }];
   Object.assign(queue[0], {
-    qa_contract_version: 'ian-layered-scene-qa-v1',
+    qa_contract_version: 'ian-layered-scene-qa-v2',
     scene_package_manifest_path: ianScenePackagePath,
     scene_package_manifest_checksum_sha256: sha256(fs.readFileSync(
       path.join(repositoryRoot, ianScenePackagePath),
@@ -1196,6 +1372,24 @@ test('build preserves accepted-asset evidence and complete timing maps', async (
     manifest.assets[0].review_evidence.ian.scene_package_manifest.record.final_composite.role,
     'final-composite-review-raster',
   );
+  assert.equal(manifest.assets[0].review_evidence.ian.package_review.members.length, 8);
+  assert.deepEqual(
+    manifest.assets[0].review_evidence.ian.package_review.members.map((member) => member.member_role),
+    [
+      'source-master', 'normalized-master', 'background',
+      'pre-text-layer', 'pre-text-layer',
+      'semantic-layer', 'semantic-layer', 'final-composite',
+    ],
+  );
+  assert.equal(manifest.assets[0].review_evidence.generation_lineage.length, 1);
+  assert.equal(
+    manifest.assets[0].review_evidence.actual_reference_inputs[0].path,
+    IAN_CANONICAL_STYLE_ANCHOR_PATH,
+  );
+  assert.equal(
+    manifest.assets[0].review_evidence.ian.validation.model_provenance_observation.software_agent_version,
+    '2.0',
+  );
   assert.equal(manifest.scenes[0].ian_layered_scene.package.layers.length, 2);
   assert.equal(manifest.assets[1].review_evidence.selected_prompt.text_utf8, '镜头：S02-master-v01\n');
   assert.equal(manifest.assets[1].review_evidence.actual_reference_inputs[0].inspection.scope, 'repository-reference');
@@ -1205,6 +1399,24 @@ test('build preserves accepted-asset evidence and complete timing maps', async (
   assert.equal(manifest.cover.approved_external_source.path, fixture.state.opening_cover.source_path);
   assert.equal(manifest.cover.episode_archive.exact_bytes_equal_external_source, true);
   assert.equal(manifest.scene_transitions[0].renderer, 'leverage-video/src/shared/scene-transitions');
+});
+
+test('finalizer rejects an Ian queue record that substitutes an arbitrary style reference', async (t) => {
+  const fixture = await setup(t);
+  rewriteState(fixture, (state) => {
+    state.visual_asset_review.queue[0].actual_reference_inputs[0] = {
+      role: 'visual_style_reference_only',
+      path: fixture.paths.reference,
+      checksum_sha256: sha256(fs.readFileSync(path.join(
+        fixture.repositoryRoot,
+        fixture.paths.reference,
+      ))),
+    };
+  });
+  await assert.rejects(
+    buildVisualAssetsManifest(buildOptions(fixture)),
+    /single canonical Ian style anchor/,
+  );
 });
 
 test('one-click exact-list approval builds and locks from caption choice without manual approval fields', async (t) => {
@@ -1232,6 +1444,27 @@ test('one-click exact-list approval builds and locks from caption choice without
   assert.equal(lockedState.phase, 'awaiting_caption_delivery_choice');
   assert.equal(lockedState.active_visual_manifest.status, 'active_locked');
   assert.equal(lockedState.visual_asset_review.status, 'locked');
+});
+
+test('one-click finalizer ignores superseded queue history outside the approved active list', async (t) => {
+  const fixture = await setup(t);
+  authorizeFixtureOneClick(fixture);
+  rewriteState(fixture, (state) => {
+    state.visual_asset_review.queue.push({
+      ...structuredClone(state.visual_asset_review.queue[1]),
+      asset_id: 'S02-master-v00',
+      status: 'superseded',
+      active_for_current_storyboard: false,
+    });
+  });
+
+  const manifest = await buildVisualAssetsManifest(buildOptions(fixture));
+  assert.equal(manifest.counts.active_asset_count, 3);
+  assert.deepEqual(manifest.assets.map((asset) => asset.asset_id), [
+    'S01-master-v01',
+    'S02-master-v01',
+    'S02-action-01-v01',
+  ]);
 });
 
 test('one-click transition policy authorization rejects fabricated concrete review evidence', async (t) => {

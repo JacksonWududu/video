@@ -20,10 +20,11 @@ class C07C10ResolutionContractTest(unittest.TestCase):
     def test_c07_ian_adapter_is_v3_bound_and_layered(self) -> None:
         self.assert_contains(
             ".agents/skills/ian-handdrawn-ppt/references/knowledge-video-frame.md",
-            "ian-knowledge-video-layered-scene-v1",
-            "one opaque 1920×1080 near-white paper background",
-            "ordered 1920×1080 transparent PNG semantic layers",
-            "transparent full-canvas layer",
+            "ian-knowledge-video-layered-scene-v2",
+            "one `gpt-image-2` text-free complete source master",
+            "one deterministic 1920×1080 opaque near-white paper background",
+            "one ordered 1920×1080 transparent pre-text layer",
+            "full-canvas transparent pre-text layers",
             "fixed eight-frame fade",
             "per-shot-visual-direction-review-v3",
             "contact sheet is an outer Visual Asset Review artifact only",

@@ -86,8 +86,12 @@ test('registers v3 action, visual rhythm, generic intra-shot transitions, routin
   assert.equal(ianLayeredScene?.path, 'leverage-video/src/shared/ian-layered-scene');
   assert.match(
     ianLayeredScene?.use_when ?? '',
-    /static Ian .*transparent-layer scene packages/i,
+    /Ian background-plus-transparent-layer scene packages/i,
   );
+  const ianEntryEffects = registry.modules.find((module) => module.module_id === 'ian-layered-entry-effects');
+  assert.equal(ianEntryEffects?.required_for_new_episode_script, true);
+  const visibleTextReview = registry.modules.find((module) => module.module_id === 'visible-text-review');
+  assert.equal(visibleTextReview?.path, 'leverage-video/src/shared/visible-text-review');
 });
 
 test('requires one explicit decision for every registered shared module', () => {
@@ -180,9 +184,11 @@ test('accepts real source imports for mandatory shared modules', () => {
     "import {buildKnowledgeVideoAssemblyPlan} from '../../shared/assembly-plan/build-assembly-plan.mjs';",
     "import {KnowledgeVideo} from '../../shared/video-scenes';",
     "import {validateIanLayeredScenePlan} from '../../shared/ian-layered-scene/contract.mjs';",
+    "import {validateIanLayeredEntryEffectsPlan} from '../../shared/ian-layered-entry-effects/contract.mjs';",
     'void buildKnowledgeVideoAssemblyPlan;',
     'void KnowledgeVideo;',
     'void validateIanLayeredScenePlan;',
+    'void validateIanLayeredEntryEffectsPlan;',
     '',
   ].join('\n'));
   try {
@@ -209,6 +215,12 @@ test('accepts real source imports for mandatory shared modules', () => {
         checksum_sha256: sha256File(sourcePath),
         shared_import_marker: 'shared/ian-layered-scene',
       }],
+      'ian-layered-entry-effects': [{
+        kind: 'source',
+        path: consumerPath,
+        checksum_sha256: sha256File(sourcePath),
+        shared_import_marker: 'shared/ian-layered-entry-effects',
+      }],
     };
     for (const item of decision.decisions) item.consumers = consumers[item.module_id] ?? [];
     assert.equal(
@@ -231,9 +243,11 @@ test('accepts an explicitly authorized legacy migration with an exact current sc
     "import {buildKnowledgeVideoAssemblyPlan} from '../../shared/assembly-plan/build-assembly-plan.mjs';",
     "import {KnowledgeVideo} from '../../shared/video-scenes';",
     "import {validateIanLayeredScenePlan} from '../../shared/ian-layered-scene/contract.mjs';",
+    "import {validateIanLayeredEntryEffectsPlan} from '../../shared/ian-layered-entry-effects/contract.mjs';",
     'void buildKnowledgeVideoAssemblyPlan;',
     'void KnowledgeVideo;',
     'void validateIanLayeredScenePlan;',
+    'void validateIanLayeredEntryEffectsPlan;',
     '',
   ].join('\n'));
   try {
@@ -259,6 +273,12 @@ test('accepts an explicitly authorized legacy migration with an exact current sc
         path: consumerPath,
         checksum_sha256: sha256File(sourcePath),
         shared_import_marker: 'shared/ian-layered-scene',
+      }],
+      'ian-layered-entry-effects': [{
+        kind: 'source',
+        path: consumerPath,
+        checksum_sha256: sha256File(sourcePath),
+        shared_import_marker: 'shared/ian-layered-entry-effects',
       }],
     };
     for (const item of decision.decisions) item.consumers = consumers[item.module_id] ?? [];
@@ -288,9 +308,11 @@ test('legacy migration and consumption use the same bytewise inventory order', (
     "import {buildKnowledgeVideoAssemblyPlan} from '../../../../shared/assembly-plan/build-assembly-plan.mjs';",
     "import {KnowledgeVideo} from '../../../../shared/video-scenes';",
     "import {validateIanLayeredScenePlan} from '../../../../shared/ian-layered-scene/contract.mjs';",
+    "import {validateIanLayeredEntryEffectsPlan} from '../../../../shared/ian-layered-entry-effects/contract.mjs';",
     'void buildKnowledgeVideoAssemblyPlan;',
     'void KnowledgeVideo;',
     'void validateIanLayeredScenePlan;',
+    'void validateIanLayeredEntryEffectsPlan;',
     '',
   ].join('\n'));
   fs.writeFileSync(demoPath, 'export const demo = true;\n');
@@ -327,6 +349,14 @@ test('legacy migration and consumption use the same bytewise inventory order', (
           path: consumerPath,
           checksum_sha256: sha256File(openingPath),
           shared_import_marker: 'shared/ian-layered-scene',
+        }];
+      }
+      if (item.module_id === 'ian-layered-entry-effects') {
+        item.consumers = [{
+          kind: 'source',
+          path: consumerPath,
+          checksum_sha256: sha256File(openingPath),
+          shared_import_marker: 'shared/ian-layered-entry-effects',
         }];
       }
     }

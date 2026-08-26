@@ -28,7 +28,12 @@ import {
   buildStoryboardVisualRhythmMapSha256,
   validateStoryboardVisualRhythm,
 } from '../storyboard-visual-rhythm/contract.mjs';
-import {inspectIanLayeredScenePackage} from '../ian-layered-scene/contract.mjs';
+import {
+  IAN_CANONICAL_STYLE_ANCHOR_PATH,
+  IAN_LAYERED_SCENE_PACKAGE_VERSION,
+  inspectIanLayeredScenePackage,
+} from '../ian-layered-scene/contract.mjs';
+import {validateWhiteCatVisualStyleSelection} from '../workflow-approval/contract.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const REPOSITORY_ROOT = path.resolve(HERE, '../../../..');
@@ -503,7 +508,9 @@ const assertReviewReady = (state) => {
   if (review.queue_generation_allowed !== true) {
     fail('visual_asset_review has a closed approval boundary');
   }
-  const queue = assertArray(review.queue, 'visual_asset_review.queue');
+  const queue = assertArray(review.queue, 'visual_asset_review.queue').filter(
+    (item) => item?.active_for_current_storyboard !== false && item?.status !== 'superseded',
+  );
   if (queue.length === 0) fail('visual_asset_review.queue is empty');
   if (queue.some((item) => item?.status !== 'approved')) fail('every visual asset queue item must be approved');
   const ids = queue.map((item) => item.asset_id);
@@ -636,7 +643,7 @@ const inspectIanEvidence = async ({
   const manifest = readJson(manifestTarget.resolved);
   const selected = direction.user_selection;
   if (selected.status !== expectedDirectionStatus
-      || item.qa_contract_version !== 'ian-layered-scene-qa-v1') {
+      || item.qa_contract_version !== 'ian-layered-scene-qa-v2') {
     fail(`asset ${item.asset_id} Ian layered-scene authorization is stale`);
   }
   const inspection = await inspectIanLayeredScenePackage(manifest, {
@@ -657,6 +664,8 @@ const inspectIanEvidence = async ({
     sourceText: item.narration_source_text,
     shotStartFrame: item.shot_start_frame,
     shotEndFrame: item.shot_end_frame,
+    visibleTextMode: item.visible_text_mode,
+    exactVisibleText: item.exact_visible_text,
   });
   const expectedVerifiedText = item.visible_text_mode === 'none' ? [] : [item.exact_visible_text];
   if (!sameJson(manifest.verified_visible_text, expectedVerifiedText)
@@ -667,7 +676,18 @@ const inspectIanEvidence = async ({
     fail(`asset ${item.asset_id} Ian layered-scene output or visible-text binding is stale`);
   }
   const expectedMembers = [
+    {
+      member_role: 'source-master',
+      layer_id: 'source-master',
+      ...manifest.master_generation.source_master,
+    },
+    {
+      member_role: 'normalized-master',
+      layer_id: 'normalized-master',
+      ...manifest.normalized_master,
+    },
     {member_role: 'background', layer_id: 'background', ...manifest.background},
+    ...manifest.pre_text_layers.map((layer) => ({member_role: 'pre-text-layer', ...layer})),
     ...manifest.layers.map((layer) => ({member_role: 'semantic-layer', ...layer})),
     {member_role: 'final-composite', layer_id: 'final-composite', ...manifest.final_composite},
   ].map((member) => ({
@@ -682,26 +702,30 @@ const inspectIanEvidence = async ({
   if (!sameJson(item.ian_scene_package_members, expectedMembers)) {
     fail(`asset ${item.asset_id} Ian layered-scene member list is stale`);
   }
-  const expectedGeneratedMembers = expectedMembers.slice(0, -1);
   const generationLineage = item.generation_lineage;
   if (!Array.isArray(generationLineage)
-      || generationLineage.length !== expectedGeneratedMembers.length
-      || generationLineage.some((stage, index) => (
-        stage?.stage !== 'independent-member-generation'
-        || stage.generation_mode !== 'codex-native-imagegen-independent-member-v1'
-        || stage.member_role !== expectedGeneratedMembers[index].member_role
-        || stage.layer_id !== expectedGeneratedMembers[index].layer_id
+      || generationLineage.length !== 1
+      || generationLineage.some((stage) => (
+        !stage
+        || JSON.stringify(Object.keys(stage).sort()) !== JSON.stringify([
+          'generation_mode', 'model_id', 'output', 'prompt',
+          'reference_inputs', 'selection_status', 'stage',
+        ])
+        || stage.stage !== 'complete-master-generation'
+        || stage.generation_mode !== 'codex-native-imagegen-gpt-image-2-text-free-master-v1'
+        || stage.model_id !== 'gpt-image-2'
         || stage.selection_status !== 'selected'
+        || !sameJson(stage.prompt, manifest.master_generation.prompt)
         || !sameJson(stage.reference_inputs, item.actual_reference_inputs)
         || !sameJson(stage.output, {
-          path: expectedGeneratedMembers[index].path,
-          checksum_sha256: expectedGeneratedMembers[index].checksum_sha256,
+          path: manifest.master_generation.source_master.path,
+          checksum_sha256: manifest.master_generation.source_master.checksum_sha256,
         })
       ))) {
-    fail(`asset ${item.asset_id} Ian source members lack independent generation lineage`);
+    fail(`asset ${item.asset_id} Ian source master lacks gpt-image-2 generation lineage`);
   }
   const reviewPayload = {
-    contract_version: 'ian-knowledge-video-layered-scene-v1',
+    contract_version: IAN_LAYERED_SCENE_PACKAGE_VERSION,
     manifest: {
       path: manifestTarget.relative,
       checksum_sha256: item.scene_package_manifest_checksum_sha256,
@@ -754,7 +778,17 @@ const inspectQueueEvidence = async ({
   const prompt = inspectPrompt({repositoryRoot, episodeWorkspace, item});
   if (!prompt) fail(`asset ${item.asset_id} selected prompt is missing`);
   const basePrompt = inspectPrompt({repositoryRoot, episodeWorkspace, item, prefix: 'base'});
-  const references = assertArray(item.actual_reference_inputs, `asset ${item.asset_id} references`).map(
+  const rawReferences = assertArray(
+    item.actual_reference_inputs,
+    `asset ${item.asset_id} references`,
+  );
+  if (item.visual_generation_route === 'ian-handdrawn-ppt'
+      && (rawReferences.length !== 1
+        || rawReferences[0]?.role !== 'visual_style_reference_only'
+        || rawReferences[0]?.path !== IAN_CANONICAL_STYLE_ANCHOR_PATH)) {
+    fail(`asset ${item.asset_id} must bind the single canonical Ian style anchor`);
+  }
+  const references = rawReferences.map(
     (reference, index) => ({
       ...structuredClone(reference),
       inspection: inspectRootOrExternalReference({
@@ -1317,6 +1351,12 @@ const buildScenes = ({
           || item.visual_structure_id !== selected.visual_structure_id
           || item.treatment_profile_id !== selected.treatment_profile_id
           || item.white_cat_present !== selected.white_cat_present
+          || (item.white_cat_visual_style_id ?? null)
+            !== (selected.white_cat_visual_style_id ?? null)
+          || (item.white_cat_visual_style_selection_sha256 ?? null)
+            !== (selected.white_cat_visual_style_selection_sha256 ?? null)
+          || (item.visual_cohesion_profile_id ?? null)
+            !== (selected.visual_cohesion_profile_id ?? null)
           || item.visible_text_mode !== selected.visible_text_mode
           || item.exact_visible_text !== selected.exact_visible_text
           || item.visible_text_placement !== selected.visible_text_placement
@@ -1653,6 +1693,20 @@ const loadBuildContext = async ({
       || state.visual_direction_review.presented_map_sha256 !== direction.value.presented_map_sha256) {
     fail('visual direction review is not authorized');
   }
+  const styleBinding = direction.value.white_cat_visual_style_binding ?? null;
+  if (styleBinding !== null) {
+    const styleSelection = state.white_cat_visual_style_selection;
+    const styleValidation = validateWhiteCatVisualStyleSelection(styleSelection, {
+      gate2ScriptSha256: styleSelection?.gate2_script_sha256,
+    });
+    if (styleBinding.contract_version !== styleSelection.contract_version
+      || styleBinding.style_id !== styleSelection.style_id
+      || styleBinding.treatment_profile_id !== styleSelection.treatment_profile_id
+      || styleBinding.visual_cohesion_profile_id !== styleSelection.visual_cohesion_profile_id
+      || styleBinding.selection_sha256 !== styleValidation.selection_sha256) {
+      fail('visual direction white-cat style binding differs from Gate 2 selection');
+    }
+  }
   if (oneClick) {
     if (direction.value.approval !== undefined && direction.value.approval !== null) {
       fail('visual direction policy authorization fabricates concrete review');
@@ -1884,6 +1938,10 @@ const loadBuildContext = async ({
         catalog_checksum_sha256: direction.value.catalog_checksum_sha256,
         visual_language_catalog_version: direction.value.visual_language_catalog_version,
         visual_language_catalog_checksum_sha256: direction.value.visual_language_catalog_checksum_sha256,
+        ...(direction.value.white_cat_visual_style_binding === undefined
+          ? {}
+          : {white_cat_visual_style_binding:
+            structuredClone(direction.value.white_cat_visual_style_binding)}),
         ...(oneClick
           ? {authorization: structuredClone(direction.value.policy_authorization)}
           : {approval: structuredClone(direction.value.approval)}),

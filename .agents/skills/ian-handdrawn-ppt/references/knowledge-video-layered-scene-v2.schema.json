@@ -1,0 +1,630 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "knowledge-video-layered-scene-v2.schema.json",
+  "title": "Ian knowledge-video layered scene package v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract_version",
+    "episode_workspace",
+    "queue_item_id",
+    "shot_id",
+    "visual_generation_route",
+    "treatment_profile_id",
+    "storyboard_binding",
+    "visual_direction_review",
+    "canvas",
+    "timing",
+    "narration_source_text",
+    "narration_source_text_sha256",
+    "scene_plan",
+    "scene_plan_sha256",
+    "generation_constraints",
+    "master_generation",
+    "model_provenance",
+    "normalized_master",
+    "split_spec",
+    "background",
+    "pre_text_layers",
+    "text_overlay",
+    "layers",
+    "final_composite",
+    "verified_visible_text"
+  ],
+  "properties": {
+    "contract_version": {"const": "ian-knowledge-video-layered-scene-v2"},
+    "episode_workspace": {"type": "string", "minLength": 1},
+    "queue_item_id": {"type": "string", "minLength": 1},
+    "shot_id": {"type": "string", "pattern": "^S[0-9]+$"},
+    "visual_generation_route": {"const": "ian-handdrawn-ppt"},
+    "treatment_profile_id": {"type": "string", "minLength": 1},
+    "storyboard_binding": {"$ref": "#/$defs/fileBinding"},
+    "visual_direction_review": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "checksum_sha256", "presented_map_sha256"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "checksum_sha256": {"$ref": "#/$defs/sha256"},
+        "presented_map_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "canvas": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["width", "height", "fps"],
+      "properties": {
+        "width": {"const": 1920},
+        "height": {"const": 1080},
+        "fps": {"const": 30}
+      }
+    },
+    "timing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["shot_start_frame", "shot_end_frame", "duration_frames"],
+      "properties": {
+        "shot_start_frame": {"type": "integer", "minimum": 0},
+        "shot_end_frame": {"type": "integer", "minimum": 1},
+        "duration_frames": {"type": "integer", "minimum": 8}
+      }
+    },
+    "narration_source_text": {"type": "string", "minLength": 1},
+    "narration_source_text_sha256": {"$ref": "#/$defs/sha256"},
+    "scene_plan": {"$ref": "#/$defs/scenePlan"},
+    "scene_plan_sha256": {"$ref": "#/$defs/sha256"},
+    "generation_constraints": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "imagegen_call_count",
+        "text_free_complete_master",
+        "independent_member_generation",
+        "deterministic_master_normalization",
+        "deterministic_semantic_region_split",
+        "deterministic_layer_text_overlay",
+        "background_raster_count",
+        "final_composite_raster_count",
+        "layer_rasters_are_full_canvas_rgba",
+        "scene_translation",
+        "scene_scaling",
+        "layer_translation",
+        "layer_scaling",
+        "layer_rotation",
+        "mask_reveal",
+        "internal_cut",
+        "automatic_page_number",
+        "automatic_title",
+        "automatic_subtitle",
+        "automatic_labels",
+        "signature"
+      ],
+      "properties": {
+        "imagegen_call_count": {"const": 1},
+        "text_free_complete_master": {"const": true},
+        "independent_member_generation": {"const": false},
+        "deterministic_master_normalization": {"const": true},
+        "deterministic_semantic_region_split": {"const": true},
+        "deterministic_layer_text_overlay": {"const": true},
+        "background_raster_count": {"const": 1},
+        "final_composite_raster_count": {"const": 1},
+        "layer_rasters_are_full_canvas_rgba": {"const": true},
+        "scene_translation": {"const": false},
+        "scene_scaling": {"const": false},
+        "layer_translation": {"const": false},
+        "layer_scaling": {"const": false},
+        "layer_rotation": {"const": false},
+        "mask_reveal": {"const": false},
+        "internal_cut": {"const": false},
+        "automatic_page_number": {"const": false},
+        "automatic_title": {"const": false},
+        "automatic_subtitle": {"const": false},
+        "automatic_labels": {"const": false},
+        "signature": {"const": false}
+      }
+    },
+    "master_generation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contract_version",
+        "generator",
+        "model_id",
+        "prompt",
+        "reference_inputs",
+        "selection_status",
+        "visible_text_mode",
+        "source_master",
+        "visual_qa"
+      ],
+      "properties": {
+        "contract_version": {"const": "ian-gpt-image-2-text-free-master-v1"},
+        "generator": {"const": "codex-native-imagegen"},
+        "model_id": {"const": "gpt-image-2"},
+        "prompt": {"$ref": "#/$defs/fileBinding"},
+        "reference_inputs": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1,
+          "items": {"$ref": "#/$defs/styleReferenceBinding"}
+        },
+        "selection_status": {"const": "selected"},
+        "visible_text_mode": {"const": "none"},
+        "source_master": {"$ref": "#/$defs/sourceMasterBinding"},
+        "visual_qa": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "result",
+            "inspection",
+            "observed_visible_text",
+            "observed_pseudo_text"
+          ],
+          "properties": {
+            "result": {"const": "pass"},
+            "inspection": {"const": "human-original-resolution-v1"},
+            "observed_visible_text": {"type": "array", "maxItems": 0},
+            "observed_pseudo_text": {"const": false}
+          }
+        }
+      }
+    },
+    "model_provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contract_version",
+        "generator",
+        "canonical_model",
+        "evidence_kind",
+        "source_master_checksum_sha256",
+        "expected_software_agent"
+      ],
+      "properties": {
+        "contract_version": {"const": "codex-native-imagegen-gpt-image-2-provenance-v1"},
+        "generator": {"const": "codex-native-imagegen"},
+        "canonical_model": {"const": "gpt-image-2"},
+        "evidence_kind": {"const": "embedded-c2pa-software-agent-observation-v1"},
+        "source_master_checksum_sha256": {"$ref": "#/$defs/sha256"},
+        "expected_software_agent": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "version"],
+          "properties": {
+            "name": {"const": "gpt-image"},
+            "version": {"const": "2.0"}
+          }
+        }
+      }
+    },
+    "normalized_master": {
+      "$ref": "#/$defs/normalizedMasterBinding"
+    },
+    "split_spec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contract_version",
+        "normalization",
+        "matte_rgb",
+        "alpha_distance_low",
+        "alpha_distance_high",
+        "blur_sigma_px",
+        "paper_background_rgba",
+        "minimum_inter_layer_gutter_px",
+        "outside_union_max_visible_pixels",
+        "layers"
+      ],
+      "properties": {
+        "contract_version": {"const": "ian-semantic-region-alpha-split-v1"},
+        "normalization": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["fit", "position", "kernel", "stretch", "padding"],
+          "properties": {
+            "fit": {"const": "cover"},
+            "position": {"const": "centre"},
+            "kernel": {"const": "lanczos3"},
+            "stretch": {"const": false},
+            "padding": {"const": false}
+          }
+        },
+        "matte_rgb": {"$ref": "#/$defs/rgb"},
+        "alpha_distance_low": {"type": "number", "minimum": 0, "exclusiveMaximum": 64},
+        "alpha_distance_high": {"type": "number", "exclusiveMinimum": 0, "maximum": 64},
+        "blur_sigma_px": {"type": "number", "minimum": 0.3, "maximum": 2},
+        "paper_background_rgba": {"$ref": "#/$defs/opaqueRgba"},
+        "minimum_inter_layer_gutter_px": {"type": "integer", "minimum": 8},
+        "outside_union_max_visible_pixels": {"const": 1024},
+        "layers": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/$defs/splitLayer"}
+        }
+      }
+    },
+    "background": {"$ref": "#/$defs/backgroundBinding"},
+    "pre_text_layers": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/preTextLayerBinding"}
+    },
+    "text_overlay": {"$ref": "#/$defs/textOverlay"},
+    "layers": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/finalLayerBinding"}
+    },
+    "final_composite": {"$ref": "#/$defs/finalCompositeBinding"},
+    "verified_visible_text": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1}
+    }
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "byte": {"type": "integer", "minimum": 0, "maximum": 255},
+    "fileBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "checksum_sha256"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "checksum_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "styleReferenceBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["role", "path", "checksum_sha256"],
+      "properties": {
+        "role": {"const": "visual_style_reference_only"},
+        "path": {
+          "const": ".agents/skills/ian-handdrawn-ppt/assets/reference-handdrawn-article-illustration-style.png"
+        },
+        "checksum_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "entryTransition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contract_version", "duration_frames", "easing"],
+      "properties": {
+        "contract_version": {"const": "ian-layer-entry-fade-v1"},
+        "duration_frames": {"const": 8},
+        "easing": {"const": "linear"}
+      }
+    },
+    "motionPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scene_transform",
+        "layer_transform",
+        "mask_reveal",
+        "internal_cut",
+        "opacity_animation"
+      ],
+      "properties": {
+        "scene_transform": {"const": "forbidden"},
+        "layer_transform": {"const": "forbidden"},
+        "mask_reveal": {"const": "forbidden"},
+        "internal_cut": {"const": "forbidden"},
+        "opacity_animation": {"const": "ian-layer-entry-fade-v1"}
+      }
+    },
+    "layerPlanProperties": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "layer_id",
+        "z_index",
+        "semantic_role",
+        "source_text_start_byte",
+        "source_text_end_byte_exclusive",
+        "source_text",
+        "entry_frame"
+      ],
+      "properties": {
+        "layer_id": {"type": "string", "pattern": "^L[0-9]{2}$"},
+        "z_index": {"type": "integer", "minimum": 1},
+        "semantic_role": {"type": "string", "minLength": 1},
+        "source_text_start_byte": {"type": "integer", "minimum": 0},
+        "source_text_end_byte_exclusive": {"type": "integer", "minimum": 1},
+        "source_text": {"type": "string", "minLength": 1},
+        "entry_frame": {"type": "integer", "minimum": 0}
+      }
+    },
+    "scenePlan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contract_version",
+        "shot_id",
+        "narration_source_text_sha256",
+        "scene_renderer",
+        "background_policy",
+        "layer_asset_policy",
+        "layer_entry_transition",
+        "motion_policy",
+        "layer_count",
+        "layers"
+      ],
+      "properties": {
+        "contract_version": {"const": "ian-layered-scene-plan-v1"},
+        "shot_id": {"type": "string", "pattern": "^S[0-9]+$"},
+        "narration_source_text_sha256": {"$ref": "#/$defs/sha256"},
+        "scene_renderer": {"const": "ian-static-layered-scene-v1"},
+        "background_policy": {"const": "static-paper-background-v1"},
+        "layer_asset_policy": {"const": "full-canvas-transparent-png-v1"},
+        "layer_entry_transition": {"$ref": "#/$defs/entryTransition"},
+        "motion_policy": {"$ref": "#/$defs/motionPolicy"},
+        "layer_count": {"type": "integer", "minimum": 1},
+        "layers": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/$defs/layerPlanProperties"}
+        }
+      }
+    },
+    "sourceMasterBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "checksum_sha256", "width", "height", "role", "has_alpha"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "checksum_sha256": {"$ref": "#/$defs/sha256"},
+        "width": {"type": "integer", "minimum": 1},
+        "height": {"type": "integer", "minimum": 1},
+        "role": {"const": "text-free-complete-master-source"},
+        "has_alpha": {"const": false}
+      }
+    },
+    "normalizedMasterBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "checksum_sha256", "width", "height", "role", "has_alpha"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "checksum_sha256": {"$ref": "#/$defs/sha256"},
+        "width": {"const": 1920},
+        "height": {"const": 1080},
+        "role": {"const": "text-free-complete-master-normalized"},
+        "has_alpha": {"const": false}
+      }
+    },
+    "backgroundBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "checksum_sha256", "width", "height", "role", "has_alpha"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "checksum_sha256": {"$ref": "#/$defs/sha256"},
+        "width": {"const": 1920},
+        "height": {"const": 1080},
+        "role": {"const": "static-paper-background"},
+        "has_alpha": {"const": false}
+      }
+    },
+    "preTextLayerBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "layer_id",
+        "z_index",
+        "semantic_role",
+        "source_text_start_byte",
+        "source_text_end_byte_exclusive",
+        "source_text",
+        "entry_frame",
+        "path",
+        "checksum_sha256",
+        "width",
+        "height",
+        "role",
+        "has_alpha"
+      ],
+      "properties": {
+        "layer_id": {"type": "string", "pattern": "^L[0-9]{2}$"},
+        "z_index": {"type": "integer", "minimum": 1},
+        "semantic_role": {"type": "string", "minLength": 1},
+        "source_text_start_byte": {"type": "integer", "minimum": 0},
+        "source_text_end_byte_exclusive": {"type": "integer", "minimum": 1},
+        "source_text": {"type": "string", "minLength": 1},
+        "entry_frame": {"type": "integer", "minimum": 0},
+        "path": {"type": "string", "minLength": 1},
+        "checksum_sha256": {"$ref": "#/$defs/sha256"},
+        "width": {"const": 1920},
+        "height": {"const": 1080},
+        "role": {"const": "transparent-semantic-element-pre-text"},
+        "has_alpha": {"const": true}
+      }
+    },
+    "finalLayerBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "layer_id",
+        "z_index",
+        "semantic_role",
+        "source_text_start_byte",
+        "source_text_end_byte_exclusive",
+        "source_text",
+        "entry_frame",
+        "path",
+        "checksum_sha256",
+        "width",
+        "height",
+        "role",
+        "has_alpha"
+      ],
+      "properties": {
+        "layer_id": {"type": "string", "pattern": "^L[0-9]{2}$"},
+        "z_index": {"type": "integer", "minimum": 1},
+        "semantic_role": {"type": "string", "minLength": 1},
+        "source_text_start_byte": {"type": "integer", "minimum": 0},
+        "source_text_end_byte_exclusive": {"type": "integer", "minimum": 1},
+        "source_text": {"type": "string", "minLength": 1},
+        "entry_frame": {"type": "integer", "minimum": 0},
+        "path": {"type": "string", "minLength": 1},
+        "checksum_sha256": {"$ref": "#/$defs/sha256"},
+        "width": {"const": 1920},
+        "height": {"const": 1080},
+        "role": {"const": "transparent-semantic-element"},
+        "has_alpha": {"const": true}
+      }
+    },
+    "finalCompositeBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "checksum_sha256", "width", "height", "role", "has_alpha"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "checksum_sha256": {"$ref": "#/$defs/sha256"},
+        "width": {"const": 1920},
+        "height": {"const": 1080},
+        "role": {"const": "final-composite-review-raster"},
+        "has_alpha": {"const": false}
+      }
+    },
+    "rgb": {
+      "type": "array",
+      "prefixItems": [
+        {"$ref": "#/$defs/byte"},
+        {"$ref": "#/$defs/byte"},
+        {"$ref": "#/$defs/byte"}
+      ],
+      "minItems": 3,
+      "maxItems": 3
+    },
+    "opaqueRgba": {
+      "type": "array",
+      "prefixItems": [
+        {"$ref": "#/$defs/byte"},
+        {"$ref": "#/$defs/byte"},
+        {"$ref": "#/$defs/byte"},
+        {"const": 255}
+      ],
+      "minItems": 4,
+      "maxItems": 4
+    },
+    "bbox": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["x", "y", "width", "height"],
+      "properties": {
+        "x": {"type": "integer", "minimum": 0, "maximum": 1919},
+        "y": {"type": "integer", "minimum": 0, "maximum": 1079},
+        "width": {"type": "integer", "minimum": 1, "maximum": 1920},
+        "height": {"type": "integer", "minimum": 1, "maximum": 1080}
+      }
+    },
+    "splitLayer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["layer_id", "bbox"],
+      "properties": {
+        "layer_id": {"type": "string", "pattern": "^L[0-9]{2}$"},
+        "bbox": {"$ref": "#/$defs/bbox"}
+      }
+    },
+    "fontBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "checksum_sha256", "font_family"],
+      "properties": {
+        "path": {"type": "string", "pattern": "^/", "minLength": 1},
+        "checksum_sha256": {"$ref": "#/$defs/sha256"},
+        "font_family": {"type": "string", "minLength": 1}
+      }
+    },
+    "labelBackground": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fill", "opacity", "radius", "stroke", "stroke_opacity", "stroke_width"],
+      "properties": {
+        "fill": {"type": "string", "pattern": "^#[0-9a-fA-F]{6}$"},
+        "opacity": {"type": "number", "minimum": 0, "maximum": 1},
+        "radius": {"type": "number", "minimum": 0},
+        "stroke": {"type": "string", "pattern": "^#[0-9a-fA-F]{6}$"},
+        "stroke_opacity": {"type": "number", "minimum": 0, "maximum": 1},
+        "stroke_width": {"type": "number", "minimum": 0}
+      }
+    },
+    "textLabel": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "layer_id",
+        "text",
+        "lines",
+        "container_bbox",
+        "font_size",
+        "font_weight",
+        "letter_spacing",
+        "fill",
+        "background"
+      ],
+      "properties": {
+        "layer_id": {"type": "string", "pattern": "^L[0-9]{2}$"},
+        "text": {"type": "string", "minLength": 1},
+        "lines": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "container_bbox": {"$ref": "#/$defs/bbox"},
+        "font_size": {"type": "integer", "minimum": 8},
+        "font_weight": {"type": "integer", "minimum": 100, "maximum": 900},
+        "letter_spacing": {"type": "number"},
+        "fill": {"type": "string", "pattern": "^#[0-9a-fA-F]{6}$"},
+        "background": {
+          "oneOf": [
+            {"type": "null"},
+            {"$ref": "#/$defs/labelBackground"}
+          ]
+        }
+      }
+    },
+    "textOverlay": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contract_version", "mode", "font", "minimum_inset_px", "labels"],
+      "properties": {
+        "contract_version": {"const": "ian-deterministic-layer-text-overlay-v1"},
+        "mode": {"enum": ["none", "required"]},
+        "font": {
+          "oneOf": [
+            {"type": "null"},
+            {"$ref": "#/$defs/fontBinding"}
+          ]
+        },
+        "minimum_inset_px": {"const": 8},
+        "labels": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/textLabel"}
+        }
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"mode": {"const": "none"}}, "required": ["mode"]},
+          "then": {
+            "properties": {
+              "font": {"type": "null"},
+              "labels": {"maxItems": 0}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"mode": {"const": "required"}}, "required": ["mode"]},
+          "then": {
+            "properties": {
+              "font": {"$ref": "#/$defs/fontBinding"},
+              "labels": {"minItems": 1}
+            }
+          }
+        }
+      ]
+    }
+  }
+}

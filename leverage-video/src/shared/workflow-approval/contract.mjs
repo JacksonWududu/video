@@ -1,16 +1,39 @@
 import crypto from 'node:crypto';
 
+export const WHITE_CAT_VISUAL_STYLE_SELECTION_VERSION = 'white-cat-visual-style-selection-v1';
 export const VISUAL_DENSITY_SELECTION_VERSION = 'visual-density-selection-v1';
 export const WORKFLOW_APPROVAL_MODE_VERSION = 'workflow-approval-mode-v1';
 export const ONE_CLICK_APPROVAL_POLICY_VERSION = 'one-click-approval-policy-v1';
+export const NARRATION_AUDIO_SOURCE_SELECTION_VERSION = 'narration-audio-source-selection-v1';
 export const ONE_CLICK_VISUAL_REVIEW_VERSION = 'visual-asset-review-v3';
 export const ONE_CLICK_FINAL_REVIEW_MODE = 'one_click_final_review_v1';
 export const ONE_CLICK_FINAL_REVIEW_PHASE = 'awaiting_precomposition_visual_review';
 export const CAPTION_CHOICE_PHASE = 'awaiting_caption_delivery_choice';
 
 const SHA256 = /^[a-f0-9]{64}$/;
+export const WHITE_CAT_VISUAL_STYLE_OPTIONS = Object.freeze({
+  'loose-line-vivid-watercolor': Object.freeze({
+    treatment_profile_id: 'imagegen-watercolor-narrative',
+    visual_cohesion_profile_id: 'warm-paper-watercolor-cohesion-v1',
+    style_skill_path: '/Users/jackson/.codex/skills/generate-visual-styles/SKILL.md',
+    style_skill_checksum_sha256: 'a7423ee693a637e75ef2a3ff623f8a5a4e951af8136c7acadc694b72be0d2502',
+    style_profile_path: '/Users/jackson/.codex/skills/generate-visual-styles/references/loose-line-vivid-watercolor.md',
+    style_profile_checksum_sha256: 'cdf1fc7f6b70f4e6a888e03803ce60cbe8b0ef2ff3ff9a7a566c7be2c3956f36',
+  }),
+  'twilight-neon-animation': Object.freeze({
+    treatment_profile_id: 'imagegen-twilight-neon-narrative',
+    visual_cohesion_profile_id: 'twilight-luminous-cohesion-v1',
+    style_skill_path: '/Users/jackson/.codex/skills/generate-visual-styles/SKILL.md',
+    style_skill_checksum_sha256: 'a7423ee693a637e75ef2a3ff623f8a5a4e951af8136c7acadc694b72be0d2502',
+    style_profile_path: '/Users/jackson/.codex/skills/generate-visual-styles/references/twilight-neon-animation.md',
+    style_profile_checksum_sha256: 'dcf85c2fbf05d5d798a4a4635f5076362b933fb6f82b990673d9924fad8ed335',
+  }),
+});
 const DENSITY_MODES = new Set(['standard', 'rich']);
 const APPROVAL_MODES = new Set(['manual', 'one_click']);
+const NARRATION_AUDIO_SOURCE_MODES = new Set(['colocated_voice', 'edge_tts']);
+const EDGE_TTS_VOICE = 'zh-CN-YunjianNeural';
+const EDGE_TTS_RATE = '+20%';
 const REQUIRED_PREAUTHORIZATIONS = Object.freeze([
   'audio_lookup',
   'deterministic_visual_direction_recommendations',
@@ -43,9 +66,67 @@ const requireDecision = (value, label) => {
   }
 };
 
+export const resolveWhiteCatVisualStyleOption = (styleId) => {
+  const option = WHITE_CAT_VISUAL_STYLE_OPTIONS[styleId];
+  if (!option) {
+    throw new Error('white-cat visual style must be loose-line-vivid-watercolor or twilight-neon-animation');
+  }
+  return option;
+};
+
+const whiteCatVisualStyleProjection = (selection) => ({
+  contract_version: WHITE_CAT_VISUAL_STYLE_SELECTION_VERSION,
+  gate2_script_sha256: selection.gate2_script_sha256,
+  style_id: selection.style_id,
+  treatment_profile_id: selection.treatment_profile_id,
+  visual_cohesion_profile_id: selection.visual_cohesion_profile_id,
+  style_skill_path: selection.style_skill_path,
+  style_skill_checksum_sha256: selection.style_skill_checksum_sha256,
+  style_profile_path: selection.style_profile_path,
+  style_profile_checksum_sha256: selection.style_profile_checksum_sha256,
+  decision: {
+    status: selection.decision?.status,
+    exact_message: selection.decision?.exact_message,
+    decided_at: selection.decision?.decided_at,
+  },
+});
+
+export const buildWhiteCatVisualStyleSelectionSha256 = (selection) => (
+  sha256(whiteCatVisualStyleProjection(selection))
+);
+
+export const validateWhiteCatVisualStyleSelection = (selection, {gate2ScriptSha256}) => {
+  if (selection?.contract_version !== WHITE_CAT_VISUAL_STYLE_SELECTION_VERSION) {
+    throw new Error('white-cat visual style selection authority mismatch');
+  }
+  requireSha256(gate2ScriptSha256, 'current Gate 2 script checksum');
+  if (selection.gate2_script_sha256 !== gate2ScriptSha256) {
+    throw new Error('white-cat visual style selection is stale after Gate 2 change');
+  }
+  const option = resolveWhiteCatVisualStyleOption(selection.style_id);
+  for (const [field, expected] of Object.entries(option)) {
+    if (selection[field] !== expected) {
+      throw new Error(`white-cat visual style selection has stale or substituted ${field}`);
+    }
+  }
+  requireDecision(selection.decision, 'white-cat visual style');
+  const expected = buildWhiteCatVisualStyleSelectionSha256(selection);
+  if (selection.selection_sha256 !== expected) {
+    throw new Error('white-cat visual style selection checksum is stale');
+  }
+  return {
+    result: 'pass',
+    style_id: selection.style_id,
+    treatment_profile_id: option.treatment_profile_id,
+    visual_cohesion_profile_id: option.visual_cohesion_profile_id,
+    selection_sha256: expected,
+  };
+};
+
 const densityProjection = (selection) => ({
   contract_version: VISUAL_DENSITY_SELECTION_VERSION,
   gate2_script_sha256: selection.gate2_script_sha256,
+  white_cat_visual_style_selection_sha256: selection.white_cat_visual_style_selection_sha256,
   density_mode: selection.density_mode,
   decision: {
     status: selection.decision?.status,
@@ -56,13 +137,20 @@ const densityProjection = (selection) => ({
 
 export const buildVisualDensitySelectionSha256 = (selection) => sha256(densityProjection(selection));
 
-export const validateVisualDensitySelection = (selection, {gate2ScriptSha256}) => {
+export const validateVisualDensitySelection = (
+  selection,
+  {gate2ScriptSha256, whiteCatVisualStyleSelectionSha256},
+) => {
   if (selection?.contract_version !== VISUAL_DENSITY_SELECTION_VERSION) {
     throw new Error('visual density selection authority mismatch');
   }
   requireSha256(gate2ScriptSha256, 'current Gate 2 script checksum');
   if (selection.gate2_script_sha256 !== gate2ScriptSha256) {
     throw new Error('visual density selection is stale after Gate 2 change');
+  }
+  requireSha256(whiteCatVisualStyleSelectionSha256, 'white-cat visual style selection checksum');
+  if (selection.white_cat_visual_style_selection_sha256 !== whiteCatVisualStyleSelectionSha256) {
+    throw new Error('visual density selection is stale or selected before white-cat visual style');
   }
   if (!DENSITY_MODES.has(selection.density_mode)) throw new Error('visual density must be standard or rich');
   requireDecision(selection.decision, 'visual density');
@@ -104,9 +192,61 @@ export const validateWorkflowApprovalMode = (
   return {result: 'pass', approval_mode: selection.approval_mode, selection_sha256: expected};
 };
 
+const narrationAudioSourceProjection = (selection) => ({
+  contract_version: NARRATION_AUDIO_SOURCE_SELECTION_VERSION,
+  gate2_script_sha256: selection.gate2_script_sha256,
+  workflow_approval_mode_selection_sha256: selection.workflow_approval_mode_selection_sha256,
+  source_mode: selection.source_mode,
+  edge_tts: selection.edge_tts ?? null,
+  decision: {
+    status: selection.decision?.status,
+    exact_message: selection.decision?.exact_message,
+    decided_at: selection.decision?.decided_at,
+  },
+});
+
+export const buildNarrationAudioSourceSelectionSha256 = (selection) => (
+  sha256(narrationAudioSourceProjection(selection))
+);
+
+export const validateNarrationAudioSourceSelection = (
+  selection,
+  {gate2ScriptSha256, workflowApprovalModeSelectionSha256},
+) => {
+  if (selection?.contract_version !== NARRATION_AUDIO_SOURCE_SELECTION_VERSION) {
+    throw new Error('narration audio source selection authority mismatch');
+  }
+  requireSha256(gate2ScriptSha256, 'current Gate 2 script checksum');
+  requireSha256(workflowApprovalModeSelectionSha256, 'workflow approval mode checksum');
+  if (selection.gate2_script_sha256 !== gate2ScriptSha256
+    || selection.workflow_approval_mode_selection_sha256 !== workflowApprovalModeSelectionSha256) {
+    throw new Error('narration audio source selection is stale');
+  }
+  if (!NARRATION_AUDIO_SOURCE_MODES.has(selection.source_mode)) {
+    throw new Error('narration audio source must be colocated_voice or edge_tts');
+  }
+  requireDecision(selection.decision, 'narration audio source');
+  if (selection.source_mode === 'edge_tts') {
+    if (selection.edge_tts?.provider !== 'edge-tts'
+      || selection.edge_tts?.voice !== EDGE_TTS_VOICE
+      || selection.edge_tts?.rate !== EDGE_TTS_RATE
+      || selection.edge_tts?.network_access_authorized !== true) {
+      throw new Error('edge_tts requires edge-tts, zh-CN-YunjianNeural, +20%, and explicit network authorization');
+    }
+  } else if (selection.edge_tts !== null && selection.edge_tts !== undefined) {
+    throw new Error('colocated_voice must not carry edge_tts settings');
+  }
+  const expected = buildNarrationAudioSourceSelectionSha256(selection);
+  if (selection.selection_sha256 !== expected) {
+    throw new Error('narration audio source selection checksum is stale');
+  }
+  return {result: 'pass', source_mode: selection.source_mode, selection_sha256: expected};
+};
+
 const policyProjection = (policy) => ({
   contract_version: ONE_CLICK_APPROVAL_POLICY_VERSION,
   gate2_script_sha256: policy.gate2_script_sha256,
+  white_cat_visual_style_selection_sha256: policy.white_cat_visual_style_selection_sha256,
   visual_density_selection_sha256: policy.visual_density_selection_sha256,
   workflow_approval_mode_selection_sha256: policy.workflow_approval_mode_selection_sha256,
   preauthorizations: policy.preauthorizations,
@@ -122,6 +262,7 @@ export const validateOneClickApprovalPolicy = (policy, bindings) => {
     throw new Error('one-click approval policy authority mismatch');
   }
   if (policy.gate2_script_sha256 !== bindings.gate2ScriptSha256
+    || policy.white_cat_visual_style_selection_sha256 !== bindings.whiteCatVisualStyleSelectionSha256
     || policy.visual_density_selection_sha256 !== bindings.visualDensitySelectionSha256
     || policy.workflow_approval_mode_selection_sha256 !== bindings.workflowApprovalModeSelectionSha256) {
     throw new Error('one-click approval policy binding is stale');
@@ -142,8 +283,21 @@ export const validateOneClickApprovalPolicy = (policy, bindings) => {
   return {result: 'pass', policy_sha256: expected};
 };
 
-export const validateApprovalSelectionSequence = ({gate2ScriptSha256, density, mode, policy = null}) => {
-  const densityResult = validateVisualDensitySelection(density, {gate2ScriptSha256});
+export const validateApprovalSelectionSequence = ({
+  gate2ScriptSha256,
+  whiteCatStyle,
+  density,
+  mode,
+  policy = null,
+}) => {
+  const whiteCatStyleResult = validateWhiteCatVisualStyleSelection(
+    whiteCatStyle,
+    {gate2ScriptSha256},
+  );
+  const densityResult = validateVisualDensitySelection(density, {
+    gate2ScriptSha256,
+    whiteCatVisualStyleSelectionSha256: whiteCatStyleResult.selection_sha256,
+  });
   const modeResult = validateWorkflowApprovalMode(mode, {
     gate2ScriptSha256,
     visualDensitySelectionSha256: densityResult.selection_sha256,
@@ -153,11 +307,18 @@ export const validateApprovalSelectionSequence = ({gate2ScriptSha256, density, m
   } else {
     validateOneClickApprovalPolicy(policy, {
       gate2ScriptSha256,
+      whiteCatVisualStyleSelectionSha256: whiteCatStyleResult.selection_sha256,
       visualDensitySelectionSha256: densityResult.selection_sha256,
       workflowApprovalModeSelectionSha256: modeResult.selection_sha256,
     });
   }
-  return {result: 'pass', density_mode: density.density_mode, approval_mode: mode.approval_mode};
+  return {
+    result: 'pass',
+    white_cat_visual_style_id: whiteCatStyleResult.style_id,
+    visual_cohesion_profile_id: whiteCatStyleResult.visual_cohesion_profile_id,
+    density_mode: density.density_mode,
+    approval_mode: mode.approval_mode,
+  };
 };
 
 export const resolveLegacyDensity = ({episodeStarted, densitySelection, explicitRebuild = false}) => {
@@ -170,16 +331,38 @@ export const calculateSelectionInvalidation = ({change, lockedScriptValid = true
   if (change === 'gate2_script') return {
     keep_locked_script: false,
     keep_audio: false,
+    invalidate_white_cat_visual_style_selection: true,
     invalidate_visual_density_selection: true,
     invalidate_workflow_approval_mode: true,
+    invalidate_narration_audio_source_selection: true,
     invalidate_from: 'gate2',
+  };
+  if (change === 'white_cat_visual_style') return {
+    keep_locked_script: lockedScriptValid,
+    keep_audio: audioValid,
+    invalidate_white_cat_visual_style_selection: false,
+    invalidate_visual_density_selection: true,
+    invalidate_workflow_approval_mode: true,
+    invalidate_narration_audio_source_selection: true,
+    invalidate_from: 'awaiting_visual_density_selection',
   };
   if (change === 'visual_density') return {
     keep_locked_script: lockedScriptValid,
     keep_audio: audioValid,
+    invalidate_white_cat_visual_style_selection: false,
     invalidate_visual_density_selection: false,
     invalidate_workflow_approval_mode: true,
+    invalidate_narration_audio_source_selection: true,
     invalidate_from: 'storyboard_construction',
+  };
+  if (change === 'narration_audio_source') return {
+    keep_locked_script: lockedScriptValid,
+    keep_audio: false,
+    invalidate_white_cat_visual_style_selection: false,
+    invalidate_visual_density_selection: false,
+    invalidate_workflow_approval_mode: false,
+    invalidate_narration_audio_source_selection: false,
+    invalidate_from: 'audio_validation',
   };
   throw new Error('unsupported selection invalidation change');
 };

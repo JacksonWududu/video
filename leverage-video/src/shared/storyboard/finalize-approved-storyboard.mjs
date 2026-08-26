@@ -4,7 +4,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 
-import {validateFinalStoryboard} from './validate-final-storyboard.mjs';
+import {
+  buildFinalStoryboardTitle,
+  validateFinalStoryboard,
+} from './validate-final-storyboard.mjs';
 import {validateEpisodeTransitionReviewProposal} from '../scene-transitions/validate-review-proposal.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -36,6 +39,7 @@ export const finalizeStoryboardMarkdown = ({
   draftMarkdown,
   transitionRows,
   authorizationMode = 'manual',
+  topic = null,
 }) => {
   if (!['manual', 'one_click'].includes(authorizationMode)) {
     throw new Error('storyboard finalization authorization mode is invalid');
@@ -47,8 +51,11 @@ export const finalizeStoryboardMarkdown = ({
   const statusLines = [...draftMarkdown.matchAll(/^- 当前状态：.*$/gm)];
   if (statusLines.length !== 1) throw new Error('active storyboard draft must contain exactly one current-status line');
   let transitionIndex = 0;
+  const finalTitle = topic === null
+    ? `# 《${draftTitle[1]}》知识视频分镜 v1\n`
+    : buildFinalStoryboardTitle(topic);
   let markdown = draftMarkdown
-    .replace(draftTitle[0], `# 《${draftTitle[1]}》知识视频分镜 v1\n`)
+    .replace(draftTitle[0], finalTitle)
     .replace(
       statusLines[0][0],
       authorizationMode === 'one_click'
@@ -124,6 +131,7 @@ const buildArtifacts = ({episodeWorkspace, presentedAt}) => {
     draftMarkdown: sourceBytes.toString('utf8'),
     transitionRows: transitionReview.rows,
     authorizationMode: oneClick ? 'one_click' : 'manual',
+    topic: state.topic,
   }));
   const finalChecksum = sha256(finalBytes);
   const qaRelative = nextVersionedRelativePath({

@@ -73,6 +73,11 @@ def record(args: argparse.Namespace) -> dict:
     else:
         item = gate.require_generation_allowed(state, args.asset_id)
     is_white_cat_action = item.get("white_cat_present") is True
+    expected_style_id, expected_cohesion_id, current_style_binding = (
+        helper.resolve_white_cat_visual_style_binding(state, item)
+        if is_white_cat_action
+        else ("loose-line-vivid-watercolor", "warm-paper-watercolor-cohesion-v1", False)
+    )
     if (
         item.get("visual_generation_route") != "imagegen"
         or (item.get("strict_review") is not False and not is_strict_revision)
@@ -107,6 +112,14 @@ def record(args: argparse.Namespace) -> dict:
         raise ValueError("production prompt lacks exact 16:9 or text-free instruction")
     if is_white_cat_action:
         helper.validate_white_cat_prompt_contract(prompt_text)
+        helper.validate_white_cat_style_prompt_and_qa(
+            prompt_text=prompt_text,
+            qa=qa,
+            style_id=expected_style_id,
+            cohesion_id=expected_cohesion_id,
+            selection_sha256=item.get("white_cat_visual_style_selection_sha256"),
+            current_binding=current_style_binding,
+        )
 
     source = helper.checksum_bound_file(qa["selected_source"], "selected source")
     dimensions = helper.png_dimensions(source)
@@ -139,7 +152,7 @@ def record(args: argparse.Namespace) -> dict:
 
     profile = qa["style_profile"]
     authority = helper.resolve_path(profile.get("authority_path", ""), "style authority")
-    if helper.sha256_file(authority) != profile.get("authority_checksum_sha256") or profile.get("medium_id") != "loose-line-vivid-watercolor":
+    if helper.sha256_file(authority) != profile.get("authority_checksum_sha256") or profile.get("medium_id") != expected_style_id:
         raise ValueError("ordinary ImageGen style authority is stale")
     expected_references = [
         {

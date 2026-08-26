@@ -55,6 +55,13 @@ import {
   validateIanLayeredScenePackage,
   validateIanLayeredSceneRhythmBinding,
 } from '../ian-layered-scene/contract.mjs';
+import {
+  IAN_INK_DRAW_REVEAL_VERSION,
+  IAN_LAYERED_ENTRY_RENDERER_VERSION,
+  IAN_SOFT_SETTLE_VERSION,
+  validateIanLayeredEntryEffectsPlan,
+} from '../ian-layered-entry-effects/contract.mjs';
+import {loadAndValidateSharedSoundEffectLibrary} from '../sound-effects/contract.mjs';
 import {validateIanStoryboardLayeredSceneSection} from '../storyboard/validate-final-storyboard.mjs';
 
 const SHA256 = /^[a-f0-9]{64}$/;
@@ -77,7 +84,14 @@ export const isActiveVisualDirectionArtifactBasename = (basename) => [
   'per-shot-visual-direction-review-v2.json',
   'per-shot-visual-direction-review-v3.json',
 ].includes(basename)
-  || /^per-shot-visual-direction-review-v3-approved-v[1-9][0-9]*\.json$/.test(basename);
+  || /^per-shot-visual-direction-review-v3-approved-v[1-9][0-9]*\.json$/.test(basename)
+  || /^per-shot-visual-direction-review-v3-revision-[0-9]{2,}\.json$/.test(basename);
+
+export const isActiveStoryboardVisualRhythmArtifactBasename = (basename) => [
+  'storyboard-visual-rhythm-v1.json',
+  'storyboard-visual-rhythm-v2.json',
+].includes(basename)
+  || /^storyboard-visual-rhythm-v[12]-revision-[0-9]{2,}\.json$/.test(basename);
 
 const requireInteger = (value, label, minimum = 0) => {
   if (!Number.isInteger(value) || value < minimum) throw new Error(`${label} must be an integer >= ${minimum}`);
@@ -701,6 +715,8 @@ const buildScene = (
       sourceText: shot.narration_source_text,
       shotStartFrame: startFrame,
       shotEndFrame: endFrame,
+      visibleTextMode: shot.visible_text_mode,
+      exactVisibleText: shot.exact_visible_text,
     });
     if (imageSequence.length !== 1
       || ianLayeredSceneEvidence.storyboard_scene_plan_sha256 !== packageValue.scene_plan_sha256
@@ -726,13 +742,24 @@ const buildScene = (
       ))) {
       throw new Error(`${shot.shot_id} Ian public render assets differ from the package members`);
     }
+    const entryEffects = ianLayeredSceneEvidence.entry_effects == null
+      ? null
+      : validateIanLayeredEntryEffectsPlan(ianLayeredSceneEvidence.entry_effects, {
+          shotId: shot.shot_id,
+          scenePlanSha256: packageValue.scene_plan_sha256,
+          packageManifest: ianLayeredSceneEvidence.package_manifest,
+          durationFrames,
+          layerEntries: packageValue.layers.map(({layer_id, entry_frame}) => ({layer_id, entry_frame})),
+          libraryManifestSha256: ianLayeredSceneEvidence.entry_effects.sound_effect_library.checksum_sha256,
+        });
     ianLayeredScene = {
-      contract_version: IAN_LAYERED_SCENE_RENDERER_VERSION,
+      contract_version: entryEffects === null
+        ? IAN_LAYERED_SCENE_RENDERER_VERSION
+        : IAN_LAYERED_ENTRY_RENDERER_VERSION,
       package_contract_version: IAN_LAYERED_SCENE_PACKAGE_VERSION,
       package_manifest: structuredClone(ianLayeredSceneEvidence.package_manifest),
       scene_plan_sha256: packageValue.scene_plan_sha256,
       storyboard_scene_plan_sha256: ianLayeredSceneEvidence.storyboard_scene_plan_sha256,
-      layer_entry_transition: structuredClone(packageValue.scene_plan.layer_entry_transition),
       background: {
         asset: backgroundAsset.asset,
         checksum_sha256: backgroundAsset.checksum_sha256,
@@ -752,7 +779,12 @@ const buildScene = (
         asset: imageSequence[0].asset,
         checksum_sha256: packageValue.final_composite.checksum_sha256,
       },
-      motion_policy: structuredClone(packageValue.scene_plan.motion_policy),
+      ...(entryEffects === null ? {
+        layer_entry_transition: structuredClone(packageValue.scene_plan.layer_entry_transition),
+        motion_policy: structuredClone(packageValue.scene_plan.motion_policy),
+      } : {
+        entry_effects: entryEffects,
+      }),
     };
   } else if (requireV3Contracts
     && (shot.internal_motion_contract != null || shot.internal_motion != null)) {
@@ -868,11 +900,12 @@ const verifyStoryboardVisualRhythmEvidence = (input) => {
   if (typeof input.episodeWorkspace !== 'string' || input.episodeWorkspace === '') {
     throw new Error('episodeWorkspace is required for storyboard visual rhythm verification');
   }
-  const allowedPaths = new Set([
-    `${input.episodeWorkspace}/schema/storyboard-visual-rhythm-v1.json`,
-    `${input.episodeWorkspace}/schema/storyboard-visual-rhythm-v2.json`,
-  ]);
-  if (!allowedPaths.has(evidence?.path) || !SHA256.test(evidence?.checksum_sha256 ?? '')) {
+  const expectedSchemaRoot = `${input.episodeWorkspace}/schema/`;
+  if (typeof evidence?.path !== 'string'
+      || !evidence.path.startsWith(expectedSchemaRoot)
+      || evidence.path.slice(expectedSchemaRoot.length).includes('/')
+      || !isActiveStoryboardVisualRhythmArtifactBasename(path.basename(evidence.path))
+      || !SHA256.test(evidence?.checksum_sha256 ?? '')) {
     throw new Error('storyboard visual rhythm artifact path and checksum are required');
   }
   const artifactPath = path.resolve(REPOSITORY_ROOT, evidence.path);
@@ -917,14 +950,14 @@ const verifyRootRelativeBinding = (binding, label, episodeWorkspace, {schemaOnly
 const verifyPublicIanAsset = (asset, checksum, label) => {
   if (typeof asset !== 'string' || asset === '' || path.isAbsolute(asset)
     || asset.replaceAll('\\', '/').split('/').includes('..')) {
-    throw new Error(`${label} must be relative to leverage-video/public`);
+    throw new Error(`${label} must be relative to the configured leverage-video/src public root`);
   }
   requireSha256(checksum, `${label}.checksum_sha256`);
-  const publicRoot = path.resolve(REPOSITORY_ROOT, 'leverage-video/public');
+  const publicRoot = path.resolve(REPOSITORY_ROOT, 'leverage-video/src');
   const resolved = path.resolve(publicRoot, asset);
   const relative = path.relative(publicRoot, resolved);
   if (relative === '' || relative.startsWith('..') || path.isAbsolute(relative)) {
-    throw new Error(`${label} escapes leverage-video/public`);
+    throw new Error(`${label} escapes the configured leverage-video/src public root`);
   }
   const status = fs.lstatSync(resolved);
   if (!status.isFile() || status.isSymbolicLink() || status.size === 0
@@ -980,6 +1013,8 @@ const verifyIanLayeredScenePackageEvidence = (input) => {
         sourceText: shot.narration_source_text,
         shotStartFrame: shot.start_frame,
         shotEndFrame: shot.end_frame,
+        visibleTextMode: shot.visible_text_mode,
+        exactVisibleText: shot.exact_visible_text,
       });
       const storyboardPath = path.resolve(REPOSITORY_ROOT, input.visualDirectionReview.storyboard.path);
       const storyboardSection = extractStoryboardShotSection(
@@ -1020,12 +1055,64 @@ const verifyIanLayeredScenePackageEvidence = (input) => {
         renderAssets?.final_composite?.checksum_sha256,
         `${shot.shot_id} Ian final composite`,
       );
+      let entryEffects = null;
+      if (binding?.entry_effects_manifest != null) {
+        verifyRootRelativeBinding(
+          binding.entry_effects_manifest,
+          `${shot.shot_id} Ian entry-effects manifest`,
+          input.episodeWorkspace,
+          {schemaOnly: true},
+        );
+        const entryEffectsValue = readJson(path.resolve(
+          REPOSITORY_ROOT,
+          binding.entry_effects_manifest.path,
+        ));
+        const library = loadAndValidateSharedSoundEffectLibrary({
+          repositoryRoot: REPOSITORY_ROOT,
+          manifestPath: entryEffectsValue.sound_effect_library?.path,
+        });
+        const edgeMargins = packageValue.split_spec.layers.map(({bbox}) => Math.min(
+          bbox.x,
+          bbox.y,
+          1920 - bbox.x - bbox.width,
+          1080 - bbox.y - bbox.height,
+        ));
+        entryEffects = validateIanLayeredEntryEffectsPlan(entryEffectsValue, {
+          shotId: shot.shot_id,
+          scenePlanSha256: packageValue.scene_plan_sha256,
+          packageManifest: manifestBinding,
+          durationFrames: shot.end_frame - shot.start_frame,
+          layerEntries: packageValue.layers.map(({layer_id, entry_frame}) => ({layer_id, entry_frame})),
+          libraryManifestSha256: library.manifest.checksum_sha256,
+          libraryAssets: library.assets,
+          layerEdgeMargins: edgeMargins,
+        });
+        entryEffects.layers.forEach((entry) => {
+          if (entry.sound_effect !== null) {
+            verifyPublicIanAsset(
+              entry.sound_effect.derived_asset.asset,
+              entry.sound_effect.derived_asset.checksum_sha256,
+              `${shot.shot_id} Ian ${entry.layer_id} entry SFX`,
+            );
+          }
+          if (entry.effect.contract_version === IAN_INK_DRAW_REVEAL_VERSION) {
+            verifyPublicIanAsset(
+              entry.effect.vector_asset.asset,
+              entry.effect.vector_asset.checksum_sha256,
+              `${shot.shot_id} Ian ${entry.layer_id} reveal vector`,
+            );
+          } else if (![IAN_SOFT_SETTLE_VERSION, 'fade-only-v1'].includes(entry.effect.contract_version)) {
+            throw new Error(`${shot.shot_id} Ian ${entry.layer_id} entry effect is unsupported`);
+          }
+        });
+      }
       return {
         shot_id: shot.shot_id,
         storyboard_scene_plan_sha256: storyboardScenePlanSha256,
         package_manifest: structuredClone(manifestBinding),
         package: packageValue,
         render_assets: structuredClone(renderAssets),
+        entry_effects: entryEffects,
       };
     });
   return {
@@ -1155,10 +1242,20 @@ export const buildKnowledgeVideoAssemblyPlan = (input, options = {}) => {
     }
     workflowApprovalValidation = validateApprovalSelectionSequence({
       gate2ScriptSha256: workflow.gate2ScriptSha256,
+      whiteCatStyle: workflow.whiteCatStyle,
       density: workflow.density,
       mode: workflow.mode,
       policy: workflow.policy ?? null,
     });
+    const styleBinding = visualDirectionReview.white_cat_visual_style_binding;
+    if (!styleBinding
+      || styleBinding.style_id !== workflow.whiteCatStyle.style_id
+      || styleBinding.treatment_profile_id !== workflow.whiteCatStyle.treatment_profile_id
+      || styleBinding.visual_cohesion_profile_id
+        !== workflow.whiteCatStyle.visual_cohesion_profile_id
+      || styleBinding.selection_sha256 !== workflow.whiteCatStyle.selection_sha256) {
+      throw new Error('workflow white-cat style selection differs from visual direction binding');
+    }
     if (workflow.density.selection_sha256
       !== visualRhythmEvidence.artifact.visual_density_selection_sha256
       || workflow.density.density_mode !== visualRhythmEvidence.artifact.density_mode) {

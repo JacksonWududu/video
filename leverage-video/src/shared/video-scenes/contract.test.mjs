@@ -18,20 +18,28 @@ test('shared narrative scenes consume v3 transition maps while retaining legacy 
   assert.doesNotMatch(source, /Math\.floor\(frame\s*\/\s*45\)/);
 });
 
-test('Ian renders a static background and checksum-bound semantic layers on narration frames', () => {
+test('Ian preserves legacy fade and consumes checksum-bound entry motion, vector reveal, and SFX', () => {
   const source = read('IanLayeredScene.tsx');
   assert.match(source, /visualGenerationRoute !== 'ian-handdrawn-ppt'/);
   assert.match(source, /ian-static-layered-scene-v1/);
+  assert.match(source, /IAN_LAYERED_ENTRY_RENDERER_VERSION/);
+  assert.match(source, /validateIanLayeredEntryEffectsRenderPlan/);
   assert.match(source, /IAN_LAYER_ENTRY_TRANSITION_VERSION/);
   assert.match(source, /useCurrentFrame/);
   assert.match(source, /interpolate/);
+  assert.match(source, /softSettleOffset/);
   assert.match(source, /layer\.entry_frame/);
   assert.match(source, /opacity/);
+  assert.match(source, /strokeDasharray/);
+  assert.match(source, /strokeDashoffset/);
+  assert.match(source, /<mask/);
+  assert.match(source, /<Audio/);
+  assert.match(source, /gain_multiplier/);
   assert.match(source, /<CanvasImage/);
   assert.match(source, /width=\{1920\}/);
   assert.match(source, /height=\{1080\}/);
   assert.match(source, /fit="fill"/);
-  assert.doesNotMatch(source, /FullFrameMaskSweep|full-frame-mask-sweep|translate3d|scale\(|transform:|clipPath/);
+  assert.doesNotMatch(source, /FullFrameMaskSweep|full-frame-mask-sweep|Math\.random|scale\(|rotate\(/);
   const graphic = read('GraphicScene.tsx');
   assert.match(graphic, /ink-doodle-knowledge-card/);
   assert.doesNotMatch(graphic, /ian-handdrawn-ppt|ian-static|ian-subtle|translate3d|scale\(/);

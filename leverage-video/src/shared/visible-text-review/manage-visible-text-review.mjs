@@ -142,6 +142,7 @@ export const buildPresentArtifacts = ({
     });
   }
   state.visible_text_review = stateBinding(reviewPath, reviewBytes, review);
+  state.phase = 'awaiting_visible_text_review';
   state.current_phase = 'awaiting_visible_text_review';
   state.blockers = [];
   return {
@@ -193,6 +194,8 @@ export const buildApproveArtifacts = ({
   const reviewBytes = jsonBytes(review);
   const state = structuredClone(context.state);
   state.visible_text_review = stateBinding(binding.path, reviewBytes, review);
+  state.gates = {...(state.gates ?? {}), visible_text_review: 'approved'};
+  state.phase = 'visible_text_review_approved';
   state.current_phase = 'visible_text_review_approved';
   state.blockers = [];
   return {

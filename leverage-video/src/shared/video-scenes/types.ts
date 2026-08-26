@@ -1,32 +1,38 @@
 import type {SceneTransitionContract} from '../scene-transitions';
 import type {IntraShotTransitionV1} from '../intra-shot-transitions';
 import type {IntraShotWatercolorTransition} from '../watercolor-bloom/contract.mjs';
+import type {IanLayeredEntryEffectsPlan} from '../ian-layered-entry-effects/contract.mjs';
 export type MotionTier = 'layered' | 'stateful' | 'hero_pose';
 
-export type IanLayeredSceneBinding = {
-  readonly contract_version: 'ian-static-layered-scene-v1';
-  readonly package_contract_version: 'ian-knowledge-video-layered-scene-v1';
+type IanLayeredSceneLayerBinding = {
+  readonly layer_id: string;
+  readonly z_index: number;
+  readonly semantic_role: string;
+  readonly source_text_start_byte: number;
+  readonly source_text_end_byte_exclusive: number;
+  readonly source_text: string;
+  readonly entry_frame: number;
+  readonly asset: string;
+  readonly checksum_sha256: string;
+};
+
+type IanLayeredSceneCommonBinding = {
+  readonly package_contract_version: 'ian-knowledge-video-layered-scene-v2';
   readonly package_manifest: {readonly path: string; readonly checksum_sha256: string};
   readonly scene_plan_sha256: string;
   readonly storyboard_scene_plan_sha256: string;
+  readonly background: {readonly asset: string; readonly checksum_sha256: string};
+  readonly layers: readonly IanLayeredSceneLayerBinding[];
+  readonly final_composite: {readonly asset: string; readonly checksum_sha256: string};
+};
+
+export type LegacyIanLayeredSceneBinding = IanLayeredSceneCommonBinding & {
+  readonly contract_version: 'ian-static-layered-scene-v1';
   readonly layer_entry_transition: {
     readonly contract_version: 'ian-layer-entry-fade-v1';
     readonly duration_frames: 8;
     readonly easing: 'linear';
   };
-  readonly background: {readonly asset: string; readonly checksum_sha256: string};
-  readonly layers: readonly {
-    readonly layer_id: string;
-    readonly z_index: number;
-    readonly semantic_role: string;
-    readonly source_text_start_byte: number;
-    readonly source_text_end_byte_exclusive: number;
-    readonly source_text: string;
-    readonly entry_frame: number;
-    readonly asset: string;
-    readonly checksum_sha256: string;
-  }[];
-  readonly final_composite: {readonly asset: string; readonly checksum_sha256: string};
   readonly motion_policy: {
     readonly scene_transform: 'forbidden';
     readonly layer_transform: 'forbidden';
@@ -35,6 +41,15 @@ export type IanLayeredSceneBinding = {
     readonly opacity_animation: 'ian-layer-entry-fade-v1';
   };
 };
+
+export type AnimatedIanLayeredSceneBinding = IanLayeredSceneCommonBinding & {
+  readonly contract_version: 'ian-layered-entry-effects-renderer-v2';
+  readonly entry_effects: IanLayeredEntryEffectsPlan;
+};
+
+export type IanLayeredSceneBinding =
+  | LegacyIanLayeredSceneBinding
+  | AnimatedIanLayeredSceneBinding;
 
 export type LegacyIntraShotWatercolorTransition = IntraShotWatercolorTransition & {
   readonly from_asset_id: string;

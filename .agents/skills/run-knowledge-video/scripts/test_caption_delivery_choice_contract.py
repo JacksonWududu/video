@@ -66,7 +66,7 @@ class CaptionDeliveryChoiceContractTest(unittest.TestCase):
         )
         phase_order = (
             "composition_locked → awaiting_caption_delivery_choice → "
-            "final_rendering → delivered"
+            "final_rendering → awaiting_post_delivery_bgm_recommendation → delivered"
         )
         self.assertIn(phase_order, state)
         self.assertIn("Do not infer a default", state)

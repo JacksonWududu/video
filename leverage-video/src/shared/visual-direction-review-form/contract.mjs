@@ -13,6 +13,7 @@ import {
   validateVisualLanguageSelection,
 } from '../visual-language/contract.mjs';
 import {validateConciseSummaryVisibleText} from '../visible-text-review/contract.mjs';
+import {resolveWhiteCatVisualStyleOption} from '../workflow-approval/contract.mjs';
 
 export const FORM_MODEL_CONTRACT_VERSION = 'visual-direction-review-form-v3';
 export const SUBMISSION_CONTRACT_VERSION = 'visual-direction-form-submission-v3';
@@ -257,7 +258,7 @@ export const compatibleRoutesForSelection = (row, whiteCatPresent) => {
     throw new Error(`${row.shot_id} has unsupported scene_class`);
   }
   const allowed = whiteCatPresent
-    ? ['imagegen', 'xuan-paper-diorama']
+    ? (row.white_cat_visual_style_id ? ['imagegen'] : ['imagegen', 'xuan-paper-diorama'])
     : ['imagegen', 'xuan-paper-diorama', 'srt-whiteboard-animation', 'local-video-file'];
   return ACTIVE_ROUTE_IDS.filter((routeId) => allowed.includes(routeId));
 };
@@ -321,6 +322,9 @@ const presentedSelection = (row) => {
       : (approved
       ? (row.user_selection.local_video_source_path ?? null)
       : (row.local_video_source_path ?? null)),
+    white_cat_visual_style_id: row.white_cat_visual_style_id ?? null,
+    white_cat_visual_style_selection_sha256: row.white_cat_visual_style_selection_sha256 ?? null,
+    visual_cohesion_profile_id: row.visual_cohesion_profile_id ?? null,
   };
 };
 
@@ -331,6 +335,22 @@ export const resolveTreatmentProfile = ({
   visualStructureId = row.visual_language_recommendation.visual_structure_id,
   whiteCatPresent = false,
 }) => {
+  if (routeId === 'imagegen' && whiteCatPresent && row.white_cat_visual_style_id) {
+    const option = resolveWhiteCatVisualStyleOption(row.white_cat_visual_style_id);
+    if (!SHA256.test(row.white_cat_visual_style_selection_sha256 ?? '')
+      || row.visual_cohesion_profile_id !== option.visual_cohesion_profile_id) {
+      throw new Error(`${row.shot_id} white-cat visual style binding is stale`);
+    }
+    validateVisualLanguageSelection({
+      scene_class: row.scene_class,
+      visual_structure_id: visualStructureId,
+      treatment_profile_id: option.treatment_profile_id,
+      visual_generation_route: routeId,
+      white_cat_present: true,
+      comic_plan: null,
+    }, {requireApprovedCharacterReference: false});
+    return option.treatment_profile_id;
+  }
   let treatmentProfileId = FIXED_TREATMENTS[routeId];
   if (routeId === 'imagegen' && typeof currentTreatmentProfileId === 'string'
     && currentTreatmentProfileId !== '') {

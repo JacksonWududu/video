@@ -36,6 +36,94 @@ WHITE_CAT_ANATOMY_QA_VERSION = "white-cat-anatomy-qa-v2"
 WHITE_CAT_MASTER_QA_VERSION = "ordinary-imagegen-white-cat-master-qa-v2"
 WHITE_CAT_ACTION_QA_VERSION = "ordinary-imagegen-white-cat-action-qa-v2"
 WHITE_CAT_LIMB_IDS = {"F1", "F2", "H1", "H2"}
+WHITE_CAT_STYLE_SELECTION_VERSION = "white-cat-visual-style-selection-v1"
+WHITE_CAT_STYLE_OPTIONS = {
+    "loose-line-vivid-watercolor": {
+        "treatment_profile_id": "imagegen-watercolor-narrative",
+        "visual_cohesion_profile_id": "warm-paper-watercolor-cohesion-v1",
+    },
+    "twilight-neon-animation": {
+        "treatment_profile_id": "imagegen-twilight-neon-narrative",
+        "visual_cohesion_profile_id": "twilight-luminous-cohesion-v1",
+    },
+}
+
+
+def _canonical_sha256(value: Any) -> str:
+    encoded = json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def resolve_white_cat_visual_style_binding(
+    state: dict[str, Any], item: dict[str, Any]
+) -> tuple[str, str, bool]:
+    style_id = item.get("white_cat_visual_style_id")
+    selection_sha256 = item.get("white_cat_visual_style_selection_sha256")
+    cohesion_id = item.get("visual_cohesion_profile_id")
+    if style_id is None and selection_sha256 is None and cohesion_id is None:
+        return "loose-line-vivid-watercolor", "warm-paper-watercolor-cohesion-v1", False
+    if style_id is None or not SHA256_RE.fullmatch(selection_sha256 or "") or cohesion_id is None:
+        raise ValueError("white-cat visual style binding is incomplete")
+    option = WHITE_CAT_STYLE_OPTIONS.get(style_id)
+    selection = state.get("white_cat_visual_style_selection")
+    if option is None or not isinstance(selection, dict):
+        raise ValueError("white-cat visual style selection is missing or unsupported")
+    projection = {
+        "contract_version": WHITE_CAT_STYLE_SELECTION_VERSION,
+        "gate2_script_sha256": selection.get("gate2_script_sha256"),
+        "style_id": selection.get("style_id"),
+        "treatment_profile_id": selection.get("treatment_profile_id"),
+        "visual_cohesion_profile_id": selection.get("visual_cohesion_profile_id"),
+        "style_skill_path": selection.get("style_skill_path"),
+        "style_skill_checksum_sha256": selection.get("style_skill_checksum_sha256"),
+        "style_profile_path": selection.get("style_profile_path"),
+        "style_profile_checksum_sha256": selection.get("style_profile_checksum_sha256"),
+        "decision": {
+            "status": selection.get("decision", {}).get("status"),
+            "exact_message": selection.get("decision", {}).get("exact_message"),
+            "decided_at": selection.get("decision", {}).get("decided_at"),
+        },
+    }
+    if (
+        selection.get("contract_version") != WHITE_CAT_STYLE_SELECTION_VERSION
+        or selection.get("selection_sha256") != _canonical_sha256(projection)
+        or selection.get("selection_sha256") != selection_sha256
+        or selection.get("style_id") != style_id
+        or selection.get("treatment_profile_id") != option["treatment_profile_id"]
+        or item.get("treatment_profile_id") != option["treatment_profile_id"]
+        or selection.get("visual_cohesion_profile_id") != cohesion_id
+        or cohesion_id != option["visual_cohesion_profile_id"]
+    ):
+        raise ValueError("white-cat visual style binding is stale, mixed, or substituted")
+    return style_id, cohesion_id, True
+
+
+def validate_white_cat_style_prompt_and_qa(
+    *,
+    prompt_text: str,
+    qa: dict[str, Any],
+    style_id: str,
+    cohesion_id: str,
+    selection_sha256: str | None,
+    current_binding: bool,
+) -> None:
+    if not current_binding:
+        return
+    if f"WHITE-CAT VISUAL STYLE: {style_id}." not in prompt_text:
+        raise ValueError("production prompt lacks the Gate-2 white-cat visual style marker")
+    if f"EPISODE VISUAL COHESION: {cohesion_id}." not in prompt_text:
+        raise ValueError("production prompt lacks the episode visual cohesion marker")
+    if qa.get("white_cat_visual_style_binding") != {
+        "style_id": style_id,
+        "selection_sha256": selection_sha256,
+        "visual_cohesion_profile_id": cohesion_id,
+    }:
+        raise ValueError("white-cat generation QA lacks the exact style/cohesion binding")
 
 
 def validate_white_cat_prompt_contract(text: str) -> None:
@@ -476,6 +564,11 @@ def record(args: argparse.Namespace) -> dict[str, Any]:
     )
     item = candidate if is_user_takeover else gate.require_generation_allowed(state, args.asset_id)
     is_white_cat_master = item.get("white_cat_present") is True
+    expected_style_id, expected_cohesion_id, current_style_binding = (
+        resolve_white_cat_visual_style_binding(state, item)
+        if is_white_cat_master
+        else ("loose-line-vivid-watercolor", "warm-paper-watercolor-cohesion-v1", False)
+    )
     if (
         item.get("visual_generation_route") != "imagegen"
         or item.get("strict_review") is not True
@@ -518,6 +611,14 @@ def record(args: argparse.Namespace) -> dict[str, Any]:
             raise ValueError("production prompt lacks exact 16:9 or text-free instruction")
         if is_white_cat_master:
             validate_white_cat_prompt_contract(text)
+            validate_white_cat_style_prompt_and_qa(
+                prompt_text=text,
+                qa=qa,
+                style_id=expected_style_id,
+                cohesion_id=expected_cohesion_id,
+                selection_sha256=item.get("white_cat_visual_style_selection_sha256"),
+                current_binding=current_style_binding,
+            )
 
     source = checksum_bound_file(qa["selected_source"], "selected source")
     dimensions = png_dimensions(source)
@@ -532,7 +633,7 @@ def record(args: argparse.Namespace) -> dict[str, Any]:
     catalog = resolve_path(profile.get("catalog_path", ""), "visual-language catalog")
     if sha256_file(authority) != profile.get("authority_checksum_sha256") or sha256_file(catalog) != profile.get("catalog_checksum_sha256"):
         raise ValueError("ordinary ImageGen style authority checksum is stale")
-    if profile.get("medium_id") != "loose-line-vivid-watercolor":
+    if profile.get("medium_id") != expected_style_id:
         raise ValueError("ordinary ImageGen master has the wrong medium")
 
     character = qa.get("character_reference")

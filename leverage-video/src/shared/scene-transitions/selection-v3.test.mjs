@@ -4,6 +4,7 @@ import fs from 'node:fs';
 
 import {
   buildTransitionReviewPresentedMapSha256,
+  nextTransitionReviewVersion,
   rebindUnaffectedTransitionApprovals,
 } from './build-review-proposal.mjs';
 import {
@@ -24,6 +25,20 @@ import {
 } from './contract.mjs';
 
 assert.equal(SCENE_TRANSITION_CATALOG_VERSION, 'scene-transition-catalog-v3');
+assert.equal(nextTransitionReviewVersion({
+  existingFilenames: [
+    'per-boundary-transition-review-v1.json',
+    'per-boundary-transition-review-v3.json',
+    'unrelated.json',
+  ],
+  versionSourcePath: null,
+  replacingOrRefreshing: false,
+}), 4);
+assert.equal(nextTransitionReviewVersion({
+  existingFilenames: ['per-boundary-transition-review-v1.json'],
+  versionSourcePath: 'leverage-video/src/topic7/schema/per-boundary-transition-review-v2.json',
+  replacingOrRefreshing: true,
+}), 3);
 assert.ok(TRANSITION_CATALOG.some((entry) => entry.kind === 'cut'));
 assert.deepEqual(RETIRED_TRANSITION_KINDS_V3, [
   'zoom-blur',
@@ -166,6 +181,21 @@ assert.deepEqual(whiteCatPriority, {
   recommendation_source: {
     authority: 'white-cat-transition-policy',
     rule_id: 'imagegen-white-cat-watercolor-bloom-priority-v1',
+    matched_boundary_roles: ['next'],
+  },
+});
+assert.deepEqual(resolveTransitionRecommendation({
+  boundaryChangeClass: 'route_change',
+  sourceVisualGenerationRoute: 'ian-handdrawn-ppt',
+  nextVisualGenerationRoute: 'imagegen',
+  sourceWhiteCatPresent: false,
+  nextWhiteCatPresent: true,
+  whiteCatVisualStyleId: 'twilight-neon-animation',
+}), {
+  recommended_transition: {kind: 'dissolve', options: {}},
+  recommendation_source: {
+    authority: 'white-cat-transition-policy',
+    rule_id: 'imagegen-white-cat-twilight-dissolve-priority-v1',
     matched_boundary_roles: ['next'],
   },
 });

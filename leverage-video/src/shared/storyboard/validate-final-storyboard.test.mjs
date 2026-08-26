@@ -4,6 +4,7 @@ import test from 'node:test';
 
 import {
   buildFinalStoryboardTitle,
+  extractLockedNarrationBody,
   openingDetailCutMarker,
   openingWorkcardScheduleMarker,
   validateIanStoryboardLayeredSceneSection,
@@ -111,6 +112,48 @@ test('accepts the recorder nested candidate checksum and rejects conflicting pro
     ...args,
     evidence: {...evidence, candidate_checksum_sha256: 'f'.repeat(64)},
   }), /conflicting candidate checksums/);
+});
+
+test('accepts projected opening evidence without inactive brand or topic fields', () => {
+  const sentence = '为什么明明困得要死，还是舍不得睡？';
+  const lockedBytes = Buffer.from(sentence);
+  const checksum = sha256(lockedBytes);
+  const evidence = {
+    rule_id: 'opening-first-sentence-record-v1',
+    status: 'pass',
+    candidate_checksum_sha256: checksum,
+    exact_first_sentence: sentence,
+    byte_start: 0,
+    byte_end_exclusive: lockedBytes.length,
+    byte_length: lockedBytes.length,
+  };
+  const args = {lockedBytes, lockedChecksum: checksum, evidence, openSourceText: sentence};
+  assert.equal(validateOpeningFirstSentenceRecord(args).result, 'pass');
+  assert.throws(() => validateOpeningFirstSentenceRecord({
+    ...args,
+    evidence: {...evidence, brand_prefix_validation: 'required'},
+  }), /must not enforce brand wording/);
+  assert.throws(() => validateOpeningFirstSentenceRecord({
+    ...args,
+    evidence: {...evidence, topic_extraction: 'performed'},
+  }), /must not enforce brand wording/);
+});
+
+test('extracts locked narration from the authoritative opening byte instead of assuming a heading', () => {
+  const body = '第一句。\n第二句。\n';
+  const header = '某期口播稿\n\n';
+  assert.equal(extractLockedNarrationBody({
+    lockedBytes: Buffer.from(`${header}${body}`),
+    openingByteStart: Buffer.byteLength(header),
+  }), body);
+  assert.equal(extractLockedNarrationBody({
+    lockedBytes: Buffer.from(body),
+    openingByteStart: 0,
+  }), body);
+  assert.throws(() => extractLockedNarrationBody({
+    lockedBytes: Buffer.from(body),
+    openingByteStart: 1,
+  }), /valid UTF-8/);
 });
 
 test('requires an exact static Ian layered-scene plan and rejects old whole-raster motion', () => {

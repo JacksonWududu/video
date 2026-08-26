@@ -1,13 +1,15 @@
-# User-audio-first narration validation
+# Selected-source narration validation
 
-## Preserve and inspect sources
+## Select and preserve the source
 
-- Ask the user whether audio lookup may begin and record the explicit permission. Do not inspect audio files before permission.
-- After permission, inspect only the already resolved script-resource topic folder. Prefer exact top-level `voice.mp3`; otherwise require exactly one real regular top-level `voice*.mp3`. Never scan sibling folders or select by modification time.
+- Require `narration-audio-source-selection-v1`, bound to the locked script and workflow approval mode, before any file lookup or provider call. Accept only `colocated_voice` or `edge_tts`; never infer or substitute a source.
+- For `colocated_voice`, record explicit permission, inspect only the already resolved script-resource topic folder, prefer exact top-level `voice.mp3`, and otherwise require exactly one real regular top-level `voice*.mp3`. Never scan sibling folders or select by modification time.
+- For `edge_tts`, require provider `edge-tts`, voice `zh-CN-YunjianNeural`, rate `+20%`, and explicit network authorization. Run only `scripts/synthesize_edge_tts.py` against the exact locked-script file and require its same-request word-boundary JSONL output. Record adapter path/checksum, dependency version, input path/checksum, exact arguments, attempt count, audio/metadata paths and checksums, and the user's selection message/time.
+- Check existing runtimes before installing `edge-tts`; if none is reusable, request installation permission. Missing dependency, network/provider failure, empty output, or exhausted retries blocks. Never silently fall back to another source or provider.
 - For `revoice_variant`, replace the standard preference rule with exact selection: require the user to name one basename matching `voice*.mp3` and explicitly permit that exact file, reject path separators, and inspect only that real top-level file even when other voice files coexist.
 - Require a readable, nonempty, real regular file and reject symbolic links.
 - Never overwrite the resolved source audio, its archived copy, or the source narration file.
-- Record the original path, byte size, and checksum; copy the exact bytes under `<episode-workspace>/assets/audio/user-source/` with a versioned filename and verify matching checksums. Standard and `revoice_variant` ingestion share this sole user-source archive category; never create `<episode-workspace>/audio/`.
+- For `colocated_voice`, record the original path, byte size, and checksum; copy exact bytes under `<episode-workspace>/assets/audio/user-source/`. For `edge_tts`, keep the generated provider MP3 versioned under `<episode-workspace>/assets/audio/`. Never create `<episode-workspace>/audio/`.
 - For `revoice_variant`, also record the parent source/master paths and checksums, require the replacement source checksum to differ from the parent source checksum, and preserve every parent audio artifact unchanged.
 - Use `ffprobe` to record duration, codec, sample rate, channel count, and bitrate.
 - Decode the full source once with `ffmpeg -v error`. Reject any file that does not decode cleanly.

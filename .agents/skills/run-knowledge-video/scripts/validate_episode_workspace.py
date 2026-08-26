@@ -499,19 +499,40 @@ def _validate_active_ian_layered_scene_queue(
         errors.extend(manifest_errors)
         members = item.get("ian_scene_package_members")
         lineage = item.get("generation_lineage")
-        if (
-            item.get("qa_contract_version") != "ian-layered-scene-qa-v1"
-            or not isinstance(members, list)
-            or len(members) != len(plan["layers"]) + 2
-            or [member.get("member_role") for member in members]
-            != ["background"]
-            + ["semantic-layer"] * len(plan["layers"])
+        layer_count = len(plan["layers"])
+        expected_roles = ["source-master", "normalized-master", "background"] \
+            + ["pre-text-layer"] * layer_count \
+            + ["semantic-layer"] * layer_count \
             + ["final-composite"]
+        source_member = (
+            members[0]
+            if isinstance(members, list) and members and isinstance(members[0], dict)
+            else {}
+        )
+        if (
+            item.get("qa_contract_version") != "ian-layered-scene-qa-v2"
+            or not isinstance(members, list)
+            or len(members) != 4 + (2 * layer_count)
+            or any(not isinstance(member, dict) for member in members)
+            or [member.get("member_role") for member in members]
+            != expected_roles
             or not isinstance(lineage, list)
-            or len(lineage) != len(plan["layers"]) + 1
-            or any(not isinstance(stage, dict) for stage in lineage)
-            or [stage.get("member_role") for stage in lineage]
-            != ["background"] + ["semantic-layer"] * len(plan["layers"])
+            or len(lineage) != 1
+            or not isinstance(lineage[0], dict)
+            or set(lineage[0]) != {
+                "stage", "generation_mode", "model_id", "prompt",
+                "reference_inputs", "output", "selection_status",
+            }
+            or lineage[0].get("stage") != "complete-master-generation"
+            or lineage[0].get("generation_mode")
+            != "codex-native-imagegen-gpt-image-2-text-free-master-v1"
+            or lineage[0].get("model_id") != "gpt-image-2"
+            or lineage[0].get("selection_status") != "selected"
+            or lineage[0].get("reference_inputs") != item.get("actual_reference_inputs")
+            or lineage[0].get("output") != {
+                "path": source_member.get("path"),
+                "checksum_sha256": source_member.get("checksum_sha256"),
+            }
         ):
             errors.append(f"{label} layered package QA/member projection is incomplete")
         if manifest_file is None:
@@ -524,12 +545,104 @@ def _validate_active_ian_layered_scene_queue(
         if (
             not isinstance(manifest, dict)
             or manifest.get("contract_version")
-            != "ian-knowledge-video-layered-scene-v1"
+            != "ian-knowledge-video-layered-scene-v2"
             or manifest.get("queue_item_id") != item.get("asset_id")
             or manifest.get("scene_plan") != plan
             or manifest.get("scene_plan_sha256") != item.get("ian_scene_plan_sha256")
         ):
             errors.append(f"{label} layered-scene manifest is stale")
+            continue
+        master_generation_value = manifest.get("master_generation")
+        model_provenance_value = manifest.get("model_provenance")
+        master_generation = (
+            master_generation_value if isinstance(master_generation_value, dict) else {}
+        )
+        model_provenance = (
+            model_provenance_value if isinstance(model_provenance_value, dict) else {}
+        )
+        if (
+            not isinstance(master_generation_value, dict)
+            or master_generation.get("contract_version")
+            != "ian-gpt-image-2-text-free-master-v1"
+            or master_generation.get("generator") != "codex-native-imagegen"
+            or master_generation.get("model_id") != "gpt-image-2"
+            or master_generation.get("source_master", {}).get("path")
+            != source_member.get("path")
+            or master_generation.get("source_master", {}).get("checksum_sha256")
+            != source_member.get("checksum_sha256")
+            or not isinstance(model_provenance_value, dict)
+            or model_provenance.get("contract_version")
+            != "codex-native-imagegen-gpt-image-2-provenance-v1"
+            or model_provenance.get("canonical_model") != "gpt-image-2"
+            or model_provenance.get("evidence_kind")
+            != "embedded-c2pa-software-agent-observation-v1"
+            or model_provenance.get("source_master_checksum_sha256")
+            != source_member.get("checksum_sha256")
+            or model_provenance.get("expected_software_agent")
+            != {"name": "gpt-image", "version": "2.0"}
+        ):
+            errors.append(f"{label} source-master/model provenance is stale")
+        normalized_master = manifest.get("normalized_master")
+        background = manifest.get("background")
+        final_composite = manifest.get("final_composite")
+        pre_text_layers = manifest.get("pre_text_layers")
+        layers = manifest.get("layers")
+        manifest_members = [
+            {
+                "member_role": "source-master",
+                "layer_id": "source-master",
+                **master_generation.get("source_master", {}),
+            },
+            {
+                "member_role": "normalized-master",
+                "layer_id": "normalized-master",
+                **(normalized_master if isinstance(normalized_master, dict) else {}),
+            },
+            {
+                "member_role": "background",
+                "layer_id": "background",
+                **(background if isinstance(background, dict) else {}),
+            },
+            *[
+                {"member_role": "pre-text-layer", **layer}
+                for layer in (pre_text_layers if isinstance(pre_text_layers, list) else [])
+                if isinstance(layer, dict)
+            ],
+            *[
+                {"member_role": "semantic-layer", **layer}
+                for layer in (layers if isinstance(layers, list) else [])
+                if isinstance(layer, dict)
+            ],
+            {
+                "member_role": "final-composite",
+                "layer_id": "final-composite",
+                **(final_composite if isinstance(final_composite, dict) else {}),
+            },
+        ]
+        projected_manifest_members = [
+            {
+                "member_role": member.get("member_role"),
+                "layer_id": member.get("layer_id"),
+                "path": member.get("path"),
+                "checksum_sha256": member.get("checksum_sha256"),
+                "width": member.get("width"),
+                "height": member.get("height"),
+                "has_alpha": member.get("has_alpha"),
+            }
+            for member in manifest_members
+        ]
+        if projected_manifest_members != members:
+            errors.append(f"{label} layered package member projection is stale")
+        for member_index, member in enumerate(members):
+            if not isinstance(member, dict):
+                continue
+            _, member_errors = _resolve_bound_regular_file(
+                repo,
+                member.get("path"),
+                member.get("checksum_sha256"),
+                f"{label} package member {member_index}",
+            )
+            errors.extend(member_errors)
     return errors
 
 
@@ -753,6 +866,226 @@ def _validate_visible_text_batch_review(
     return errors
 
 
+def _validate_post_delivery_bgm_recommendation(
+    repo: Path,
+    workspace: Path,
+) -> list[str]:
+    state_file = workspace / "schema" / "episode-state.json"
+    if not state_file.exists() or state_file.is_symlink() or not state_file.is_file():
+        return []
+    try:
+        state = json.loads(state_file.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return []
+    if not isinstance(state, dict):
+        return []
+
+    policy = state.get("post_delivery_bgm_recommendation_policy")
+    phase = state.get("current_phase")
+    final_phases = {"delivered", "revoice_variant_delivered"}
+    waiting_phase = "awaiting_post_delivery_bgm_recommendation"
+    if policy is None and phase not in {waiting_phase}:
+        return []
+    if policy != "required-v1":
+        return ["post-delivery BGM recommendation policy must be required-v1"]
+    if phase not in final_phases | {waiting_phase}:
+        return []
+
+    errors: list[str] = []
+    delivery = state.get("delivery")
+    if not isinstance(delivery, dict):
+        return ["post-delivery BGM recommendation requires a passing delivery transaction"]
+    required_roles = delivery.get("required_delivery_roles")
+    delivered_roles = delivery.get("delivered_roles")
+    if (
+        delivery.get("status") != "delivered"
+        or delivery.get("result") != "pass"
+        or delivery.get("role_set_equality_result") != "pass"
+        or not isinstance(required_roles, list)
+        or not required_roles
+        or any(not isinstance(role, str) or not role for role in required_roles)
+        or not isinstance(delivered_roles, list)
+        or sorted(required_roles) != sorted(delivered_roles)
+    ):
+        errors.append("post-delivery BGM recommendation requires a passing delivery transaction")
+    if phase == waiting_phase:
+        return errors
+
+    binding = state.get("post_delivery_bgm_recommendation")
+    if not isinstance(binding, dict):
+        return errors + ["post-delivery BGM recommendation evidence is missing"]
+    if (
+        binding.get("contract_version")
+        != "knowledge-video-post-delivery-bgm-recommendation-v1"
+        or binding.get("status") != "complete"
+    ):
+        errors.append("post-delivery BGM recommendation state binding is incomplete")
+
+    artifact_file, artifact_errors = _resolve_bound_regular_file(
+        repo,
+        binding.get("artifact_path"),
+        binding.get("artifact_checksum_sha256"),
+        "Post-delivery BGM recommendation artifact",
+    )
+    report_file, report_errors = _resolve_bound_regular_file(
+        repo,
+        binding.get("report_path"),
+        binding.get("report_checksum_sha256"),
+        "Post-delivery BGM recommendation report",
+    )
+    errors.extend(artifact_errors)
+    errors.extend(report_errors)
+    if artifact_file is None or report_file is None:
+        return errors
+    if artifact_file.parent != workspace / "schema":
+        errors.append("Post-delivery BGM recommendation artifact must be under episode schema/")
+    if report_file.parent != workspace / "docs":
+        errors.append("Post-delivery BGM recommendation report must be under episode docs/")
+
+    try:
+        artifact = json.loads(artifact_file.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return errors + ["Post-delivery BGM recommendation artifact is not valid UTF-8 JSON"]
+    if not isinstance(artifact, dict):
+        return errors + ["Post-delivery BGM recommendation artifact must contain a JSON object"]
+    if (
+        artifact.get("contract_version")
+        != "knowledge-video-post-delivery-bgm-recommendation-v1"
+        or artifact.get("status") != "complete"
+        or artifact.get("scope") != "advisory_only_no_media_mutation"
+    ):
+        errors.append("post-delivery BGM recommendation artifact contract is invalid")
+
+    manifest_binding = artifact.get("delivery_transaction_manifest")
+    expected_manifest_binding = {
+        "path": delivery.get("transaction_manifest_path"),
+        "checksum_sha256": delivery.get("transaction_manifest_checksum_sha256"),
+    }
+    if manifest_binding != expected_manifest_binding:
+        errors.append("post-delivery BGM recommendation delivery binding is stale")
+    else:
+        manifest_file, manifest_errors = _resolve_bound_regular_file(
+            repo,
+            manifest_binding.get("path"),
+            manifest_binding.get("checksum_sha256"),
+            "Post-delivery BGM delivery manifest",
+        )
+        errors.extend(manifest_errors)
+        if manifest_file is not None and manifest_file.parent != workspace / "schema":
+            errors.append("Post-delivery BGM delivery manifest must be under episode schema/")
+
+    expected_role = (
+        "caption_free_master"
+        if isinstance(required_roles, list) and "caption_free_master" in required_roles
+        else "captioned_master"
+    )
+    analysis_master = artifact.get("analysis_master")
+    render_outputs_value = state.get("render_outputs")
+    render_outputs = render_outputs_value if isinstance(render_outputs_value, dict) else {}
+    delivery_outputs_value = delivery.get("outputs")
+    delivery_outputs = delivery_outputs_value if isinstance(delivery_outputs_value, dict) else {}
+    render_output = render_outputs.get(expected_role, {})
+    delivery_output = delivery_outputs.get(expected_role, {})
+    if (
+        not isinstance(analysis_master, dict)
+        or analysis_master.get("role") != expected_role
+        or analysis_master.get("path") != render_output.get("path")
+        or analysis_master.get("checksum_sha256")
+        != render_output.get("checksum_sha256")
+        or analysis_master.get("checksum_sha256")
+        != delivery_output.get("checksum_sha256")
+    ):
+        errors.append("post-delivery BGM recommendation master binding is stale")
+    else:
+        master_file, master_errors = _resolve_bound_regular_file(
+            repo,
+            analysis_master.get("path"),
+            analysis_master.get("checksum_sha256"),
+            "Post-delivery BGM analysis master",
+        )
+        errors.extend(master_errors)
+        if master_file is not None and master_file.parent != workspace / "assets" / "video":
+            errors.append("Post-delivery BGM analysis master must be under assets/video/")
+
+    basis = artifact.get("recommendation_basis")
+    basis_fields = (
+        "content_track",
+        "topic",
+        "emotion_arc",
+        "pacing",
+        "narration_and_sfx",
+        "distribution_intent",
+    )
+    if not isinstance(basis, dict) or any(
+        not isinstance(basis.get(field), str) or not basis[field].strip()
+        for field in basis_fields
+    ):
+        errors.append("post-delivery BGM recommendation basis is incomplete")
+
+    recommendations = artifact.get("recommendations")
+    if not isinstance(recommendations, list) or not 3 <= len(recommendations) <= 5:
+        errors.append("post-delivery BGM recommendation must contain 3 to 5 candidates")
+    else:
+        required_text_fields = (
+            "title",
+            "creator",
+            "source_name",
+            "license_type",
+            "attribution_requirement",
+            "commercial_boundary",
+            "platform_restrictions",
+            "verified_at",
+            "emotion",
+            "fit_reason",
+            "editing_note",
+        )
+        observed_urls: set[str] = set()
+        for index, candidate in enumerate(recommendations, start=1):
+            label = f"post-delivery BGM candidate {index}"
+            if not isinstance(candidate, dict):
+                errors.append(f"{label} must be a JSON object")
+                continue
+            if candidate.get("rank") != index:
+                errors.append(f"{label} rank is invalid")
+            if any(
+                not isinstance(candidate.get(field), str) or not candidate[field].strip()
+                for field in required_text_fields
+            ):
+                errors.append(f"{label} metadata is incomplete")
+            for field in ("audition_url", "license_url"):
+                url = candidate.get(field)
+                if not isinstance(url, str) or not url.startswith("https://"):
+                    errors.append(f"{label} {field} must be a verified HTTPS link")
+                elif field == "audition_url":
+                    if url in observed_urls:
+                        errors.append(f"{label} audition_url must be unique")
+                    observed_urls.add(url)
+            if candidate.get("risk_level") not in {"low", "medium", "high"}:
+                errors.append(f"{label} risk level is invalid")
+            bpm = candidate.get("bpm")
+            bpm_basis = candidate.get("bpm_basis")
+            if (
+                isinstance(bpm, bool)
+                or (bpm is not None and (not isinstance(bpm, (int, float)) or not 0 < bpm <= 300))
+                or bpm_basis not in {"official_metadata", "measured", "unpublished"}
+                or (bpm is None and bpm_basis != "unpublished")
+            ):
+                errors.append(f"{label} BPM evidence is invalid")
+
+    if artifact.get("mutation_evidence") != {
+        "music_downloaded": False,
+        "music_mixed": False,
+        "delivered_master_changed": False,
+    }:
+        errors.append("post-delivery BGM recommendation must preserve delivered media")
+    if artifact.get("report") != {
+        "path": binding.get("report_path"),
+        "checksum_sha256": binding.get("report_checksum_sha256"),
+    }:
+        errors.append("post-delivery BGM recommendation report binding is stale")
+    return errors
+
+
 def validate_episode_workspace(repo_root: Path, workspace_arg: Path) -> list[str]:
     errors: list[str] = []
     repo = repo_root.resolve(strict=True)
@@ -828,6 +1161,7 @@ def validate_episode_workspace(repo_root: Path, workspace_arg: Path) -> list[str
     errors.extend(_validate_white_cat_pending_qa(repo, workspace))
     errors.extend(_validate_active_ian_layered_scene_queue(repo, workspace))
     errors.extend(_validate_visible_text_batch_review(repo, workspace))
+    errors.extend(_validate_post_delivery_bgm_recommendation(repo, workspace))
 
     return sorted(set(errors))
 

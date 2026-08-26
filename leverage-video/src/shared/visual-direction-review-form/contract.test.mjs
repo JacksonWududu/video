@@ -12,7 +12,9 @@ import {
   applyBulkEdit,
   buildCompactShotMergePlan,
   buildVisualDirectionFormModel,
+  compatibleRoutesForSelection,
   parseStoryboardSummary,
+  resolveTreatmentProfile,
   validateApprovedDirectionSynchronization,
   validateStoryboardShotMergeRequest,
   validateVisualDirectionFormSubmission,
@@ -96,6 +98,30 @@ const readFixture = () => {
   review.presented_map_sha256 = buildPresentedMapSha256(review);
   return {review, storyboardMarkdown};
 };
+
+test('Gate-2 twilight binding forces white-cat ImageGen treatment and route', () => {
+  const row = {
+    shot_id: 'S01',
+    scene_class: 'narrative_illustration',
+    compatible_routes: ['imagegen', 'xuan-paper-diorama'],
+    white_cat_visual_style_id: 'twilight-neon-animation',
+    white_cat_visual_style_selection_sha256: 'a'.repeat(64),
+    visual_cohesion_profile_id: 'twilight-luminous-cohesion-v1',
+    visual_language_recommendation: {
+      visual_structure_id: 'single-scene',
+      treatment_profile_id: 'imagegen-twilight-neon-narrative',
+    },
+    user_selection: {
+      treatment_profile_id: 'imagegen-twilight-neon-narrative',
+    },
+  };
+  assert.deepEqual(compatibleRoutesForSelection(row, true), ['imagegen']);
+  assert.equal(resolveTreatmentProfile({
+    row,
+    whiteCatPresent: true,
+    routeId: 'imagegen',
+  }), 'imagegen-twilight-neon-narrative');
+});
 
 const buildFixtureModel = () => {
   const {review, storyboardMarkdown} = readFixture();

@@ -62,6 +62,12 @@ export const TRANSITION_RECOMMENDATION_DIVERSITY_RULE_ID =
   'scene-transition-recommendation-diversity-v2';
 export const WHITE_CAT_TRANSITION_RECOMMENDATION_RULE_ID =
   'imagegen-white-cat-watercolor-bloom-priority-v1';
+export const TWILIGHT_WHITE_CAT_TRANSITION_RECOMMENDATION_RULE_ID =
+  'imagegen-white-cat-twilight-dissolve-priority-v1';
+const WHITE_CAT_VISUAL_STYLE_IDS = new Set([
+  'loose-line-vivid-watercolor',
+  'twilight-neon-animation',
+]);
 
 const DIVERSITY_CANDIDATES = Object.freeze({
   continuity: [{kind: 'cut', options: {}}],
@@ -153,9 +159,13 @@ export const resolveTransitionRecommendation = ({
   nextVisualGenerationRoute,
   sourceWhiteCatPresent = false,
   nextWhiteCatPresent = false,
+  whiteCatVisualStyleId = 'loose-line-vivid-watercolor',
 }) => {
   if (typeof sourceWhiteCatPresent !== 'boolean' || typeof nextWhiteCatPresent !== 'boolean') {
     throw new Error('transition white-cat recommendation context must use booleans');
+  }
+  if (!WHITE_CAT_VISUAL_STYLE_IDS.has(whiteCatVisualStyleId)) {
+    throw new Error('transition white-cat visual style is unsupported');
   }
   const sourceRoute = ROUTES_BY_ID.get(sourceVisualGenerationRoute);
   const nextRoute = ROUTES_BY_ID.get(nextVisualGenerationRoute);
@@ -192,11 +202,14 @@ export const resolveTransitionRecommendation = ({
     matchedBoundaryRoles.push('next');
   }
   if (matchedBoundaryRoles.length > 0) {
+    const twilight = whiteCatVisualStyleId === 'twilight-neon-animation';
     return Object.freeze({
-      recommended_transition: {kind: 'watercolor-bloom', options: {}},
+      recommended_transition: {kind: twilight ? 'dissolve' : 'watercolor-bloom', options: {}},
       recommendation_source: {
         authority: 'white-cat-transition-policy',
-        rule_id: WHITE_CAT_TRANSITION_RECOMMENDATION_RULE_ID,
+        rule_id: twilight
+          ? TWILIGHT_WHITE_CAT_TRANSITION_RECOMMENDATION_RULE_ID
+          : WHITE_CAT_TRANSITION_RECOMMENDATION_RULE_ID,
         matched_boundary_roles: matchedBoundaryRoles,
       },
     });
@@ -254,7 +267,7 @@ export const applyTransitionRecommendationDiversity = (rows) => {
     max_identical_visible_kind_share_uses: maxIdenticalVisibleKindShareUses,
     max_consecutive_identical_visible_kind_uses: maxConsecutiveIdenticalVisibleKindUses,
     route_specific_recommendations_keep_priority: true,
-    white_cat_imagegen_watercolor_bloom_priority: true,
+    white_cat_style_bound_priority: true,
   });
   const counts = new Map();
   let previousKind = null;
@@ -407,6 +420,8 @@ export const validateUserApprovedTransition = (
       nextVisualGenerationRoute: transition.next_visual_generation_route,
       sourceWhiteCatPresent: transition.source_white_cat_present,
       nextWhiteCatPresent: transition.next_white_cat_present,
+      whiteCatVisualStyleId:
+        transition.white_cat_visual_style_id ?? 'loose-line-vivid-watercolor',
     });
     if (canonical(transition.recommended_transition)
       !== canonical(expectedRecommendation.recommended_transition)) {
@@ -489,6 +504,8 @@ const revoiceTransitionProjection = (transition) => ({
   next_visual_generation_route: transition.next_visual_generation_route,
   source_white_cat_present: transition.source_white_cat_present,
   next_white_cat_present: transition.next_white_cat_present,
+  ...(transition.white_cat_visual_style_id === undefined
+    ? {} : {white_cat_visual_style_id: transition.white_cat_visual_style_id}),
   recommended_transition: transition.recommended_transition,
   recommendation_source: transition.recommendation_source,
   diversity_adjustment: transition.diversity_adjustment ?? null,

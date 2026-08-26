@@ -25,6 +25,10 @@ import {
   IAN_LAYER_ENTRY_DURATION_FRAMES,
   IAN_LAYER_ENTRY_TRANSITION_VERSION,
 } from '../../../../leverage-video/src/shared/ian-layered-scene/contract.mjs';
+import {
+  IAN_LAYERED_ENTRY_RENDERER_VERSION,
+  validateIanLayeredEntryEffectsPlan,
+} from '../../../../leverage-video/src/shared/ian-layered-entry-effects/contract.mjs';
 
 const LEGACY_ALLOWED_KINDS = new Set(TRANSITION_KINDS);
 const COVER_SOURCE = '/Users/jackson/Desktop/video-edit/video-resource/cover.png';
@@ -62,35 +66,58 @@ const validateIanLayeredSceneCoverage = ({evidence, scenes}) => {
     throw new Error('v3 assembly lacks complete Ian layered-scene package evidence');
   }
   const sceneByShotId = new Map(scenes.map((scene) => [scene.shot_id, scene]));
+  const rendererVersions = new Set();
   for (const record of evidence.records) {
     const scene = sceneByShotId.get(record.shot_id);
     const binding = scene?.ian_layered_scene;
     const packageValue = record.package;
-    if (binding?.contract_version !== IAN_LAYERED_SCENE_RENDERER_VERSION
+    const commonInvalid = ![IAN_LAYERED_SCENE_RENDERER_VERSION, IAN_LAYERED_ENTRY_RENDERER_VERSION]
+      .includes(binding?.contract_version)
       || binding.package_contract_version !== IAN_LAYERED_SCENE_PACKAGE_VERSION
       || packageValue?.contract_version !== IAN_LAYERED_SCENE_PACKAGE_VERSION
       || JSON.stringify(binding.package_manifest) !== JSON.stringify(record.package_manifest)
       || binding.scene_plan_sha256 !== packageValue.scene_plan_sha256
-      || binding.layer_entry_transition?.contract_version !== IAN_LAYER_ENTRY_TRANSITION_VERSION
-      || binding.layer_entry_transition?.duration_frames !== IAN_LAYER_ENTRY_DURATION_FRAMES
-      || binding.layer_entry_transition?.easing !== 'linear'
-      || binding.motion_policy?.scene_transform !== 'forbidden'
-      || binding.motion_policy?.layer_transform !== 'forbidden'
-      || binding.motion_policy?.mask_reveal !== 'forbidden'
-      || binding.motion_policy?.internal_cut !== 'forbidden'
-      || binding.motion_policy?.opacity_animation !== IAN_LAYER_ENTRY_TRANSITION_VERSION
       || !Array.isArray(binding.layers)
       || binding.layers.length !== packageValue.layers?.length
       || binding.layers.some((layer, index) => (
         layer.layer_id !== packageValue.layers[index].layer_id
         || layer.checksum_sha256 !== packageValue.layers[index].checksum_sha256
         || layer.entry_frame !== packageValue.layers[index].entry_frame
-      ))) {
+      ));
+    if (commonInvalid) {
       throw new Error(`${record.shot_id} Ian layered-scene binding is stale or permits motion`);
     }
+    if (binding.contract_version === IAN_LAYERED_SCENE_RENDERER_VERSION) {
+      if (binding.layer_entry_transition?.contract_version !== IAN_LAYER_ENTRY_TRANSITION_VERSION
+        || binding.layer_entry_transition?.duration_frames !== IAN_LAYER_ENTRY_DURATION_FRAMES
+        || binding.layer_entry_transition?.easing !== 'linear'
+        || binding.motion_policy?.scene_transform !== 'forbidden'
+        || binding.motion_policy?.layer_transform !== 'forbidden'
+        || binding.motion_policy?.mask_reveal !== 'forbidden'
+        || binding.motion_policy?.internal_cut !== 'forbidden'
+        || binding.motion_policy?.opacity_animation !== IAN_LAYER_ENTRY_TRANSITION_VERSION) {
+        throw new Error(`${record.shot_id} legacy Ian binding is stale or permits motion`);
+      }
+    } else {
+      if (JSON.stringify(binding.entry_effects) !== JSON.stringify(record.entry_effects)) {
+        throw new Error(`${record.shot_id} Ian entry-effects evidence differs from the rendered binding`);
+      }
+      validateIanLayeredEntryEffectsPlan(binding.entry_effects, {
+        shotId: record.shot_id,
+        scenePlanSha256: binding.scene_plan_sha256,
+        packageManifest: binding.package_manifest,
+        durationFrames: scene.duration_frames,
+        layerEntries: binding.layers.map(({layer_id, entry_frame}) => ({layer_id, entry_frame})),
+        libraryManifestSha256: binding.entry_effects.sound_effect_library.checksum_sha256,
+      });
+    }
+    rendererVersions.add(binding.contract_version);
+  }
+  if (rendererVersions.size > 1) {
+    throw new Error('one assembly may not mix legacy and active Ian entry renderer contracts');
   }
   return {
-    contract_version: IAN_LAYERED_SCENE_RENDERER_VERSION,
+    contract_version: [...rendererVersions][0] ?? IAN_LAYERED_SCENE_RENDERER_VERSION,
     shot_ids: expectedShotIds,
   };
 };
@@ -208,8 +235,12 @@ export const validateSceneTransitions = ({plan, source}) => {
   const expectedCatalogVersion = sceneRoutingContract === 'explicit-visual-generation-route-v1'
     ? 'visual-generation-route-catalog-v1'
     : 'visual-generation-route-catalog-v2';
+  const visualDirectionStatusIsValid = visualDirectionReview?.status === 'approved'
+    || (visualDirectionReview?.status === 'policy_authorized'
+      && plan?.qa_contract?.workflow_approval?.result === 'pass'
+      && plan.qa_contract.workflow_approval.approval_mode === 'one_click');
   if (visualDirectionReview?.result !== 'pass'
-    || visualDirectionReview?.status !== 'approved'
+    || !visualDirectionStatusIsValid
     || visualDirectionReview?.contract_version !== expectedDirectionContract
     || visualDirectionReview?.catalog_version !== expectedCatalogVersion
     || !SHA256.test(visualDirectionReview?.catalog_checksum_sha256 ?? '')
@@ -339,7 +370,8 @@ export const validateSceneTransitions = ({plan, source}) => {
           throw new Error(`Ian whole-raster motion is retired: ${scene.shot_id}`);
         }
         if (scene.scene_type !== 'ian-layered'
-          || layered?.contract_version !== IAN_LAYERED_SCENE_RENDERER_VERSION
+          || ![IAN_LAYERED_SCENE_RENDERER_VERSION, IAN_LAYERED_ENTRY_RENDERER_VERSION]
+            .includes(layered?.contract_version)
           || !Array.isArray(layered.layers)
           || layered.layers.length < 1
           || images.length !== 1
@@ -599,7 +631,18 @@ export const validateSceneTransitions = ({plan, source}) => {
       || !/layer\.entry_frame/.test(source)
       || !/opacity/.test(source)
       || /validateIanSceneMotion|translate3d/.test(source))) {
-    throw new Error('composition does not consume the static Ian layered-scene renderer');
+    throw new Error('composition does not consume the Ian layered-scene renderer');
+  }
+  if (plan.scenes.some((scene) => scene.ian_layered_scene?.contract_version
+      === IAN_LAYERED_ENTRY_RENDERER_VERSION)
+    && (!/<Audio\b/.test(source)
+      || !/gain_multiplier/.test(source)
+      || !/softSettleOffset/.test(source)
+      || !/strokeDasharray/.test(source)
+      || !/strokeDashoffset/.test(source)
+      || !/<mask\b/.test(source)
+      || /const AnimatedLayer[\s\S]*?(?:Math\.random|scale\(|rotate\()[\s\S]*?export const IanLayeredScene/.test(source))) {
+    throw new Error('composition does not consume the approved Ian entry motion and SFX renderer');
   }
   if (plan.scenes.some((scene) => scene.visual_generation_route === 'comic-imagegen')) {
     if (!/<ComicScene\b/.test(source)

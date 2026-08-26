@@ -8,9 +8,11 @@ Core modules:
 
 - `assembly-plan`: plan generation, scene routing, inter-shot and intra-shot transition contracts.
 - `ian-layered-scene`: Ian narration-byte/layer-entry planning, package validation, pixel/alpha inspection, and deterministic final composition.
+- `ian-layered-entry-effects`: policy-bound soft-settle, SVG contour/path reveal, exact-frame SFX mapping, and fail-closed entry-plan validation.
+- `sound-effects`: immutable shared source SFX, license/source inventory, disk-byte validator, and episode cue inputs.
 - `audio-tools`: offline word timestamps and strict locked-narration comparison.
 - `episode-tooling`: file integrity, atomic JSON, and raster geometry contracts.
-- `video-scenes`: cover-only opening, narration, narrative, static Ian layered scenes, and plan-driven composition.
+- `video-scenes`: cover-only opening, narration, narrative, legacy/static and active animated Ian layered scenes, and plan-driven composition.
 - `render-qa`: media probing, full decode, and exact-role delivery locking.
 - `scene-transitions`, `watercolor-bloom`, `gen-think`: active shared render effects and visual families.
-- `full-frame-mask-sweep`: historical read-only lineage module; unfinished/new Ian scenes consume `ian-knowledge-video-layered-scene-v1` through `IanLayeredScene` and never import it.
+- `full-frame-mask-sweep`: historical read-only lineage module; unfinished/new Ian scenes consume `ian-knowledge-video-layered-scene-v2` through `IanLayeredScene` and never import it.

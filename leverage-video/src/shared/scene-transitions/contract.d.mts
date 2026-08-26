@@ -71,12 +71,15 @@ export type SceneTransitionContractV3 = Omit<SceneTransitionContractV2, 'contrac
   next_visual_generation_route: string;
   source_white_cat_present: boolean;
   next_white_cat_present: boolean;
+  white_cat_visual_style_id?: 'loose-line-vivid-watercolor' | 'twilight-neon-animation';
   recommended_transition: TransitionRecommendation;
   recommendation_source:
     | {authority: 'visual-generation-route'; route_id: string; rule_id: string}
     | {
       authority: 'white-cat-transition-policy';
-      rule_id: 'imagegen-white-cat-watercolor-bloom-priority-v1';
+      rule_id:
+        | 'imagegen-white-cat-watercolor-bloom-priority-v1'
+        | 'imagegen-white-cat-twilight-dissolve-priority-v1';
       matched_boundary_roles: readonly ('source' | 'next')[];
     }
     | {authority: 'shared-fallback'; rule_id: string};
@@ -114,6 +117,8 @@ export const TRANSITION_RECOMMENDATION_DIVERSITY_RULE_ID:
   'scene-transition-recommendation-diversity-v2';
 export const WHITE_CAT_TRANSITION_RECOMMENDATION_RULE_ID:
   'imagegen-white-cat-watercolor-bloom-priority-v1';
+export const TWILIGHT_WHITE_CAT_TRANSITION_RECOMMENDATION_RULE_ID:
+  'imagegen-white-cat-twilight-dissolve-priority-v1';
 
 export function getRecommendedTransition(input: {
   boundaryChangeClass: BoundaryChangeClass;
@@ -126,6 +131,7 @@ export function resolveTransitionRecommendation(input: {
   nextVisualGenerationRoute: string;
   sourceWhiteCatPresent?: boolean;
   nextWhiteCatPresent?: boolean;
+  whiteCatVisualStyleId?: 'loose-line-vivid-watercolor' | 'twilight-neon-animation';
 }): Pick<SceneTransitionContractV3, 'recommended_transition' | 'recommendation_source'>;
 
 export function applyTransitionRecommendationDiversity(rows: readonly {
@@ -147,7 +153,7 @@ export function applyTransitionRecommendationDiversity(rows: readonly {
     max_identical_visible_kind_share_uses: number;
     max_consecutive_identical_visible_kind_uses: 3;
     route_specific_recommendations_keep_priority: true;
-    white_cat_imagegen_watercolor_bloom_priority: true;
+    white_cat_style_bound_priority: true;
   };
   rows: readonly {
     source_shot_id: string;

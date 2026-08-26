@@ -138,6 +138,121 @@ class EpisodeWorkspaceValidatorTests(unittest.TestCase):
             )
         return item
 
+    def post_delivery_context(self) -> dict:
+        master = self.workspace / "assets/video/topic1-caption-free-master-v1.mp4"
+        master.write_bytes(b"verified-delivered-master")
+        master_path = master.relative_to(self.repo).as_posix()
+        master_checksum = sha256(master)
+
+        transaction = self.workspace / "schema/delivery-transaction-v1.json"
+        transaction.write_text(
+            json.dumps({"transaction_id": "delivery-topic1-v1"}) + "\n",
+            encoding="utf-8",
+        )
+        transaction_path = transaction.relative_to(self.repo).as_posix()
+        transaction_checksum = sha256(transaction)
+
+        report = self.workspace / "docs/post-delivery-bgm-recommendation-v1.md"
+        report.write_text(
+            "# BGM 推荐\n\n1. Track One — https://music.example/track-one\n",
+            encoding="utf-8",
+        )
+        report_path = report.relative_to(self.repo).as_posix()
+        report_checksum = sha256(report)
+
+        recommendations = []
+        for rank in range(1, 4):
+            recommendations.append({
+                "rank": rank,
+                "title": f"Track {rank}",
+                "creator": f"Creator {rank}",
+                "source_name": "Official Music Library",
+                "audition_url": f"https://music.example/track-{rank}",
+                "license_url": f"https://music.example/track-{rank}/license",
+                "license_type": "library-license",
+                "attribution_requirement": "not required",
+                "commercial_boundary": "verify for the recorded distribution intent",
+                "platform_restrictions": "none recorded",
+                "risk_level": "low",
+                "verified_at": "2026-08-26T20:00:00+08:00",
+                "bpm": None,
+                "bpm_basis": "unpublished",
+                "emotion": "steady and reflective",
+                "fit_reason": "supports knowledge narration without masking speech",
+                "editing_note": "loop under narration and fade at the ending",
+            })
+
+        artifact = {
+            "contract_version": "knowledge-video-post-delivery-bgm-recommendation-v1",
+            "status": "complete",
+            "scope": "advisory_only_no_media_mutation",
+            "delivery_transaction_manifest": {
+                "path": transaction_path,
+                "checksum_sha256": transaction_checksum,
+            },
+            "analysis_master": {
+                "role": "caption_free_master",
+                "path": master_path,
+                "checksum_sha256": master_checksum,
+            },
+            "recommendation_basis": {
+                "content_track": "knowledge_explainer",
+                "topic": "test topic",
+                "emotion_arc": "question to insight",
+                "pacing": "steady narration with short visual beats",
+                "narration_and_sfx": "speech first with sparse effects",
+                "distribution_intent": "unknown",
+            },
+            "recommendations": recommendations,
+            "mutation_evidence": {
+                "music_downloaded": False,
+                "music_mixed": False,
+                "delivered_master_changed": False,
+            },
+            "report": {
+                "path": report_path,
+                "checksum_sha256": report_checksum,
+            },
+        }
+        artifact_file = self.workspace / "schema/post-delivery-bgm-recommendation-v1.json"
+        artifact_file.write_text(
+            json.dumps(artifact, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        artifact_path = artifact_file.relative_to(self.repo).as_posix()
+        return {
+            "post_delivery_bgm_recommendation_policy": "required-v1",
+            "render_outputs": {
+                "caption_free_master": {
+                    "path": master_path,
+                    "checksum_sha256": master_checksum,
+                },
+            },
+            "delivery": {
+                "status": "delivered",
+                "result": "pass",
+                "required_delivery_roles": ["caption_free_master"],
+                "delivered_roles": ["caption_free_master"],
+                "role_set_equality_result": "pass",
+                "transaction_manifest_path": transaction_path,
+                "transaction_manifest_checksum_sha256": transaction_checksum,
+                "outputs": {
+                    "caption_free_master": {
+                        "path": "/external/topic1-caption-free-master-v1.mp4",
+                        "checksum_sha256": master_checksum,
+                    },
+                },
+            },
+            "post_delivery_bgm_recommendation": {
+                "contract_version": "knowledge-video-post-delivery-bgm-recommendation-v1",
+                "status": "complete",
+                "artifact_path": artifact_path,
+                "artifact_checksum_sha256": sha256(artifact_file),
+                "report_path": report_path,
+                "report_checksum_sha256": report_checksum,
+            },
+        }
+
     def errors(self) -> list[str]:
         return MODULE.validate_episode_workspace(self.repo, self.workspace)
 
@@ -187,6 +302,192 @@ class EpisodeWorkspaceValidatorTests(unittest.TestCase):
         }
         item["ian_scene_plan"] = plan
         item["ian_scene_plan_sha256"] = MODULE._canonical_sha256(plan)
+        return item
+
+    def attach_ian_v2_package(self, item: dict) -> dict:
+        layer_ids = [layer["layer_id"] for layer in item["ian_scene_plan"]["layers"]]
+
+        def write_member(name: str, payload: bytes) -> tuple[str, str]:
+            target = self.workspace / f"assets/image/ian/{name}.png"
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(payload)
+            return target.relative_to(self.repo).as_posix(), sha256(target)
+
+        source_path, source_checksum = write_member("source-master", b"source-master")
+        normalized_path, normalized_checksum = write_member(
+            "normalized-master", b"normalized-master"
+        )
+        background_path, background_checksum = write_member("background", b"background")
+        pre_text = [write_member(f"{layer_id}-pre-text", b"pre-text-" + layer_id.encode())
+                    for layer_id in layer_ids]
+        final_layers = [write_member(layer_id, b"layer-" + layer_id.encode())
+                        for layer_id in layer_ids]
+        final_path, final_checksum = write_member("final", b"final")
+        members = [
+            {
+                "member_role": "source-master",
+                "layer_id": "source-master",
+                "path": source_path,
+                "checksum_sha256": source_checksum,
+                "width": 1672,
+                "height": 941,
+                "has_alpha": False,
+            },
+            {
+                "member_role": "normalized-master",
+                "layer_id": "normalized-master",
+                "path": normalized_path,
+                "checksum_sha256": normalized_checksum,
+                "width": 1920,
+                "height": 1080,
+                "has_alpha": False,
+            },
+            {
+                "member_role": "background",
+                "layer_id": "background",
+                "path": background_path,
+                "checksum_sha256": background_checksum,
+                "width": 1920,
+                "height": 1080,
+                "has_alpha": False,
+            },
+            *[
+                {
+                    "member_role": "pre-text-layer",
+                    "layer_id": layer_id,
+                    "path": path,
+                    "checksum_sha256": checksum,
+                    "width": 1920,
+                    "height": 1080,
+                    "has_alpha": True,
+                }
+                for layer_id, (path, checksum) in zip(layer_ids, pre_text, strict=True)
+            ],
+            *[
+                {
+                    "member_role": "semantic-layer",
+                    "layer_id": layer_id,
+                    "path": path,
+                    "checksum_sha256": checksum,
+                    "width": 1920,
+                    "height": 1080,
+                    "has_alpha": True,
+                }
+                for layer_id, (path, checksum) in zip(layer_ids, final_layers, strict=True)
+            ],
+            {
+                "member_role": "final-composite",
+                "layer_id": "final-composite",
+                "path": final_path,
+                "checksum_sha256": final_checksum,
+                "width": 1920,
+                "height": 1080,
+                "has_alpha": False,
+            },
+        ]
+        prompt = self.workspace / "assets/narration/ian-master-prompt.txt"
+        prompt.write_text("16:9 landscape composition\nno visible text\n", encoding="utf-8")
+        prompt_binding = {
+            "path": prompt.relative_to(self.repo).as_posix(),
+            "checksum_sha256": sha256(prompt),
+        }
+        references: list[dict] = []
+        manifest = {
+            "contract_version": "ian-knowledge-video-layered-scene-v2",
+            "queue_item_id": item["asset_id"],
+            "scene_plan": item["ian_scene_plan"],
+            "scene_plan_sha256": item["ian_scene_plan_sha256"],
+            "master_generation": {
+                "contract_version": "ian-gpt-image-2-text-free-master-v1",
+                "generator": "codex-native-imagegen",
+                "model_id": "gpt-image-2",
+                "prompt": prompt_binding,
+                "reference_inputs": references,
+                "source_master": {
+                    "path": source_path,
+                    "checksum_sha256": source_checksum,
+                    "width": 1672,
+                    "height": 941,
+                    "role": "text-free-complete-master-source",
+                    "has_alpha": False,
+                },
+            },
+            "model_provenance": {
+                "contract_version": "codex-native-imagegen-gpt-image-2-provenance-v1",
+                "canonical_model": "gpt-image-2",
+                "evidence_kind": "embedded-c2pa-software-agent-observation-v1",
+                "source_master_checksum_sha256": source_checksum,
+                "expected_software_agent": {"name": "gpt-image", "version": "2.0"},
+            },
+            "normalized_master": {
+                "path": normalized_path,
+                "checksum_sha256": normalized_checksum,
+                "width": 1920,
+                "height": 1080,
+                "role": "text-free-complete-master-normalized",
+                "has_alpha": False,
+            },
+            "background": {
+                "path": background_path,
+                "checksum_sha256": background_checksum,
+                "width": 1920,
+                "height": 1080,
+                "role": "static-paper-background",
+                "has_alpha": False,
+            },
+            "pre_text_layers": [
+                {
+                    "layer_id": layer_id,
+                    "path": path,
+                    "checksum_sha256": checksum,
+                    "width": 1920,
+                    "height": 1080,
+                    "role": "transparent-semantic-element-pre-text",
+                    "has_alpha": True,
+                }
+                for layer_id, (path, checksum) in zip(layer_ids, pre_text, strict=True)
+            ],
+            "layers": [
+                {
+                    "layer_id": layer_id,
+                    "path": path,
+                    "checksum_sha256": checksum,
+                    "width": 1920,
+                    "height": 1080,
+                    "role": "transparent-semantic-element",
+                    "has_alpha": True,
+                }
+                for layer_id, (path, checksum) in zip(layer_ids, final_layers, strict=True)
+            ],
+            "final_composite": {
+                "path": final_path,
+                "checksum_sha256": final_checksum,
+                "width": 1920,
+                "height": 1080,
+                "role": "final-composite-review-raster",
+                "has_alpha": False,
+            },
+        }
+        manifest_file = self.workspace / "schema/ian-layered-scene-v2.json"
+        manifest_file.write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
+        item.update(
+            qa_contract_version="ian-layered-scene-qa-v2",
+            scene_package_manifest_path=manifest_file.relative_to(self.repo).as_posix(),
+            scene_package_manifest_checksum_sha256=sha256(manifest_file),
+            ian_scene_package_members=members,
+            actual_reference_inputs=references,
+            generation_lineage=[{
+                "stage": "complete-master-generation",
+                "generation_mode": "codex-native-imagegen-gpt-image-2-text-free-master-v1",
+                "model_id": "gpt-image-2",
+                "prompt": prompt_binding,
+                "reference_inputs": references,
+                "output": {"path": source_path, "checksum_sha256": source_checksum},
+                "selection_status": "selected",
+            }],
+            path=final_path,
+            checksum_sha256=final_checksum,
+        )
         return item
 
     def test_category_classification_is_unchanged(self) -> None:
@@ -353,6 +654,25 @@ class EpisodeWorkspaceValidatorTests(unittest.TestCase):
         self.assertTrue(any("manifest path" in error for error in errors))
         self.assertTrue(any("package QA/member projection is incomplete" in error for error in errors))
 
+    def test_qa_passed_ian_accepts_active_v2_master_first_projection(self) -> None:
+        item = self.attach_ian_v2_package(
+            self.ian_item(status="qa_passed_pending_final_review")
+        )
+        self.write_state(item)
+        self.assertEqual(self.errors(), [])
+
+    def test_qa_passed_ian_rejects_v1_package_in_unfinished_episode(self) -> None:
+        item = self.attach_ian_v2_package(
+            self.ian_item(status="qa_passed_pending_final_review")
+        )
+        manifest_file = self.repo / item["scene_package_manifest_path"]
+        manifest = json.loads(manifest_file.read_text(encoding="utf-8"))
+        manifest["contract_version"] = "ian-knowledge-video-layered-scene-v1"
+        manifest_file.write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
+        item["scene_package_manifest_checksum_sha256"] = sha256(manifest_file)
+        self.write_state(item)
+        self.assertTrue(any("manifest is stale" in error for error in self.errors()))
+
     def visible_text_review_state(self, *, row_approval: bool = False) -> dict:
         storyboard_path = "leverage-video/src/topic1/assets/narration/storyboard-v1.md"
         storyboard = self.repo / storyboard_path
@@ -489,6 +809,85 @@ class EpisodeWorkspaceValidatorTests(unittest.TestCase):
         self.assertTrue(any(
             "must not carry per-shot approval evidence" in error
             for error in self.errors()
+        ))
+
+    def test_completed_legacy_delivery_without_bgm_recommendation_remains_valid(self) -> None:
+        self.write_state(
+            self.item(
+                status="approved",
+                qa_contract="ordinary-imagegen-white-cat-master-qa-v1",
+                include_anatomy=False,
+            ),
+            current_phase="delivered",
+        )
+        self.assertEqual(self.errors(), [])
+
+    def test_waiting_post_delivery_bgm_phase_accepts_passing_delivery(self) -> None:
+        context = self.post_delivery_context()
+        context.pop("post_delivery_bgm_recommendation")
+        self.write_state(
+            self.item(
+                status="approved",
+                qa_contract="ordinary-imagegen-white-cat-master-qa-v1",
+                include_anatomy=False,
+            ),
+            current_phase="awaiting_post_delivery_bgm_recommendation",
+            extra_state=context,
+        )
+        self.assertEqual(self.errors(), [])
+
+    def test_required_final_delivery_rejects_missing_bgm_recommendation(self) -> None:
+        context = self.post_delivery_context()
+        context.pop("post_delivery_bgm_recommendation")
+        self.write_state(
+            self.item(
+                status="approved",
+                qa_contract="ordinary-imagegen-white-cat-master-qa-v1",
+                include_anatomy=False,
+            ),
+            current_phase="delivered",
+            extra_state=context,
+        )
+        self.assertTrue(any(
+            "post-delivery BGM recommendation evidence is missing" in error
+            for error in self.errors()
+        ))
+
+    def test_required_final_delivery_accepts_valid_bgm_recommendation(self) -> None:
+        self.write_state(
+            self.item(
+                status="approved",
+                qa_contract="ordinary-imagegen-white-cat-master-qa-v1",
+                include_anatomy=False,
+            ),
+            current_phase="delivered",
+            extra_state=self.post_delivery_context(),
+        )
+        self.assertEqual(self.errors(), [])
+
+    def test_post_delivery_bgm_recommendation_must_not_mutate_media(self) -> None:
+        context = self.post_delivery_context()
+        artifact_file = self.repo / context["post_delivery_bgm_recommendation"]["artifact_path"]
+        artifact = json.loads(artifact_file.read_text(encoding="utf-8"))
+        artifact["mutation_evidence"]["music_mixed"] = True
+        artifact_file.write_text(
+            json.dumps(artifact, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        context["post_delivery_bgm_recommendation"][
+            "artifact_checksum_sha256"
+        ] = sha256(artifact_file)
+        self.write_state(
+            self.item(
+                status="approved",
+                qa_contract="ordinary-imagegen-white-cat-master-qa-v1",
+                include_anatomy=False,
+            ),
+            current_phase="delivered",
+            extra_state=context,
+        )
+        self.assertTrue(any(
+            "must preserve delivered media" in error for error in self.errors()
         ))
 
     def test_malformed_episode_state_fails_closed(self) -> None:

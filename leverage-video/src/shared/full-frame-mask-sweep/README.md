@@ -1,6 +1,6 @@
 # FullFrameMaskSweep
 
-> 历史只读模块。未完成与新建 Ian 项目统一使用 `ian-knowledge-video-layered-scene-v1` 和 `IanLayeredScene`：背景及元素固定不动，只按口播时点做透明层渐显，不消费本组件。任何新建、修改、迁移、revoice、预览或渲染均不得导入或消费它。`ian-static-full-frame-v1` 与 `ian-subtle-raster-motion-v1` 同样只属于已完成历史。保留源码与测试仅用于核验既有成片血缘。
+> 历史只读模块。未完成与新建 Ian 项目统一使用 `ian-knowledge-video-layered-scene-v2` 和 `IanLayeredScene`：背景及元素固定不动，只按口播时点做透明层渐显，不消费本组件。任何新建、修改、迁移、revoice、预览或渲染均不得导入或消费它。`ian-static-full-frame-v1` 与 `ian-subtle-raster-motion-v1` 同样只属于已完成历史。保留源码与测试仅用于核验既有成片血缘。
 
 旧行为：图片保持不动，一个与当前画布同尺寸的遮罩从左向右移动，最后完整图片固定停留 3 秒。
 

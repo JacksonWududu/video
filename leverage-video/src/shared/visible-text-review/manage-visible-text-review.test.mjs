@@ -52,6 +52,7 @@ const buildRepository = () => {
   fs.writeFileSync(path.join(repositoryRoot, directionRelative), directionBytes);
   const state = {
     workspace_path: episodeWorkspace,
+    phase: 'visual_direction_review_approved',
     current_phase: 'visual_direction_review_approved',
     workflow_approval_mode: {approval_mode: 'one_click'},
     visual_direction_review: {
@@ -62,6 +63,7 @@ const buildRepository = () => {
     },
     visible_text_review: null,
     transition_review: {status: 'not_started'},
+    gates: {visible_text_review: 'pending'},
     blockers: [],
     superseded_artifacts: [],
   };
@@ -78,6 +80,7 @@ test('present writes one complete batch and pauses both approval modes', () => {
   });
   assert.equal(artifacts.review.status, 'pending');
   assert.equal(artifacts.review.rows.length, 1);
+  assert.equal(artifacts.state.phase, 'awaiting_visible_text_review');
   assert.equal(artifacts.state.current_phase, 'awaiting_visible_text_review');
   assert.equal(artifacts.state.visible_text_review.status, 'pending');
   writeVisibleTextReviewArtifacts(artifacts, {repositoryRoot: fixture.repositoryRoot});
@@ -100,8 +103,10 @@ test('one batch approval advances to the pre-transition phase without row approv
   });
   assert.equal(approved.review.status, 'approved');
   assert.ok(approved.review.rows.every((row) => !Object.hasOwn(row, 'approval')));
+  assert.equal(approved.state.phase, 'visible_text_review_approved');
   assert.equal(approved.state.current_phase, 'visible_text_review_approved');
   assert.equal(approved.state.visible_text_review.status, 'approved');
+  assert.equal(approved.state.gates.visible_text_review, 'approved');
   assert.equal(approved.state.visible_text_review.exact_decision_message, '批准全部可见文字');
 });
 

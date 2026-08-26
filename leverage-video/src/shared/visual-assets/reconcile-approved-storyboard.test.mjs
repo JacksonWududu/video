@@ -5,6 +5,7 @@ import test from 'node:test';
 
 import {buildReconciledState} from './reconcile-approved-storyboard.mjs';
 import {parseStoryboardSummary} from '../visual-direction-review-form/contract.mjs';
+import {canonicalJson} from '../ian-layered-scene/contract.mjs';
 
 const ROOT = new URL('../../../../', import.meta.url);
 
@@ -316,6 +317,97 @@ test('initializes a fresh one-click storyboard only from policy-bound direction 
   assert.equal(result.visual_asset_review.mode, 'one_click_final_review_v1');
   assert.equal(result.visual_asset_review.policy_sha256, policySha256);
   assert.equal(result.visual_asset_review.queue[0].visual_direction_presented_map_sha256, direction.presented_map_sha256);
+
+  const evidencePath = 'leverage-video/src/shared/visual-assets/reconcile-approved-storyboard.test.mjs';
+  const evidenceChecksum = crypto.createHash('sha256')
+    .update(fs.readFileSync(new URL(evidencePath, ROOT)))
+    .digest('hex');
+  const migrated = structuredClone(result);
+  migrated.phase = 'storyboard_policy_authorized';
+  migrated.current_phase = 'storyboard_policy_authorized';
+  migrated.visual_asset_review.status = 'invalidated_pending_storyboard_rebind';
+  migrated.visual_asset_review.current_asset_id = null;
+  migrated.visual_asset_review.active_storyboard_binding = null;
+  migrated.visual_asset_review.queue = migrated.visual_asset_review.queue.map((item) => (
+    item.visual_generation_route === 'ian-handdrawn-ppt'
+      ? {
+          ...item,
+          status: 'superseded',
+          active_for_current_storyboard: false,
+          superseded_reason: 'flattened_Ian_raster_replaced_by_layered_scene_contract',
+        }
+      : {
+          ...item,
+          status: 'qa_passed_pending_final_review',
+          active_for_current_storyboard: false,
+          rebind_status: 'preserved_exact_bytes_pending_current_storyboard_rebind',
+          path: evidencePath,
+          checksum_sha256: evidenceChecksum,
+          qa_evidence_path: evidencePath,
+          qa_evidence_checksum_sha256: evidenceChecksum,
+          technical_qa: {result: 'pass'},
+          semantic_qa: {result: 'pass'},
+          visible_text_qa: {result: 'pass'},
+          visual_qa: {result: 'pass'},
+        }
+  ));
+  const preserved = migrated.visual_asset_review.queue.filter(
+    (item) => item.rebind_status === 'preserved_exact_bytes_pending_current_storyboard_rebind',
+  );
+  const preservedDigest = crypto.createHash('sha256').update(Buffer.from(canonicalJson(
+    preserved.map((item) => ({
+      asset_id: item.asset_id,
+      path: item.path,
+      checksum_sha256: item.checksum_sha256,
+      status: item.status,
+    })),
+  ))).digest('hex');
+  migrated.superseded_artifacts = [{
+    record_type: 'unfinished_ian_layered_scene_contract_migration',
+    preserved_non_ian_asset_count: preserved.length,
+    preserved_non_ian_ordered_binding_digest_sha256: preservedDigest,
+    preservation_policy: 'preserve_exact_historical_bytes_and_rebind_unchanged_non_Ian_assets_later',
+  }];
+
+  const rebound = buildReconciledState({
+    state: migrated,
+    storyboardBytes,
+    directionBytes,
+    rhythmBytes,
+    actionScheduleBytes,
+    reconciledAt: '2026-08-24T11:00:00+08:00',
+  });
+  const reboundActive = rebound.visual_asset_review.queue.filter(
+    (item) => item.active_for_current_storyboard !== false,
+  );
+  const reboundIan = reboundActive.filter(
+    (item) => item.visual_generation_route === 'ian-handdrawn-ppt',
+  );
+  const reboundPreserved = reboundActive.filter(
+    (item) => item.visual_generation_route !== 'ian-handdrawn-ppt',
+  );
+  assert.equal(reboundActive.length, result.visual_asset_review.queue.length);
+  assert.ok(reboundIan.length > 0);
+  assert.ok(reboundIan.every((item) => /-ian-v02$/.test(item.asset_id)
+    && item.status === 'pending_generation'));
+  assert.ok(reboundPreserved.every((item) => item.status === 'qa_passed_pending_final_review'
+    && item.path === evidencePath
+    && item.rebind_status === undefined));
+  assert.equal(rebound.visual_asset_review.current_asset_id, reboundIan[0].asset_id);
+  assert.equal(rebound.visual_asset_review.storyboard_sha256, storyboardChecksum);
+  assert.equal(new Set(rebound.visual_asset_review.queue.map((item) => item.asset_id)).size,
+    rebound.visual_asset_review.queue.length);
+
+  const stalePreservation = structuredClone(migrated);
+  stalePreservation.superseded_artifacts[0].preserved_non_ian_ordered_binding_digest_sha256 = '0'.repeat(64);
+  assert.throws(() => buildReconciledState({
+    state: stalePreservation,
+    storyboardBytes,
+    directionBytes,
+    rhythmBytes,
+    actionScheduleBytes,
+    reconciledAt: '2026-08-24T11:00:00+08:00',
+  }), /preserved non-Ian binding digest is stale/);
 
   const fabricated = structuredClone(direction);
   fabricated.rows[0].user_selection.user_has_reviewed_specific_map = true;

@@ -4,6 +4,7 @@ import test from 'node:test';
 
 import {
   buildKnowledgeVideoAssemblyPlan as buildPlanWithVerification,
+  isActiveStoryboardVisualRhythmArtifactBasename,
   isActiveVisualDirectionArtifactBasename,
 } from './build-assembly-plan.mjs';
 import {
@@ -22,10 +23,20 @@ import {
 } from '../action-state-schedule/contract.mjs';
 import {buildDefaultIntraShotTransitions} from '../intra-shot-transitions/contract.mjs';
 import {
+  WHITE_CAT_VISUAL_STYLE_OPTIONS,
+  buildWhiteCatVisualStyleSelectionSha256,
   buildVisualDensitySelectionSha256,
   buildWorkflowApprovalModeSha256,
 } from '../workflow-approval/contract.mjs';
-import {sha256Canonical, sha256Text} from '../ian-layered-scene/contract.mjs';
+import {
+  IAN_CANONICAL_STYLE_ANCHOR_PATH,
+  sha256Canonical,
+  sha256Text,
+} from '../ian-layered-scene/contract.mjs';
+import {
+  IAN_LAYERED_ENTRY_EFFECTS_POLICY_SHA256,
+  buildIanLayeredEntryEffectsMapSha256,
+} from '../ian-layered-entry-effects/contract.mjs';
 
 const buildVisualDirectionReview = () => {
   const review = {
@@ -193,8 +204,11 @@ const baseInput = {
 
 test('accepts immutable approved v3 review artifacts but rejects arbitrary archive names', () => {
   assert.equal(isActiveVisualDirectionArtifactBasename('per-shot-visual-direction-review-v3-approved-v2.json'), true);
+  assert.equal(isActiveVisualDirectionArtifactBasename('per-shot-visual-direction-review-v3-revision-02.json'), true);
   assert.equal(isActiveVisualDirectionArtifactBasename('per-shot-visual-direction-review-v3-approved-v0.json'), false);
   assert.equal(isActiveVisualDirectionArtifactBasename('per-shot-visual-direction-review-v3-draft-v2.json'), false);
+  assert.equal(isActiveStoryboardVisualRhythmArtifactBasename('storyboard-visual-rhythm-v2-revision-02.json'), true);
+  assert.equal(isActiveStoryboardVisualRhythmArtifactBasename('storyboard-visual-rhythm-v2-draft.json'), false);
 });
 
 const buildComicInput = () => {
@@ -393,8 +407,12 @@ const buildIanLayeredPackage = (input, shot) => {
   const raster = (path, checksum, role, hasAlpha) => ({
     path, checksum_sha256: checksum, width: 1920, height: 1080, role, has_alpha: hasAlpha,
   });
+  const sourceMaster = raster(
+    `${input.episodeWorkspace}/assets/image/${shot.shot_id}-source-master.png`,
+    '1'.repeat(64), 'text-free-complete-master-source', false,
+  );
   return {
-    contract_version: 'ian-knowledge-video-layered-scene-v1',
+    contract_version: 'ian-knowledge-video-layered-scene-v2',
     episode_workspace: input.episodeWorkspace,
     queue_item_id: shot.assets[0].asset_id,
     shot_id: shot.shot_id,
@@ -417,6 +435,11 @@ const buildIanLayeredPackage = (input, shot) => {
     scene_plan: scenePlan,
     scene_plan_sha256: sha256Canonical(scenePlan),
     generation_constraints: {
+      imagegen_call_count: 1, text_free_complete_master: true,
+      independent_member_generation: false,
+      deterministic_master_normalization: true,
+      deterministic_semantic_region_split: true,
+      deterministic_layer_text_overlay: true,
       background_raster_count: 1, final_composite_raster_count: 1,
       layer_rasters_are_full_canvas_rgba: true,
       scene_translation: false, scene_scaling: false,
@@ -425,10 +448,73 @@ const buildIanLayeredPackage = (input, shot) => {
       automatic_page_number: false, automatic_title: false,
       automatic_subtitle: false, automatic_labels: false, signature: false,
     },
+    master_generation: {
+      contract_version: 'ian-gpt-image-2-text-free-master-v1',
+      generator: 'codex-native-imagegen',
+      model_id: 'gpt-image-2',
+      prompt: {
+        path: `${input.episodeWorkspace}/assets/narration/${shot.shot_id}-ian-master-prompt.txt`,
+        checksum_sha256: '2'.repeat(64),
+      },
+      reference_inputs: [{
+        role: 'visual_style_reference_only',
+        path: IAN_CANONICAL_STYLE_ANCHOR_PATH,
+        checksum_sha256: '3'.repeat(64),
+      }],
+      selection_status: 'selected',
+      visible_text_mode: 'none',
+      source_master: sourceMaster,
+      visual_qa: {
+        result: 'pass',
+        inspection: 'human-original-resolution-v1',
+        observed_visible_text: [],
+        observed_pseudo_text: false,
+      },
+    },
+    model_provenance: {
+      contract_version: 'codex-native-imagegen-gpt-image-2-provenance-v1',
+      generator: 'codex-native-imagegen',
+      canonical_model: 'gpt-image-2',
+      evidence_kind: 'embedded-c2pa-software-agent-observation-v1',
+      source_master_checksum_sha256: sourceMaster.checksum_sha256,
+      expected_software_agent: {name: 'gpt-image', version: '2.0'},
+    },
+    normalized_master: raster(
+      `${input.episodeWorkspace}/assets/image/${shot.shot_id}-normalized-master.png`,
+      '8'.repeat(64), 'text-free-complete-master-normalized', false,
+    ),
+    split_spec: {
+      contract_version: 'ian-semantic-region-alpha-split-v1',
+      normalization: {
+        fit: 'cover', position: 'centre', kernel: 'lanczos3', stretch: false, padding: false,
+      },
+      matte_rgb: [244, 240, 231],
+      alpha_distance_low: 6,
+      alpha_distance_high: 24,
+      blur_sigma_px: 0.8,
+      paper_background_rgba: [244, 240, 231, 255],
+      minimum_inter_layer_gutter_px: 8,
+      outside_union_max_visible_pixels: 1024,
+      layers: [{layer_id: 'L01', bbox: {x: 100, y: 100, width: 800, height: 700}}],
+    },
     background: raster(
       `${input.episodeWorkspace}/assets/image/${shot.shot_id}-background.png`,
       '4'.repeat(64), 'static-paper-background', false,
     ),
+    pre_text_layers: [{
+      ...scenePlan.layers[0],
+      ...raster(
+        `${input.episodeWorkspace}/assets/image/${shot.shot_id}-L01-pre-text.png`,
+        '9'.repeat(64), 'transparent-semantic-element-pre-text', true,
+      ),
+    }],
+    text_overlay: {
+      contract_version: 'ian-deterministic-layer-text-overlay-v1',
+      mode: 'none',
+      font: null,
+      minimum_inset_px: 8,
+      labels: [],
+    },
     layers: [{
       ...scenePlan.layers[0],
       ...raster(
@@ -529,12 +615,26 @@ const buildV3Input = ({characterSchedule = false} = {}) => {
     modified_shot_ids: input.shots.map((shot) => shot.shot_id),
   };
   input.visualDirectionReview.path = 'leverage-video/src/example/schema/per-shot-visual-direction-review-v3.json';
+  const whiteCatStyleBinding = {
+    contract_version: 'white-cat-visual-style-selection-v1',
+    style_id: 'loose-line-vivid-watercolor',
+    treatment_profile_id: 'imagegen-watercolor-narrative',
+    visual_cohesion_profile_id: 'warm-paper-watercolor-cohesion-v1',
+    selection_sha256: 'f'.repeat(64),
+  };
+  input.visualDirectionReview.white_cat_visual_style_binding = whiteCatStyleBinding;
   input.visualDirectionReview.rows.forEach((row, index) => {
+    row.white_cat_visual_style_id = whiteCatStyleBinding.style_id;
+    row.white_cat_visual_style_selection_sha256 = whiteCatStyleBinding.selection_sha256;
+    row.visual_cohesion_profile_id = whiteCatStyleBinding.visual_cohesion_profile_id;
     row.visible_text_mode = 'none';
     row.exact_visible_text = null;
     row.visible_text_placement = null;
     row.local_video_source_path = null;
     Object.assign(row.user_selection, {
+      white_cat_visual_style_id: whiteCatStyleBinding.style_id,
+      white_cat_visual_style_selection_sha256: whiteCatStyleBinding.selection_sha256,
+      visual_cohesion_profile_id: whiteCatStyleBinding.visual_cohesion_profile_id,
       visible_text_mode: 'none',
       exact_visible_text: null,
       visible_text_placement: null,
@@ -580,7 +680,7 @@ const buildV3Input = ({characterSchedule = false} = {}) => {
   ianShot.assets[0].checksum_sha256 = '6'.repeat(64);
   ianShot.ian_layered_scene = {
     package_manifest: {
-      path: `${input.episodeWorkspace}/schema/visual-assets/S02-ian-layered-scene-v1.json`,
+      path: `${input.episodeWorkspace}/schema/visual-assets/S02-ian-layered-scene-v2.json`,
       checksum_sha256: '7'.repeat(64),
     },
     render_assets: {
@@ -958,6 +1058,79 @@ test('v3 continuity cut adds no transition duration and records semantic boundar
   assert.deepEqual(plan.qa_contract.ian_layered_scene_packages.shot_ids, ['S02']);
 });
 
+test('v3 Ian assembly consumes policy-bound entry motion and louder exact-frame SFX', () => {
+  const input = buildV3Input();
+  const plan = buildKnowledgeVideoAssemblyPlan(input, {
+    verifySharedReuseEvidence: passingVerifier,
+    verifyIanLayeredScenePackageEvidence: (value) => {
+      const evidence = passingIanLayeredSceneVerifier(value);
+      const record = evidence.records[0];
+      const entryEffects = {
+        contract_version: 'ian-layered-entry-effects-v2',
+        shot_id: 'S02',
+        scene_plan_sha256: record.package.scene_plan_sha256,
+        package_manifest: structuredClone(record.package_manifest),
+        fps: 30,
+        duration_frames: record.package.timing.duration_frames,
+        policy_authorization: {
+          status: 'policy_authorized',
+          policy_sha256: IAN_LAYERED_ENTRY_EFFECTS_POLICY_SHA256,
+          user_has_reviewed_specific_map: false,
+        },
+        sound_effect_library: {
+          path: 'leverage-video/src/shared/sound-effects/manifest.json',
+          checksum_sha256: 'e'.repeat(64),
+        },
+        mix_policy: {
+          narration_gain: 1,
+          normalize: false,
+          peak_ceiling_dbfs: -1,
+          narration_mean_loudness_change_max_db: 0.5,
+          overflow_action: 'lower-sfx-bus-uniformly',
+        },
+        language_families: ['soft-settle-v1'],
+        layer_count: 1,
+        layers: [{
+          layer_id: 'L01',
+          entry_frame: 0,
+          element_class: 'paper_card',
+          language_family: 'soft-settle-v1',
+          effect: {
+            contract_version: 'soft-settle-v1', duration_frames: 8,
+            opacity_easing: 'linear', translation_profile: 'fixed-damped-v1',
+            axis: 'x', direction: 1, max_displacement_px: 10, edge_margin_px: 24,
+          },
+          sound_effect: {
+            contract_version: 'ian-layer-entry-sfx-cue-v2', role: 'paper_slide',
+            selection_reason: '关键纸卡入场',
+            source: {
+              asset_id: 'paper-slide-mixkit-1530',
+              path: 'leverage-video/src/shared/sound-effects/assets/paper-slide-mixkit-1530.wav',
+              checksum_sha256: '1'.repeat(64),
+              trim_start_sample: 0,
+              trim_end_sample_exclusive: 8820,
+            },
+            derived_asset: {
+              asset: 'example/assets/audio/sfx/S02-L01-paper-slide.wav',
+              checksum_sha256: '2'.repeat(64), sample_rate_hz: 44100, channels: 2,
+            },
+            cue_frame: 0, cue_sample: 0, gain_multiplier: 0.17,
+          },
+        }],
+        presented_map_sha256: '',
+      };
+      entryEffects.presented_map_sha256 = buildIanLayeredEntryEffectsMapSha256(entryEffects);
+      record.entry_effects = entryEffects;
+      return evidence;
+    },
+  });
+  const binding = plan.scenes[1].ian_layered_scene;
+  assert.equal(binding.contract_version, 'ian-layered-entry-effects-renderer-v2');
+  assert.equal(binding.entry_effects.layers[0].effect.contract_version, 'soft-settle-v1');
+  assert.equal(binding.entry_effects.layers[0].sound_effect.cue_frame, 0);
+  assert.equal(binding.entry_effects.layers[0].sound_effect.gain_multiplier, 0.17);
+});
+
 test('v3 rejects retired Ian pan/zoom fields instead of translating the full raster', () => {
   const input = buildV3Input();
   input.shots[1].internal_motion_contract = 'ian-subtle-raster-motion-v1';
@@ -1163,11 +1336,24 @@ test('legacy v2 Comic direction evidence is readable but no Comic assembly is al
     modified_shot_ids: input.shots.map((shot) => shot.shot_id),
   };
   input.visualDirectionReview.path = 'leverage-video/src/example/schema/per-shot-visual-direction-review-v3.json';
+  input.visualDirectionReview.white_cat_visual_style_binding = {
+    contract_version: 'white-cat-visual-style-selection-v1',
+    style_id: 'loose-line-vivid-watercolor',
+    treatment_profile_id: 'imagegen-watercolor-narrative',
+    visual_cohesion_profile_id: 'warm-paper-watercolor-cohesion-v1',
+    selection_sha256: 'f'.repeat(64),
+  };
   input.visualDirectionReview.rows.forEach((row, index) => {
+    row.white_cat_visual_style_id = 'loose-line-vivid-watercolor';
+    row.white_cat_visual_style_selection_sha256 = 'f'.repeat(64);
+    row.visual_cohesion_profile_id = 'warm-paper-watercolor-cohesion-v1';
     row.visible_text_mode = 'none';
     row.exact_visible_text = null;
     row.visible_text_placement = null;
     Object.assign(row.user_selection, {
+      white_cat_visual_style_id: 'loose-line-vivid-watercolor',
+      white_cat_visual_style_selection_sha256: 'f'.repeat(64),
+      visual_cohesion_profile_id: 'warm-paper-watercolor-cohesion-v1',
       visible_text_mode: 'none',
       exact_visible_text: null,
       visible_text_placement: null,
@@ -1269,9 +1455,33 @@ test('v3 assembly validates the mechanical action-state schedule and exact asset
 test('new assembly binds explicit workflow selection, v2 rhythm, and v4 schedule', () => {
   const input = buildV3Input({characterSchedule: true});
   const gate2ScriptSha256 = '4'.repeat(64);
+  const whiteCatStyle = {
+    contract_version: 'white-cat-visual-style-selection-v1',
+    gate2_script_sha256: gate2ScriptSha256,
+    style_id: 'loose-line-vivid-watercolor',
+    ...WHITE_CAT_VISUAL_STYLE_OPTIONS['loose-line-vivid-watercolor'],
+    decision: {
+      status: 'selected',
+      exact_message: '选择松线明彩水彩',
+      decided_at: '2026-08-22T09:59:00+08:00',
+    },
+  };
+  whiteCatStyle.selection_sha256 = buildWhiteCatVisualStyleSelectionSha256(whiteCatStyle);
+  input.visualDirectionReview.white_cat_visual_style_binding.selection_sha256 =
+    whiteCatStyle.selection_sha256;
+  input.visualDirectionReview.rows.forEach((row) => {
+    row.white_cat_visual_style_selection_sha256 = whiteCatStyle.selection_sha256;
+    row.user_selection.white_cat_visual_style_selection_sha256 = whiteCatStyle.selection_sha256;
+  });
+  input.visualDirectionReview.presented_map_sha256 =
+    buildPresentedMapSha256(input.visualDirectionReview);
+  input.visualDirectionReview.rows.forEach((row) => {
+    row.user_selection.presented_map_sha256 = input.visualDirectionReview.presented_map_sha256;
+  });
   const density = {
     contract_version: 'visual-density-selection-v1',
     gate2_script_sha256: gate2ScriptSha256,
+    white_cat_visual_style_selection_sha256: whiteCatStyle.selection_sha256,
     density_mode: 'standard',
     decision: {
       status: 'selected',
@@ -1292,7 +1502,7 @@ test('new assembly binds explicit workflow selection, v2 rhythm, and v4 schedule
     },
   };
   mode.selection_sha256 = buildWorkflowApprovalModeSha256(mode);
-  input.workflowApproval = {gate2ScriptSha256, density, mode};
+  input.workflowApproval = {gate2ScriptSha256, whiteCatStyle, density, mode};
   const shot = input.shots[0];
   shot.density_mode = 'standard';
   shot.visual_density_selection_sha256 = density.selection_sha256;

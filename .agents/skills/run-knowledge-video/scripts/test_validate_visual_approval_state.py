@@ -168,13 +168,41 @@ class VisualApprovalGateTests(unittest.TestCase):
             scene_plan, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
         ).encode("utf-8")
         plan_checksum = hashlib.sha256(encoded_plan).hexdigest()
+        source_master_path = "episodes/fixture/assets/image/ian/source-master.png"
+        normalized_master_path = "episodes/fixture/assets/image/ian/normalized-master.png"
         background_path = "episodes/fixture/assets/image/ian/background.png"
+        pre_text_layer_path = "episodes/fixture/assets/image/ian/L01-pre-text.png"
         layer_path = "episodes/fixture/assets/image/ian/L01.png"
         final_path = "episodes/fixture/assets/image/ian/final.png"
+        source_master = self._write_png(source_master_path, 1672, 941, b"source-master")
+        normalized_master = self._write_png(
+            normalized_master_path, 1920, 1080, b"normalized-master"
+        )
         background = self._write_png(background_path, 1920, 1080, b"background")
+        pre_text_layer = self._write_png(
+            pre_text_layer_path, 1920, 1080, b"pre-text-layer"
+        )
         layer = self._write_png(layer_path, 1920, 1080, b"layer")
         final = self._write_png(final_path, 1920, 1080, b"final")
         members = [
+            {
+                "member_role": "source-master",
+                "layer_id": "source-master",
+                "path": source_master_path,
+                "checksum_sha256": self._sha256(source_master),
+                "width": 1672,
+                "height": 941,
+                "has_alpha": False,
+            },
+            {
+                "member_role": "normalized-master",
+                "layer_id": "normalized-master",
+                "path": normalized_master_path,
+                "checksum_sha256": self._sha256(normalized_master),
+                "width": 1920,
+                "height": 1080,
+                "has_alpha": False,
+            },
             {
                 "member_role": "background",
                 "layer_id": "background",
@@ -183,6 +211,15 @@ class VisualApprovalGateTests(unittest.TestCase):
                 "width": 1920,
                 "height": 1080,
                 "has_alpha": False,
+            },
+            {
+                "member_role": "pre-text-layer",
+                "layer_id": "L01",
+                "path": pre_text_layer_path,
+                "checksum_sha256": self._sha256(pre_text_layer),
+                "width": 1920,
+                "height": 1080,
+                "has_alpha": True,
             },
             {
                 "member_role": "semantic-layer",
@@ -203,38 +240,6 @@ class VisualApprovalGateTests(unittest.TestCase):
                 "has_alpha": False,
             },
         ]
-        manifest_path = "episodes/fixture/schema/ian-layered-scene-v1.json"
-        manifest_file = self.repository_root / manifest_path
-        manifest_file.parent.mkdir(parents=True, exist_ok=True)
-        manifest_file.write_text(json.dumps({
-            "contract_version": "ian-knowledge-video-layered-scene-v1",
-            "queue_item_id": item["asset_id"],
-            "shot_id": "S06",
-            "scene_plan": scene_plan,
-            "scene_plan_sha256": plan_checksum,
-            "background": {
-                "path": background_path,
-                "checksum_sha256": self._sha256(background),
-                "width": 1920,
-                "height": 1080,
-                "has_alpha": False,
-            },
-            "layers": [{
-                "layer_id": "L01",
-                "path": layer_path,
-                "checksum_sha256": self._sha256(layer),
-                "width": 1920,
-                "height": 1080,
-                "has_alpha": True,
-            }],
-            "final_composite": {
-                "path": final_path,
-                "checksum_sha256": self._sha256(final),
-                "width": 1920,
-                "height": 1080,
-                "has_alpha": False,
-            },
-        }, ensure_ascii=False), encoding="utf-8")
         style_path = "episodes/fixture/assets/image/ian/style.png"
         style = self._write_png(style_path, 1920, 1080, b"style")
         references = [{
@@ -242,37 +247,118 @@ class VisualApprovalGateTests(unittest.TestCase):
             "path": style_path,
             "checksum_sha256": self._sha256(style),
         }]
-        generation_lineage = []
-        for index, member in enumerate(members[:-1]):
-            prompt_path = f"episodes/fixture/assets/narration/ian-member-{index + 1}-prompt.txt"
-            prompt_file = self.repository_root / prompt_path
-            prompt_file.parent.mkdir(parents=True, exist_ok=True)
-            prompt_file.write_text(
-                f"16:9 landscape composition\nIan member {member['layer_id']}\n",
-                encoding="utf-8",
-            )
-            generation_lineage.append({
-                "stage": "independent-member-generation",
-                "generation_mode": "codex-native-imagegen-independent-member-v1",
-                "member_role": member["member_role"],
-                "layer_id": member["layer_id"],
-                "prompt": {
-                    "path": prompt_path,
-                    "checksum_sha256": self._sha256(prompt_file),
-                },
+        prompt_path = "episodes/fixture/assets/narration/ian-master-prompt.txt"
+        prompt_file = self.repository_root / prompt_path
+        prompt_file.parent.mkdir(parents=True, exist_ok=True)
+        prompt_file.write_text(
+            "16:9 landscape composition\nno visible text\n",
+            encoding="utf-8",
+        )
+        prompt = {
+            "path": prompt_path,
+            "checksum_sha256": self._sha256(prompt_file),
+        }
+        manifest_path = "episodes/fixture/schema/ian-layered-scene-v2.json"
+        manifest_file = self.repository_root / manifest_path
+        manifest_file.parent.mkdir(parents=True, exist_ok=True)
+        manifest_file.write_text(json.dumps({
+            "contract_version": "ian-knowledge-video-layered-scene-v2",
+            "queue_item_id": item["asset_id"],
+            "shot_id": "S06",
+            "scene_plan": scene_plan,
+            "scene_plan_sha256": plan_checksum,
+            "master_generation": {
+                "contract_version": "ian-gpt-image-2-text-free-master-v1",
+                "generator": "codex-native-imagegen",
+                "model_id": "gpt-image-2",
+                "prompt": prompt,
                 "reference_inputs": references,
-                "output": {
-                    "path": member["path"],
-                    "checksum_sha256": member["checksum_sha256"],
-                },
                 "selection_status": "selected",
-            })
+                "visible_text_mode": "none",
+                "source_master": {
+                    "path": source_master_path,
+                    "checksum_sha256": self._sha256(source_master),
+                    "width": 1672,
+                    "height": 941,
+                    "role": "text-free-complete-master-source",
+                    "has_alpha": False,
+                },
+                "visual_qa": {
+                    "result": "pass",
+                    "inspection": "human-original-resolution-v1",
+                    "observed_visible_text": [],
+                    "observed_pseudo_text": False,
+                },
+            },
+            "model_provenance": {
+                "contract_version": "codex-native-imagegen-gpt-image-2-provenance-v1",
+                "generator": "codex-native-imagegen",
+                "canonical_model": "gpt-image-2",
+                "evidence_kind": "embedded-c2pa-software-agent-observation-v1",
+                "source_master_checksum_sha256": self._sha256(source_master),
+                "expected_software_agent": {"name": "gpt-image", "version": "2.0"},
+            },
+            "normalized_master": {
+                "path": normalized_master_path,
+                "checksum_sha256": self._sha256(normalized_master),
+                "width": 1920,
+                "height": 1080,
+                "role": "text-free-complete-master-normalized",
+                "has_alpha": False,
+            },
+            "background": {
+                "path": background_path,
+                "checksum_sha256": self._sha256(background),
+                "width": 1920,
+                "height": 1080,
+                "role": "static-paper-background",
+                "has_alpha": False,
+            },
+            "pre_text_layers": [{
+                "layer_id": "L01",
+                "path": pre_text_layer_path,
+                "checksum_sha256": self._sha256(pre_text_layer),
+                "width": 1920,
+                "height": 1080,
+                "role": "transparent-semantic-element-pre-text",
+                "has_alpha": True,
+            }],
+            "layers": [{
+                "layer_id": "L01",
+                "path": layer_path,
+                "checksum_sha256": self._sha256(layer),
+                "width": 1920,
+                "height": 1080,
+                "role": "transparent-semantic-element",
+                "has_alpha": True,
+            }],
+            "final_composite": {
+                "path": final_path,
+                "checksum_sha256": self._sha256(final),
+                "width": 1920,
+                "height": 1080,
+                "role": "final-composite-review-raster",
+                "has_alpha": False,
+            },
+        }, ensure_ascii=False), encoding="utf-8")
+        generation_lineage = [{
+            "stage": "complete-master-generation",
+            "generation_mode": "codex-native-imagegen-gpt-image-2-text-free-master-v1",
+            "model_id": "gpt-image-2",
+            "prompt": prompt,
+            "reference_inputs": references,
+            "output": {
+                "path": source_master_path,
+                "checksum_sha256": self._sha256(source_master),
+            },
+            "selection_status": "selected",
+        }]
         item.update(
             shot_id="S06",
             status="awaiting_user_approval",
             strict_review=True,
             visual_generation_route="ian-handdrawn-ppt",
-            qa_contract_version="ian-layered-scene-qa-v1",
+            qa_contract_version="ian-layered-scene-qa-v2",
             path=final_path,
             checksum_sha256=self._sha256(final),
             presented_checksum_sha256=self._sha256(final),
@@ -321,7 +407,7 @@ class VisualApprovalGateTests(unittest.TestCase):
             approved["presented_ian_layered_scene_package"],
         )
         self.assertEqual(
-            len(approved["approved_ian_layered_scene_package"]["members"]), 3
+            len(approved["approved_ian_layered_scene_package"]["members"]), 6
         )
 
     def test_ian_approval_rejects_a_changed_semantic_layer(self):
@@ -363,9 +449,10 @@ class VisualApprovalGateTests(unittest.TestCase):
     def test_ian_approval_rejects_cross_member_generation_lineage(self):
         item = self.state["visual_asset_review"]["queue"][0]
         self._attach_ian_layered_scene(item)
-        item["generation_lineage"][1]["output"] = dict(
-            item["generation_lineage"][0]["output"]
-        )
+        item["generation_lineage"][0]["output"] = {
+            "path": item["ian_scene_package_members"][1]["path"],
+            "checksum_sha256": item["ian_scene_package_members"][1]["checksum_sha256"],
+        }
         with self.assertRaisesRegex(ValueError, "generation lineage is stale"):
             self.gate._require_ian_layered_scene_package(item)
 
@@ -404,6 +491,22 @@ class VisualApprovalGateTests(unittest.TestCase):
                 "contract_version": "white-cat-imagegen-attempt-limit-v1",
                 "maximum_automatic_qa_failures": 3,
                 "qa_failed_generation_count": 3,
+                "automatic_retry_status": "stopped_user_takeover_required",
+            },
+        )
+        self.state["visual_asset_review"]["queue_generation_allowed"] = True
+        with self.assertRaisesRegex(ValueError, "user takeover required"):
+            self.gate.require_generation_allowed(self.state, "S06-master-v02")
+
+    def test_third_route_agnostic_qa_failure_blocks_automatic_retry(self):
+        item = self.state["visual_asset_review"]["queue"][0]
+        item.update(
+            status="changes_requested",
+            visual_generation_route="ian-handdrawn-ppt",
+            image_generation_attempt_control={
+                "contract_version": "storyboard-image-generation-attempt-limit-v1",
+                "maximum_automatic_rejected_generations": 3,
+                "rejected_generation_count": 3,
                 "automatic_retry_status": "stopped_user_takeover_required",
             },
         )
@@ -600,6 +703,69 @@ class VisualApprovalGateTests(unittest.TestCase):
             self.state, item["asset_id"], "2026-08-22T11:01:00Z"
         )
         self.assertEqual(passed["status"], "qa_passed_pending_batch_review")
+
+    def test_current_gate2_style_binding_rejects_white_cat_xuan(self):
+        item = self.state["visual_asset_review"]["queue"][0]
+        self.state["visual_asset_review"]["queue"] = [item]
+        self.state["white_cat_visual_style_selection"] = {
+            "contract_version": "white-cat-visual-style-selection-v1",
+            "style_id": "twilight-neon-animation",
+            "treatment_profile_id": "imagegen-twilight-neon-narrative",
+            "visual_cohesion_profile_id": "twilight-luminous-cohesion-v1",
+            "selection_sha256": "f" * 64,
+        }
+        item.update(
+            white_cat_present=True,
+            visual_generation_route="xuan-paper-diorama",
+            white_cat_visual_style_id="twilight-neon-animation",
+            white_cat_visual_style_selection_sha256="f" * 64,
+            visual_cohesion_profile_id="twilight-luminous-cohesion-v1",
+            treatment_profile_id="imagegen-twilight-neon-narrative",
+        )
+        with self.assertRaisesRegex(ValueError, "Gate-2 ImageGen style binding"):
+            self.gate._queue(self.state)
+
+        item["visual_generation_route"] = "imagegen"
+        self.assertEqual(self.gate._queue(self.state)[0]["asset_id"], item["asset_id"])
+
+    def test_current_style_lock_requires_complete_passing_cohesion_qa(self):
+        overview = self._write_png("assets/image/review/cohesion.png")
+        selection = {
+            "contract_version": "white-cat-visual-style-selection-v1",
+            "style_id": "loose-line-vivid-watercolor",
+            "treatment_profile_id": "imagegen-watercolor-narrative",
+            "visual_cohesion_profile_id": "warm-paper-watercolor-cohesion-v1",
+            "selection_sha256": "e" * 64,
+        }
+        self.state["white_cat_visual_style_selection"] = selection
+        queue = [
+            {"asset_id": "S01-master", "visual_generation_route": "imagegen"},
+            {"asset_id": "S02-local", "visual_generation_route": "local-video-file"},
+        ]
+        self.state["visual_cohesion_qa"] = {
+            "contract_version": "episode-visual-cohesion-qa-v1",
+            "result": "pass",
+            "white_cat_visual_style_selection_sha256": "e" * 64,
+            "visual_cohesion_profile_id": "warm-paper-watercolor-cohesion-v1",
+            "covered_asset_ids": ["S01-master"],
+            "anomalies": [],
+            "overview": {
+                "path": "assets/image/review/cohesion.png",
+                "checksum_sha256": self._sha256(overview),
+            },
+        }
+        result = self.gate._validate_visual_cohesion_qa(
+            self.state, queue, self.repository_root
+        )
+        self.assertEqual(result["result"], "pass")
+
+        self.state["visual_cohesion_qa"]["anomalies"] = [
+            {"asset_id": "S01-master", "reason": "明度突跳"}
+        ]
+        with self.assertRaisesRegex(ValueError, "cohesion QA"):
+            self.gate._validate_visual_cohesion_qa(
+                self.state, queue, self.repository_root
+            )
 
     def test_white_cat_batch_approval_rechecks_unique_paw_evidence(self):
         self.state["visual_asset_review"]["mode"] = "batch_final_review"
@@ -1154,6 +1320,7 @@ class VisualApprovalGateTests(unittest.TestCase):
 
     def _one_click_state(self):
         state = {
+            "workspace_path": "episode",
             "visual_asset_review": {
                 "contract_version": "visual-asset-review-v3",
                 "mode": "one_click_final_review_v1",
@@ -1170,6 +1337,9 @@ class VisualApprovalGateTests(unittest.TestCase):
             target = self._write_png(relative, marker=f"v{index}".encode())
             state["visual_asset_review"]["queue"].append({
                 "asset_id": f"S01-state-{index}",
+                "shot_id": "S01",
+                "role": f"state-{index}",
+                "visual_generation_route": "imagegen",
                 "path": relative,
                 "checksum_sha256": self._sha256(target),
                 "measured_dimensions": [1672, 941],
@@ -1178,6 +1348,98 @@ class VisualApprovalGateTests(unittest.TestCase):
                 "technical_qa": {"result": "pass"},
             })
         return state
+
+    def _attach_final_review_package(self, state, final_review):
+        digest = final_review["presented_map_sha256"]
+        short_digest = digest[:8]
+        workspace = state["workspace_path"]
+        html_relative = (
+            f"{workspace}/docs/final-production-asset-review-{short_digest}.html"
+        )
+        page_relative = (
+            f"{workspace}/assets/image/review/"
+            f"final-production-assets-{short_digest}-page-01.png"
+        )
+        manifest_relative = (
+            f"{workspace}/schema/final-production-asset-review-{short_digest}.json"
+        )
+        html_target = self.repository_root / html_relative
+        html_target.parent.mkdir(parents=True, exist_ok=True)
+        cards = "".join(
+            f'<article data-final-review-asset="1" data-asset-id="{asset["asset_id"]}">'
+            f'<img src="file:///preview.png">{asset["checksum_sha256"]}</article>'
+            for asset in final_review["assets"]
+        )
+        html_target.write_text(
+            '<meta name="final-production-review-contract" '
+            'content="final-production-asset-review-package-v1">'
+            f'<meta name="final-production-review-map-sha256" content="{digest}">'
+            f'<meta name="final-production-review-asset-count" '
+            f'content="{len(final_review["assets"])}">'
+            '<meta name="final-production-review-ian-package-count" content="0">'
+            + cards,
+            encoding="utf-8",
+        )
+        page_target = self._write_png(page_relative, width=1920, height=1080, marker=b"page")
+        pages = [{
+            "path": page_relative,
+            "checksum_sha256": self._sha256(page_target),
+            "width": 1920,
+            "height": 1080,
+            "asset_ids": [asset["asset_id"] for asset in final_review["assets"]],
+        }]
+        html_binding = {
+            "path": html_relative,
+            "checksum_sha256": self._sha256(html_target),
+        }
+        counts = {
+            "shot_count": 1,
+            "asset_count": len(final_review["assets"]),
+            "page_count": 1,
+            "ian_package_count": 0,
+        }
+        manifest = {
+            "contract_version": "final-production-asset-review-package-v1",
+            "episode_workspace": workspace,
+            "phase": "awaiting_precomposition_visual_review",
+            "presented_map_sha256": digest,
+            "counts": counts,
+            "assets": [{
+                "asset_id": asset["asset_id"],
+                "path": asset["path"],
+                "checksum_sha256": asset["checksum_sha256"],
+                "qa_status": asset["qa_status"],
+            } for asset in final_review["assets"]],
+            "outputs": {
+                "html": html_binding,
+                "pages": pages,
+                "ian_stage_sheets": [],
+            },
+            "approval_effect": "none-display-aid-only",
+            "episode_state_mutated": False,
+        }
+        manifest_target = self.repository_root / manifest_relative
+        manifest_target.parent.mkdir(parents=True, exist_ok=True)
+        manifest_target.write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        report = {
+            "contract_version": "final-production-asset-review-package-v1",
+            "presented_map_sha256": digest,
+            "counts": counts,
+            "html": html_binding,
+            "manifest": {
+                "path": manifest_relative,
+                "checksum_sha256": self._sha256(manifest_target),
+            },
+            "pages": pages,
+            "ian_stage_sheets": [],
+            "episode_state_mutated": False,
+        }
+        return self.gate.bind_one_click_final_review_package(
+            state, report, repository_root=self.repository_root,
+        )
 
     def test_one_click_qa_continues_but_final_review_precedes_caption_and_lock(self):
         state = self._one_click_state()
@@ -1188,6 +1450,7 @@ class VisualApprovalGateTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "exact hash-list approval"):
             self.gate.validate_visual_assets_locked(state, self.repository_root)
         final_review = self.gate.present_one_click_final_visual_review(state)
+        self._attach_final_review_package(state, final_review)
         approved = self.gate.approve_one_click_final_visual_review(
             state,
             final_review["presented_map_sha256"],
@@ -1201,6 +1464,69 @@ class VisualApprovalGateTests(unittest.TestCase):
             self.gate.validate_visual_assets_locked(state, self.repository_root)["result"],
             "pass",
         )
+
+    def test_one_click_final_review_excludes_inactive_superseded_history(self):
+        state = self._one_click_state()
+        queue = state["visual_asset_review"]["queue"]
+        for item in queue:
+            item["status"] = "qa_passed_pending_final_review"
+        historical = {
+            "asset_id": "S00-historical",
+            "active_for_current_storyboard": False,
+            "status": "superseded",
+            "path": "assets/image/historical-missing.png",
+            "checksum_sha256": "f" * 64,
+        }
+        queue.append(historical)
+
+        final_review = self.gate.present_one_click_final_visual_review(state)
+        self._attach_final_review_package(state, final_review)
+        self.assertEqual(
+            [asset["asset_id"] for asset in final_review["assets"]],
+            ["S01-state-0", "S01-state-1"],
+        )
+        self.gate.approve_one_click_final_visual_review(
+            state,
+            final_review["presented_map_sha256"],
+            "批准完整精确哈希清单",
+            "2026-08-22T10:02:00+08:00",
+            repository_root=self.repository_root,
+        )
+        locked = self.gate.validate_visual_assets_locked(state, self.repository_root)
+
+        self.assertEqual(locked["active_asset_count"], 2)
+        self.assertEqual(historical["status"], "superseded")
+
+    def test_one_click_final_approval_requires_current_image_rich_html_package(self):
+        state = self._one_click_state()
+        for item in state["visual_asset_review"]["queue"]:
+            item["status"] = "qa_passed_pending_final_review"
+        final_review = self.gate.present_one_click_final_visual_review(state)
+        with self.assertRaisesRegex(ValueError, "image-rich unified final review package"):
+            self.gate.approve_one_click_final_visual_review(
+                state,
+                final_review["presented_map_sha256"],
+                "批准完整精确哈希清单",
+                "2026-08-22T10:02:00+08:00",
+                repository_root=self.repository_root,
+            )
+
+    def test_one_click_final_approval_rejects_changed_unified_html(self):
+        state = self._one_click_state()
+        for item in state["visual_asset_review"]["queue"]:
+            item["status"] = "qa_passed_pending_final_review"
+        final_review = self.gate.present_one_click_final_visual_review(state)
+        package = self._attach_final_review_package(state, final_review)
+        html_path = self.repository_root / package["html"]["path"]
+        html_path.write_text("tampered", encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "HTML changed on disk"):
+            self.gate.approve_one_click_final_visual_review(
+                state,
+                final_review["presented_map_sha256"],
+                "批准完整精确哈希清单",
+                "2026-08-22T10:02:00+08:00",
+                repository_root=self.repository_root,
+            )
 
     def test_white_cat_one_click_qa_rejects_missing_v2_evidence_before_status_change(self):
         state = self._one_click_state()
@@ -1311,6 +1637,7 @@ class VisualApprovalGateTests(unittest.TestCase):
                 batch_qa_checksum_sha256=item["checksum_sha256"],
             )
         final_review = self.gate.present_one_click_final_visual_review(state)
+        self._attach_final_review_package(state, final_review)
         untouched = dict(state["visual_asset_review"]["queue"][0])
 
         changed = self.gate.record_one_click_changes_requested(
@@ -1348,6 +1675,10 @@ class VisualApprovalGateTests(unittest.TestCase):
         self.assertEqual(archive["preserved_unaffected_asset_count"], 1)
         self.assertEqual(
             archive["prior_final_review"]["presented_map_sha256"],
+            final_review["presented_map_sha256"],
+        )
+        self.assertEqual(
+            archive["prior_final_review"]["review_package"]["presented_map_sha256"],
             final_review["presented_map_sha256"],
         )
 

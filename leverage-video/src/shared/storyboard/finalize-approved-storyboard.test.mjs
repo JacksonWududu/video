@@ -65,6 +65,14 @@ assert.throws(() => finalizeStoryboardMarkdown({
   transitionRows: [row],
 }), /draft title is unexpected/);
 
+const authoritativeTitleFinalized = finalizeStoryboardMarkdown({
+  draftMarkdown: draft.replace('习得性无助', '酒神 vs 日神'),
+  transitionRows: [row],
+  topic: {title: '酒神vs日神'},
+});
+assert.match(authoritativeTitleFinalized, /^# 《酒神vs日神》知识视频分镜 v1$/m);
+assert.ok(!authoritativeTitleFinalized.includes('《酒神 vs 日神》'));
+
 const storyboardChecksum = 'a'.repeat(64);
 const approvedState = buildApprovedStoryboardReviewState({
   state: {

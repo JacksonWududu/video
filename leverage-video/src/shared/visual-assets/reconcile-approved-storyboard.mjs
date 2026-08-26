@@ -8,11 +8,15 @@ import {
   validateFinalStoryboard,
   validateIanStoryboardLayeredSceneSection,
 } from '../storyboard/validate-final-storyboard.mjs';
-import {sha256Canonical as sha256IanCanonical} from '../ian-layered-scene/contract.mjs';
+import {
+  canonicalJson,
+  sha256Canonical as sha256IanCanonical,
+} from '../ian-layered-scene/contract.mjs';
 import {parseStoryboardSummary} from '../visual-direction-review-form/contract.mjs';
 import {validateActionStateSchedule} from '../action-state-schedule/contract.mjs';
 import {validateStoryboardVisualRhythm} from '../storyboard-visual-rhythm/contract.mjs';
 import {buildPresentedMapSha256 as buildVisualDirectionMapSha256} from '../visual-generation-routes/contract.mjs';
+import {validateWhiteCatVisualStyleSelection} from '../workflow-approval/contract.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPOSITORY_ROOT = path.resolve(HERE, '../../../..');
@@ -21,6 +25,8 @@ const jsonBytes = (value) => Buffer.from(`${JSON.stringify(value, null, 2)}\n`);
 const CHINESE_COUNT = new Map([['一', 1], ['二', 2], ['三', 3], ['四', 4], ['五', 5]]);
 const LOCAL_VIDEO_ROUTE = 'local-video-file';
 const SHA256 = /^[a-f0-9]{64}$/;
+const PRESERVED_REBIND_STATUS = 'preserved_exact_bytes_pending_current_storyboard_rebind';
+const PRESERVED_REBIND_POLICY = 'preserve_exact_historical_bytes_and_rebind_unchanged_non_Ian_assets_later';
 
 const resolveRootRelative = (rootRelativePath, label) => {
   if (typeof rootRelativePath !== 'string' || rootRelativePath === '' || path.isAbsolute(rootRelativePath)) {
@@ -136,6 +142,120 @@ const cleanPendingItem = (item) => {
   return next;
 };
 
+const verifyPreservedFile = (binding, label) => {
+  if (!SHA256.test(binding?.checksum_sha256 ?? '')) {
+    throw new Error(`${label} checksum is invalid`);
+  }
+  const target = resolveRootRelative(binding.path, `${label} path`);
+  const status = fs.lstatSync(target);
+  if (!status.isFile() || status.isSymbolicLink() || sha256(fs.readFileSync(target)) !== binding.checksum_sha256) {
+    throw new Error(`${label} changed on disk`);
+  }
+};
+
+const preservedRebindAssetIds = ({state, review}) => {
+  const items = review.queue.filter(
+    (item) => item.rebind_status === PRESERVED_REBIND_STATUS,
+  );
+  if (items.length === 0) return new Set();
+  const migration = [...(state.superseded_artifacts ?? [])].reverse().find(
+    (record) => record?.record_type === 'unfinished_ian_layered_scene_contract_migration'
+      && record.preservation_policy === PRESERVED_REBIND_POLICY,
+  );
+  if (!migration || migration.preserved_non_ian_asset_count !== items.length) {
+    throw new Error('preserved non-Ian migration evidence is missing or incomplete');
+  }
+  const projection = items.map((item) => ({
+    asset_id: item.asset_id,
+    path: item.path,
+    checksum_sha256: item.checksum_sha256,
+    status: item.status,
+  }));
+  if (sha256(Buffer.from(canonicalJson(projection)))
+      !== migration.preserved_non_ian_ordered_binding_digest_sha256) {
+    throw new Error('preserved non-Ian binding digest is stale');
+  }
+  for (const item of items) {
+    if (item.visual_generation_route === 'ian-handdrawn-ppt'
+      || item.active_for_current_storyboard !== false
+      || item.status !== 'qa_passed_pending_final_review'
+      || item.technical_qa?.result !== 'pass'
+      || item.semantic_qa?.result !== 'pass'
+      || item.visible_text_qa?.result !== 'pass'
+      || item.visual_qa?.result !== 'pass') {
+      throw new Error(`${item.asset_id} is not eligible for exact-byte preservation`);
+    }
+    verifyPreservedFile(item, `${item.asset_id} preserved asset`);
+    verifyPreservedFile({
+      path: item.qa_evidence_path,
+      checksum_sha256: item.qa_evidence_checksum_sha256,
+    }, `${item.asset_id} preserved QA evidence`);
+  }
+  return new Set(items.map((item) => item.asset_id));
+};
+
+const assertPreservedVisualContract = ({item, row, summaryRow, timing, count, actionSchedule}) => {
+  const expected = {
+    visual_generation_route: row.user_selection.visual_generation_route,
+    scene_class: row.scene_class,
+    visual_structure_id: row.user_selection.visual_structure_id,
+    treatment_profile_id: row.user_selection.treatment_profile_id,
+    white_cat_present: row.user_selection.white_cat_present,
+    white_cat_visual_style_id: row.user_selection.white_cat_visual_style_id ?? null,
+    white_cat_visual_style_selection_sha256:
+      row.user_selection.white_cat_visual_style_selection_sha256 ?? null,
+    visual_cohesion_profile_id: row.user_selection.visual_cohesion_profile_id ?? null,
+    visible_text_mode: row.user_selection.visible_text_mode,
+    exact_visible_text: row.user_selection.exact_visible_text,
+    visible_text_placement: row.user_selection.visible_text_placement,
+    local_video_source_path: row.user_selection.local_video_source_path ?? null,
+    narration_source_text: summaryRow.locked_narration,
+    shot_start_frame: timing.startFrame,
+    shot_end_frame: timing.endFrame,
+    shot_duration_frames: timing.endFrame - timing.startFrame,
+    state_count_total: count,
+  };
+  for (const [field, value] of Object.entries(expected)) {
+    if (canonicalJson(item[field] ?? null) !== canonicalJson(value ?? null)) {
+      throw new Error(`${item.asset_id} preserved visual contract changed at ${field}`);
+    }
+  }
+  if (actionSchedule) {
+    const occurrence = actionSchedule.schedule?.occurrences?.[item.state_index];
+    if (!occurrence
+      || item.schedule_state_id !== occurrence.state_id
+      || item.semantic_state !== occurrence.semantic_state
+      || item.motion_tier !== actionSchedule.schedule.motion_tier
+      || item.action_state_schedule_contract_version !== actionSchedule.schedule.contract_version
+      || item.action_state_plan_sha256 !== actionSchedule.state_plan_sha256) {
+      throw new Error(`${item.asset_id} preserved action-state binding changed`);
+    }
+  }
+};
+
+const preserveExactItem = (item) => {
+  const next = structuredClone(item);
+  delete next.rebind_status;
+  next.active_for_current_storyboard = true;
+  return next;
+};
+
+const nextShotAssetVersion = (shotId, queue) => {
+  const versions = queue
+    .filter((item) => item.shot_id === shotId)
+    .map((item) => Number(item.asset_id?.match(/-v(\d+)$/)?.[1]))
+    .filter(Number.isInteger);
+  return versions.length === 0 ? 1 : Math.max(...versions) + 1;
+};
+
+const versionFreshItems = (items, version) => items.map((item) => ({
+  ...item,
+  asset_id: item.asset_id.replace(/-v01$/, `-v${String(version).padStart(2, '0')}`),
+  depends_on: item.depends_on.map(
+    (assetId) => assetId.replace(/-v01$/, `-v${String(version).padStart(2, '0')}`),
+  ),
+}));
+
 const buildInkItems = (shotId, count) => Array.from({length: count}, (_, stateIndex) => ({
   asset_id: `${shotId}-ink-state-${String(stateIndex).padStart(2, '0')}-v01`,
   shot_id: shotId,
@@ -172,6 +292,7 @@ const bindItem = ({
   storyboard,
   direction,
   ianScenePlan = null,
+  preservedExactBytes = false,
 }) => ({
   ...item,
   visual_generation_route: row.user_selection.visual_generation_route,
@@ -179,6 +300,10 @@ const bindItem = ({
   visual_structure_id: row.user_selection.visual_structure_id,
   treatment_profile_id: row.user_selection.treatment_profile_id,
   white_cat_present: row.user_selection.white_cat_present,
+  white_cat_visual_style_id: row.user_selection.white_cat_visual_style_id ?? null,
+  white_cat_visual_style_selection_sha256:
+    row.user_selection.white_cat_visual_style_selection_sha256 ?? null,
+  visual_cohesion_profile_id: row.user_selection.visual_cohesion_profile_id ?? null,
   visible_text_mode: row.user_selection.visible_text_mode,
   exact_visible_text: row.user_selection.exact_visible_text,
   visible_text_placement: row.user_selection.visible_text_placement,
@@ -198,7 +323,9 @@ const bindItem = ({
   }),
   storyboard_rebind_qa: {
     result: 'pass',
-    basis: 'approved_visual_contract_and_exact_narration_timing_reconciled',
+    basis: preservedExactBytes
+      ? 'preserved_exact_bytes_after_unchanged_visual_contract_rebind'
+      : 'approved_visual_contract_and_exact_narration_timing_reconciled',
   },
 });
 
@@ -238,6 +365,20 @@ export const buildReconciledState = ({
   const expectedAuthorityStatus = oneClick ? 'policy_authorized' : 'approved';
   const expectedPhase = oneClick ? 'storyboard_policy_authorized' : 'storyboard_review_approved';
   const policySha256 = state.one_click_approval_policy?.policy_sha256;
+  const styleBinding = direction.white_cat_visual_style_binding ?? null;
+  if (styleBinding !== null) {
+    const styleSelection = state.white_cat_visual_style_selection;
+    const styleValidation = validateWhiteCatVisualStyleSelection(styleSelection, {
+      gate2ScriptSha256: styleSelection?.gate2_script_sha256,
+    });
+    if (styleBinding.contract_version !== styleSelection.contract_version
+      || styleBinding.style_id !== styleSelection.style_id
+      || styleBinding.treatment_profile_id !== styleSelection.treatment_profile_id
+      || styleBinding.visual_cohesion_profile_id !== styleSelection.visual_cohesion_profile_id
+      || styleBinding.selection_sha256 !== styleValidation.selection_sha256) {
+      throw new Error('visual direction white-cat style binding differs from Gate 2 selection');
+    }
+  }
   const policyAuthorizationInvalid = oneClick && (
     !SHA256.test(policySha256 ?? '')
     || state.one_click_approval_policy?.contract_version !== 'one-click-approval-policy-v1'
@@ -327,10 +468,12 @@ export const buildReconciledState = ({
   const summaryById = new Map(summary.map((row) => [row.shot_id, row]));
   const rhythmById = new Map((rhythm?.shots ?? []).map((shot) => [shot.shot_id, shot]));
   const actionScheduleById = new Map((actionSchedules?.schedules ?? []).map((schedule) => [schedule.shot_id, schedule]));
+  const preservedRebindIds = preservedRebindAssetIds({state, review});
   const rebindCandidates = review.queue.filter((item) => (
     item.status !== 'superseded'
     && (item.active_for_current_storyboard !== false
-      || (item.status === 'blocked_pending_reapproved_storyboard' && item.prior_status))
+      || (item.status === 'blocked_pending_reapproved_storyboard' && item.prior_status)
+      || preservedRebindIds.has(item.asset_id))
   ));
   const priorByShot = Map.groupBy(rebindCandidates, (item) => item.shot_id);
   const activeQueueInStoryboardOrder = [];
@@ -352,8 +495,26 @@ export const buildReconciledState = ({
         })
       : null;
     const count = stateCountFor(section, row, priorItems, rhythmById.get(shotId) ?? null, actionSchedule);
+    const preservingExactBytes = priorItems.length > 0
+      && priorItems.every((item) => preservedRebindIds.has(item.asset_id));
     let items;
-    if (row.user_selection.visual_generation_route === 'ink-doodle-knowledge-card') {
+    if (preservingExactBytes) {
+      if (priorItems.length !== count
+        || priorItems.some((item) => item.visual_generation_route !== row.user_selection.visual_generation_route)) {
+        throw new Error(`${shotId} preserved queue cannot be safely rebound`);
+      }
+      for (const item of priorItems) {
+        assertPreservedVisualContract({
+          item,
+          row,
+          summaryRow,
+          timing,
+          count,
+          actionSchedule,
+        });
+      }
+      items = priorItems.map(preserveExactItem);
+    } else if (row.user_selection.visual_generation_route === 'ink-doodle-knowledge-card') {
       items = buildInkItems(shotId, count);
       replacedShots.add(shotId);
     } else if (row.user_selection.visual_generation_route === LOCAL_VIDEO_ROUTE) {
@@ -366,6 +527,17 @@ export const buildReconciledState = ({
     } else {
       if (initializing && priorItems.length === 0) {
         items = buildStandardItems({shotId, row, count, actionSchedule});
+      } else if (row.user_selection.visual_generation_route === 'ian-handdrawn-ppt'
+        && priorItems.length === 0
+        && review.queue.some((item) => item.shot_id === shotId
+          && item.visual_generation_route === 'ian-handdrawn-ppt'
+          && item.status === 'superseded'
+          && item.active_for_current_storyboard === false)) {
+        items = versionFreshItems(
+          buildStandardItems({shotId, row, count, actionSchedule}),
+          nextShotAssetVersion(shotId, review.queue),
+        );
+        replacedShots.add(shotId);
       } else if (priorItems.length !== count || priorItems.some((item) => item.visual_generation_route !== row.user_selection.visual_generation_route)) {
         throw new Error(`${shotId} prior queue cannot be safely rebound`);
       } else {
@@ -381,7 +553,14 @@ export const buildReconciledState = ({
       },
     };
     activeQueueInStoryboardOrder.push(...items.map((item) => bindItem({
-      item, row, summaryRow, section, timing, ianScenePlan, ...binding,
+      item,
+      row,
+      summaryRow,
+      section,
+      timing,
+      ianScenePlan,
+      preservedExactBytes: preservedRebindIds.has(item.asset_id),
+      ...binding,
     })));
   }
   const activeQueue = [
@@ -399,6 +578,14 @@ export const buildReconciledState = ({
     throw new Error('reconciled active queue is incomplete, duplicated, or uses a retired route');
   }
   const nextState = structuredClone(state);
+  const completedQueueStatuses = new Set([
+    'approved',
+    'qa_passed_pending_batch_review',
+    'qa_passed_pending_final_review',
+  ]);
+  const currentItem = preservedRebindIds.size === 0
+    ? activeQueue[0]
+    : activeQueue.find((item) => !completedQueueStatuses.has(item.status));
   nextState.phase = 'visual_production';
   nextState.current_phase = 'visual_production';
   nextState.blockers = [];
@@ -406,7 +593,8 @@ export const buildReconciledState = ({
     ...review,
     status: 'in_progress',
     queue_generation_allowed: true,
-    current_asset_id: activeQueue[0].asset_id,
+    ...(oneClick ? {storyboard_sha256: storyboardChecksum} : {}),
+    current_asset_id: currentItem?.asset_id ?? null,
     active_storyboard_binding: {
       path: state.storyboard_review.approved_path,
       checksum_sha256: storyboardChecksum,

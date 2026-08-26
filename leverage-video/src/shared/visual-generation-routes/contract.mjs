@@ -10,6 +10,7 @@ import {
   validateVisualLanguageSelection,
 } from '../visual-language/contract.mjs';
 import {validateConciseSummaryVisibleText} from '../visible-text-review/contract.mjs';
+import {resolveWhiteCatVisualStyleOption} from '../workflow-approval/contract.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const CATALOG_BYTES = fs.readFileSync(path.join(HERE, 'catalog.json'));
@@ -51,6 +52,8 @@ const LEGACY_V3_PRE_LOCAL_VIDEO_ROUTE_IDS = Object.freeze([
 ]);
 export const LEGACY_V3_PRE_LOCAL_VIDEO_CATALOG_CHECKSUM_SHA256 = '037380ed89c72cbda8bfa336a93989366b913e31ded160a497c80488f7b5077b';
 export const LEGACY_V3_PRE_LOCAL_VIDEO_VISUAL_LANGUAGE_CATALOG_CHECKSUM_SHA256 = '702a473066a3097df41e0ae6a92709c42951c8b50b37259ba0de56abd98834df';
+export const LEGACY_V3_PRE_WHITE_CAT_STYLE_CATALOG_CHECKSUM_SHA256 = '5214aa035c6a9ff7dcbd39e682ba899c4a3d3af3ba46804b0a96e3ae175d5d4e';
+export const LEGACY_V3_PRE_WHITE_CAT_STYLE_VISUAL_LANGUAGE_CATALOG_CHECKSUM_SHA256 = '7919fc29cdd80fff88a4c26704d56e7eb7427638ef6af41c73436e317ff0e646';
 
 const SHA256 = /^[a-f0-9]{64}$/;
 const GENERIC_AUTHORIZATION = new Set([
@@ -86,7 +89,13 @@ const isV2 = (review) => [
   'per-shot-visual-direction-review-v3',
 ].includes(review?.contract_version);
 const isV3 = (review) => review?.contract_version === 'per-shot-visual-direction-review-v3';
-const presentedRow = (row, version2, version3, includeLocalVideoPath = true) => ({
+const presentedRow = (
+  row,
+  version2,
+  version3,
+  includeLocalVideoPath = true,
+  includeWhiteCatStyleBinding = true,
+) => ({
   shot_id: row.shot_id,
   scene_class: row.scene_class,
   structured_visual_kind: row.structured_visual_kind ?? null,
@@ -98,6 +107,11 @@ const presentedRow = (row, version2, version3, includeLocalVideoPath = true) => 
     visual_language_recommendation: row.visual_language_recommendation,
     comic_eligibility: row.comic_eligibility,
     comic_plan_candidate: row.comic_plan_candidate ?? null,
+  } : {}),
+  ...(version3 && includeWhiteCatStyleBinding ? {
+    white_cat_visual_style_id: row.white_cat_visual_style_id ?? null,
+    white_cat_visual_style_selection_sha256: row.white_cat_visual_style_selection_sha256 ?? null,
+    visual_cohesion_profile_id: row.visual_cohesion_profile_id ?? null,
   } : {}),
   ...(version3 ? {
     visible_text_mode: row.visible_text_mode,
@@ -118,7 +132,10 @@ const presentedRow = (row, version2, version3, includeLocalVideoPath = true) => 
   recommendation_reason: row.recommendation_reason,
 });
 
-const buildPresentedMapSha256WithPolicy = (review, {includeLocalVideoPath}) => sha256Canonical({
+const buildPresentedMapSha256WithPolicy = (
+  review,
+  {includeLocalVideoPath, includeWhiteCatStyleBinding},
+) => sha256Canonical({
   contract_version: review?.contract_version,
   catalog_version: review?.catalog_version,
   catalog_checksum_sha256: review?.catalog_checksum_sha256,
@@ -126,6 +143,9 @@ const buildPresentedMapSha256WithPolicy = (review, {includeLocalVideoPath}) => s
     visual_language_catalog_version: review?.visual_language_catalog_version,
     visual_language_catalog_checksum_sha256: review?.visual_language_catalog_checksum_sha256,
   } : {}),
+  ...(isV3(review) && includeWhiteCatStyleBinding && review.white_cat_visual_style_binding
+    ? {white_cat_visual_style_binding: review.white_cat_visual_style_binding}
+    : {}),
   storyboard: review?.storyboard,
   rows: Array.isArray(review?.rows)
     ? review.rows.map((row) => presentedRow(
@@ -133,13 +153,14 @@ const buildPresentedMapSha256WithPolicy = (review, {includeLocalVideoPath}) => s
       isV2(review),
       isV3(review),
       includeLocalVideoPath,
+      includeWhiteCatStyleBinding,
     ))
     : review?.rows,
 });
 
 export const buildPresentedMapSha256 = (review) => buildPresentedMapSha256WithPolicy(
   review,
-  {includeLocalVideoPath: true},
+  {includeLocalVideoPath: true, includeWhiteCatStyleBinding: true},
 );
 
 export const authorizeVisualDirectionRecommendationsOneClick = (
@@ -171,6 +192,9 @@ export const authorizeVisualDirectionRecommendationsOneClick = (
       visual_structure_id: row.visual_language_recommendation.visual_structure_id,
       treatment_profile_id: row.visual_language_recommendation.treatment_profile_id,
       visual_generation_route: row.recommended_route,
+      white_cat_visual_style_id: row.white_cat_visual_style_id ?? null,
+      white_cat_visual_style_selection_sha256: row.white_cat_visual_style_selection_sha256 ?? null,
+      visual_cohesion_profile_id: row.visual_cohesion_profile_id ?? null,
       comic_plan: null,
       visible_text_mode: row.visible_text_mode,
       exact_visible_text: row.exact_visible_text ?? null,
@@ -190,7 +214,14 @@ export const authorizeVisualDirectionRecommendationsOneClick = (
 
 const buildLegacyV3PresentedMapSha256 = (review) => buildPresentedMapSha256WithPolicy(
   review,
-  {includeLocalVideoPath: false},
+  {includeLocalVideoPath: false, includeWhiteCatStyleBinding: false},
+);
+
+const buildLegacyV3PreWhiteCatStylePresentedMapSha256 = (review) => (
+  buildPresentedMapSha256WithPolicy(
+    review,
+    {includeLocalVideoPath: true, includeWhiteCatStyleBinding: false},
+  )
 );
 
 const validateKnownRoutes = (routes, label, routeIds) => {
@@ -201,7 +232,14 @@ const validateKnownRoutes = (routes, label, routeIds) => {
   }
 };
 
-const expectedCompatibleRoutes = (row, whiteCatPresent, version2, version3, legacyV3) => {
+const expectedCompatibleRoutes = (
+  row,
+  whiteCatPresent,
+  version2,
+  version3,
+  legacyV3PreLocalVideo,
+  legacyV3PreWhiteCatStyle,
+) => {
   if (!version2) {
     if (whiteCatPresent) return ['imagegen'];
     return row.scene_class === 'structured_graphic'
@@ -214,17 +252,19 @@ const expectedCompatibleRoutes = (row, whiteCatPresent, version2, version3, lega
           'ian-handdrawn-ppt',
           INK_DOODLE_KNOWLEDGE_CARD_ROUTE_ID,
           'srt-whiteboard-animation',
-          ...(legacyV3 ? [] : [LOCAL_VIDEO_FILE_ROUTE_ID]),
+          ...(legacyV3PreLocalVideo ? [] : [LOCAL_VIDEO_FILE_ROUTE_ID]),
         ]
       : ['ian-handdrawn-ppt', 'doodle-slides', 'srt-whiteboard-animation'];
   }
   if (version3) return whiteCatPresent
-    ? ['imagegen', XUAN_PAPER_DIORAMA_ROUTE_ID]
+    ? ((legacyV3PreLocalVideo || legacyV3PreWhiteCatStyle)
+      ? ['imagegen', XUAN_PAPER_DIORAMA_ROUTE_ID]
+      : ['imagegen'])
     : [
         'imagegen',
         XUAN_PAPER_DIORAMA_ROUTE_ID,
         'srt-whiteboard-animation',
-        ...(legacyV3 ? [] : [LOCAL_VIDEO_FILE_ROUTE_ID]),
+        ...(legacyV3PreLocalVideo ? [] : [LOCAL_VIDEO_FILE_ROUTE_ID]),
       ];
   const comicEligible = row?.comic_eligibility?.eligible === true;
   if (whiteCatPresent) return comicEligible ? ['imagegen', 'comic-imagegen'] : ['imagegen'];
@@ -313,6 +353,38 @@ const validateV3VisibleText = (row) => {
   }
 };
 
+const validateV3WhiteCatVisualStyleBinding = (row, selection, binding) => {
+  if (binding === null) return;
+  if (binding?.contract_version !== 'white-cat-visual-style-selection-v1'
+    || !SHA256.test(binding.selection_sha256 ?? '')) {
+    throw new Error('visual direction white-cat style binding is invalid');
+  }
+  const option = resolveWhiteCatVisualStyleOption(binding.style_id);
+  if (binding.treatment_profile_id !== option.treatment_profile_id
+    || binding.visual_cohesion_profile_id !== option.visual_cohesion_profile_id) {
+    throw new Error('visual direction white-cat style binding is stale or substituted');
+  }
+  if (row.white_cat_visual_style_id !== binding.style_id
+    || row.white_cat_visual_style_selection_sha256 !== binding.selection_sha256
+    || row.visual_cohesion_profile_id !== binding.visual_cohesion_profile_id) {
+    throw new Error(`${row.shot_id} lacks the episode-wide white-cat style and cohesion binding`);
+  }
+  if (selection.white_cat_visual_style_id !== binding.style_id
+    || selection.white_cat_visual_style_selection_sha256 !== binding.selection_sha256
+    || selection.visual_cohesion_profile_id !== binding.visual_cohesion_profile_id) {
+    throw new Error(`${row.shot_id} selected visual direction has a stale white-cat style binding`);
+  }
+  if (selection.white_cat_present) {
+    if (selection.visual_generation_route !== 'imagegen') {
+      throw new Error(`${row.shot_id} new white-cat work must use the Gate-2-selected imagegen style`);
+    }
+    if (row.visual_language_recommendation.treatment_profile_id !== option.treatment_profile_id
+      || selection.treatment_profile_id !== option.treatment_profile_id) {
+      throw new Error(`${row.shot_id} white-cat treatment does not match the Gate-2 style selection`);
+    }
+  }
+};
+
 const validateV3LocalVideoSelection = (row, selection) => {
   const selected = selection.visual_generation_route === LOCAL_VIDEO_FILE_ROUTE_ID;
   const rowPath = row.local_video_source_path ?? null;
@@ -370,10 +442,19 @@ const validateRouteResolvedVisibleText = (row, selection) => {
   return policy;
 };
 
-const validateRow = (row, presentedMapSha256, version2, version3, legacyV3, policyAuthorized = false) => {
+const validateRow = (
+  row,
+  presentedMapSha256,
+  version2,
+  version3,
+  legacyV3PreLocalVideo,
+  legacyV3PreWhiteCatStyle,
+  whiteCatStyleBinding,
+  policyAuthorized = false,
+) => {
   validateClassificationAndIdentity(row);
   const routeIds = version3
-    ? (legacyV3 ? LEGACY_V3_PRE_LOCAL_VIDEO_ROUTE_IDS : ACTIVE_ROUTE_IDS)
+    ? (legacyV3PreLocalVideo ? LEGACY_V3_PRE_LOCAL_VIDEO_ROUTE_IDS : ACTIVE_ROUTE_IDS)
     : (version2 ? LEGACY_V2_ROUTE_IDS : LEGACY_ROUTE_IDS);
   if (version3 && RETIRED_ROUTE_IDS.includes(row?.user_selection?.visual_generation_route)) {
     throw new Error(`${row.shot_id} ${row.user_selection.visual_generation_route} is retired for new or modified v3 work`);
@@ -415,7 +496,9 @@ const validateRow = (row, presentedMapSha256, version2, version3, legacyV3, poli
   if (selection.white_cat_present
     && ![
       'imagegen',
-      ...(version3 ? [XUAN_PAPER_DIORAMA_ROUTE_ID] : []),
+      ...(version3 && (legacyV3PreLocalVideo || legacyV3PreWhiteCatStyle)
+        ? [XUAN_PAPER_DIORAMA_ROUTE_ID]
+        : []),
       ...(version2 && !version3 ? ['comic-imagegen'] : []),
     ].includes(selection.visual_generation_route)) {
     throw new Error(`${row.shot_id} white cat requires an approved imagegen-backed route`);
@@ -442,7 +525,8 @@ const validateRow = (row, presentedMapSha256, version2, version3, legacyV3, poli
     selection.white_cat_present,
     version2,
     version3,
-    legacyV3,
+    legacyV3PreLocalVideo,
+    legacyV3PreWhiteCatStyle,
   );
   if (!arrayEquals(row.compatible_routes, expectedRoutes)) {
     if ([INK_DOODLE_KNOWLEDGE_CARD_ROUTE_ID, 'doodle-slides']
@@ -492,6 +576,7 @@ const validateRow = (row, presentedMapSha256, version2, version3, legacyV3, poli
     }, {requireApprovedCharacterReference: false});
   }
   if (version3) {
+    validateV3WhiteCatVisualStyleBinding(row, selection, whiteCatStyleBinding);
     if (selection.visible_text_mode !== row.visible_text_mode
       || (selection.exact_visible_text ?? null) !== (row.exact_visible_text ?? null)
       || (selection.visible_text_placement ?? null) !== (row.visible_text_placement ?? null)) {
@@ -536,7 +621,8 @@ const validateRow = (row, presentedMapSha256, version2, version3, legacyV3, poli
 
 const validateReviewAuthority = (review) => {
   const version2 = isV2(review);
-  let legacyV3 = false;
+  let legacyV3PreLocalVideo = false;
+  let legacyV3PreWhiteCatStyle = false;
   if (!version2 && review.contract_version !== 'per-shot-visual-direction-review-v1') {
     throw new Error('unsupported visual direction review contract');
   }
@@ -550,25 +636,36 @@ const validateReviewAuthority = (review) => {
       && review.catalog_checksum_sha256 === LEGACY_V2_CATALOG_CHECKSUM_SHA256
       && review.visual_language_catalog_version === 'visual-language-catalog-v1'
       && review.visual_language_catalog_checksum_sha256 === LEGACY_V2_VISUAL_LANGUAGE_CATALOG_CHECKSUM_SHA256;
-    legacyV3 = review.contract_version === 'per-shot-visual-direction-review-v3'
+    legacyV3PreLocalVideo = review.contract_version === 'per-shot-visual-direction-review-v3'
       && review.catalog_version === 'visual-generation-route-catalog-v2'
       && review.catalog_checksum_sha256 === LEGACY_V3_PRE_LOCAL_VIDEO_CATALOG_CHECKSUM_SHA256
       && review.visual_language_catalog_version === 'visual-language-catalog-v1'
       && review.visual_language_catalog_checksum_sha256
         === LEGACY_V3_PRE_LOCAL_VIDEO_VISUAL_LANGUAGE_CATALOG_CHECKSUM_SHA256;
-    if (!currentAuthority && !legacyV2Authority && !legacyV3) {
+    legacyV3PreWhiteCatStyle = review.contract_version === 'per-shot-visual-direction-review-v3'
+      && review.catalog_version === 'visual-generation-route-catalog-v2'
+      && review.catalog_checksum_sha256 === LEGACY_V3_PRE_WHITE_CAT_STYLE_CATALOG_CHECKSUM_SHA256
+      && review.visual_language_catalog_version === 'visual-language-catalog-v1'
+      && review.visual_language_catalog_checksum_sha256
+        === LEGACY_V3_PRE_WHITE_CAT_STYLE_VISUAL_LANGUAGE_CATALOG_CHECKSUM_SHA256;
+    if (!currentAuthority && !legacyV2Authority && !legacyV3PreLocalVideo
+      && !legacyV3PreWhiteCatStyle) {
       throw new Error('visual route catalog version or checksum mismatch');
     }
   } else if (review.catalog_version !== LEGACY_CATALOG_VERSION
     || review.catalog_checksum_sha256 !== LEGACY_CATALOG_CHECKSUM_SHA256) {
     throw new Error('legacy visual route catalog checksum mismatch or unsupported version');
   }
-  return {version2, legacyV3};
+  return {version2, legacyV3PreLocalVideo, legacyV3PreWhiteCatStyle};
 };
 
 export const validateVisualDirectionReview = (review, {shots = []} = {}) => {
   if (!review || typeof review !== 'object') throw new Error('visual direction review object required');
-  const {version2, legacyV3} = validateReviewAuthority(review);
+  const {
+    version2,
+    legacyV3PreLocalVideo,
+    legacyV3PreWhiteCatStyle,
+  } = validateReviewAuthority(review);
   requireNonEmptyString(review?.storyboard?.path, 'visual direction storyboard path');
   if (!SHA256.test(review?.storyboard?.checksum_sha256 ?? '')) throw new Error('visual direction storyboard checksum is invalid');
   const policyAuthorized = review.status === 'policy_authorized';
@@ -586,9 +683,15 @@ export const validateVisualDirectionReview = (review, {shots = []} = {}) => {
   }
   if (!Array.isArray(review.rows) || review.rows.length === 0) throw new Error('visual direction review rows are required');
   if (review.generated_shot_count !== review.rows.length) throw new Error('visual direction generated shot count mismatch');
-  const expectedPresentedMapSha256 = legacyV3
+  if (isV3(review) && !legacyV3PreLocalVideo && !legacyV3PreWhiteCatStyle
+    && review.white_cat_visual_style_binding == null) {
+    throw new Error('current v3 visual direction review requires the Gate-2 white-cat style binding');
+  }
+  const expectedPresentedMapSha256 = legacyV3PreLocalVideo
     ? buildLegacyV3PresentedMapSha256(review)
-    : buildPresentedMapSha256(review);
+    : (legacyV3PreWhiteCatStyle
+      ? buildLegacyV3PreWhiteCatStylePresentedMapSha256(review)
+      : buildPresentedMapSha256(review));
   if (!SHA256.test(review.presented_map_sha256 ?? '')
     || review.presented_map_sha256 !== expectedPresentedMapSha256) {
     throw new Error('visual direction presented map checksum mismatch');
@@ -597,7 +700,16 @@ export const validateVisualDirectionReview = (review, {shots = []} = {}) => {
   for (const row of review.rows) {
     if (ids.has(row.shot_id)) throw new Error(`duplicate visual direction row: ${row.shot_id}`);
     ids.add(row.shot_id);
-    validateRow(row, review.presented_map_sha256, version2, isV3(review), legacyV3, policyAuthorized);
+    validateRow(
+      row,
+      review.presented_map_sha256,
+      version2,
+      isV3(review),
+      legacyV3PreLocalVideo,
+      legacyV3PreWhiteCatStyle,
+      review.white_cat_visual_style_binding ?? null,
+      policyAuthorized,
+    );
   }
   if (!Array.isArray(shots) || shots.length !== review.rows.length) {
     throw new Error('visual direction review must cover every generated shot exactly once');

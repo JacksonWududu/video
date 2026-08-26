@@ -1,15 +1,23 @@
+export const WHITE_CAT_VISUAL_STYLE_SELECTION_VERSION: 'white-cat-visual-style-selection-v1';
+export const WHITE_CAT_VISUAL_STYLE_OPTIONS: Readonly<Record<string, Readonly<Record<string, string>>>>;
 export const VISUAL_DENSITY_SELECTION_VERSION: 'visual-density-selection-v1';
 export const WORKFLOW_APPROVAL_MODE_VERSION: 'workflow-approval-mode-v1';
 export const ONE_CLICK_APPROVAL_POLICY_VERSION: 'one-click-approval-policy-v1';
+export const NARRATION_AUDIO_SOURCE_SELECTION_VERSION: 'narration-audio-source-selection-v1';
 export const ONE_CLICK_VISUAL_REVIEW_VERSION: 'visual-asset-review-v3';
 export const ONE_CLICK_FINAL_REVIEW_MODE: 'one_click_final_review_v1';
 export const ONE_CLICK_FINAL_REVIEW_PHASE: 'awaiting_precomposition_visual_review';
 export const CAPTION_CHOICE_PHASE: 'awaiting_caption_delivery_choice';
 
+export function resolveWhiteCatVisualStyleOption(styleId: string): Readonly<Record<string, string>>;
+export function buildWhiteCatVisualStyleSelectionSha256(selection: unknown): string;
+export function validateWhiteCatVisualStyleSelection(selection: unknown, context: unknown): unknown;
 export function buildVisualDensitySelectionSha256(selection: unknown): string;
 export function validateVisualDensitySelection(selection: unknown, context: unknown): unknown;
 export function buildWorkflowApprovalModeSha256(selection: unknown): string;
 export function validateWorkflowApprovalMode(selection: unknown, context: unknown): unknown;
+export function buildNarrationAudioSourceSelectionSha256(selection: unknown): string;
+export function validateNarrationAudioSourceSelection(selection: unknown, context: unknown): unknown;
 export function buildOneClickApprovalPolicySha256(policy: unknown): string;
 export function validateOneClickApprovalPolicy(policy: unknown, bindings: unknown): unknown;
 export function validateApprovalSelectionSequence(value: unknown): unknown;

@@ -1,4 +1,6 @@
 /output/
 /assets/
 /.codegraph/
+/.venv-edge-tts/
+/.venv-audio-validation/
 /.cache/

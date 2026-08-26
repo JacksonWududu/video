@@ -481,7 +481,7 @@ const buildV3Review = ({
   item.user_selection.white_cat_present = whiteCatPresent;
   if (eligible && whiteCatPresent) item.comic_plan_candidate.character_reference_review = pendingReference;
   item.compatible_routes = whiteCatPresent
-    ? ['imagegen', 'xuan-paper-diorama']
+    ? ['imagegen']
     : ['imagegen', 'xuan-paper-diorama', 'srt-whiteboard-animation', 'local-video-file'];
   item.incompatible_routes = ACTIVE_ROUTES_FOR_TEST.filter(
     (candidate) => !item.compatible_routes.includes(candidate),
@@ -490,10 +490,23 @@ const buildV3Review = ({
     item.incompatible_routes.map((candidate) => [candidate, `${candidate} 不兼容当前分类。`]),
   );
   item.recommended_route = 'imagegen';
+  const styleBinding = {
+    contract_version: 'white-cat-visual-style-selection-v1',
+    style_id: 'loose-line-vivid-watercolor',
+    treatment_profile_id: 'imagegen-watercolor-narrative',
+    visual_cohesion_profile_id: 'warm-paper-watercolor-cohesion-v1',
+    selection_sha256: 'f'.repeat(64),
+  };
+  item.white_cat_visual_style_id = styleBinding.style_id;
+  item.white_cat_visual_style_selection_sha256 = styleBinding.selection_sha256;
+  item.visual_cohesion_profile_id = styleBinding.visual_cohesion_profile_id;
   item.visible_text_mode = visibleTextMode;
   item.exact_visible_text = visibleTextMode === 'required' ? '知行合一' : null;
   item.visible_text_placement = visibleTextMode === 'required' ? '画面中央标题区' : null;
   Object.assign(item.user_selection, {
+    white_cat_visual_style_id: styleBinding.style_id,
+    white_cat_visual_style_selection_sha256: styleBinding.selection_sha256,
+    visual_cohesion_profile_id: styleBinding.visual_cohesion_profile_id,
     visible_text_mode: item.visible_text_mode,
     exact_visible_text: item.exact_visible_text,
     visible_text_placement: item.visible_text_placement,
@@ -504,6 +517,7 @@ const buildV3Review = ({
   item.local_video_source_path = item.user_selection.local_video_source_path;
   const review = buildV2Review([item]);
   review.contract_version = 'per-shot-visual-direction-review-v3';
+  review.white_cat_visual_style_binding = styleBinding;
   review.presentation.exact_message = '请确认完整逐镜视觉方向表 v3。';
   review.presented_map_sha256 = buildPresentedMapSha256(review);
   item.user_selection.presented_map_sha256 = review.presented_map_sha256;
@@ -682,6 +696,35 @@ test('v3 white-cat ordinary imagegen is text-free and forbids top titles', () =>
   assert.equal(validateVisualDirectionReview(accepted, {shots: matchingV3Shots(accepted)}).result, 'pass');
 });
 
+test('v3 binds twilight white-cat treatment and cohesion across the whole direction map', () => {
+  const review = buildV3Review({whiteCatPresent: true});
+  Object.assign(review.white_cat_visual_style_binding, {
+    style_id: 'twilight-neon-animation',
+    treatment_profile_id: 'imagegen-twilight-neon-narrative',
+    visual_cohesion_profile_id: 'twilight-luminous-cohesion-v1',
+  });
+  const row = review.rows[0];
+  row.white_cat_visual_style_id = 'twilight-neon-animation';
+  row.visual_cohesion_profile_id = 'twilight-luminous-cohesion-v1';
+  row.visual_language_recommendation.treatment_profile_id = 'imagegen-twilight-neon-narrative';
+  Object.assign(row.user_selection, {
+    white_cat_visual_style_id: 'twilight-neon-animation',
+    visual_cohesion_profile_id: 'twilight-luminous-cohesion-v1',
+    treatment_profile_id: 'imagegen-twilight-neon-narrative',
+  });
+  review.presented_map_sha256 = buildPresentedMapSha256(review);
+  row.user_selection.presented_map_sha256 = review.presented_map_sha256;
+  assert.equal(validateVisualDirectionReview(review, {shots: matchingV3Shots(review)}).result, 'pass');
+
+  row.user_selection.treatment_profile_id = 'imagegen-watercolor-narrative';
+  review.presented_map_sha256 = buildPresentedMapSha256(review);
+  row.user_selection.presented_map_sha256 = review.presented_map_sha256;
+  assert.throws(
+    () => validateVisualDirectionReview(review, {shots: matchingV3Shots(review)}),
+    /white-cat treatment does not match/i,
+  );
+});
+
 test('v3 no-cat ordinary imagegen may keep route-approved exact raster text', () => {
   const review = buildV3Review({
     eligible: false,
@@ -692,16 +735,25 @@ test('v3 no-cat ordinary imagegen may keep route-approved exact raster text', ()
   assert.equal(validateVisualDirectionReview(review, {shots: matchingV3Shots(review)}).result, 'pass');
 });
 
-test('v3 accepts text-free xuan-paper-diorama for narrative shots with or without the white cat', () => {
-  for (const whiteCatPresent of [true, false]) {
-    const review = buildV3Review({
-      eligible: false,
-      route: 'xuan-paper-diorama',
-      visibleTextMode: 'none',
-      whiteCatPresent,
-    });
-    assert.equal(validateVisualDirectionReview(review, {shots: matchingV3Shots(review)}).result, 'pass');
-  }
+test('v3 keeps xuan-paper-diorama no-cat only after the Gate-2 white-cat style choice', () => {
+  const accepted = buildV3Review({
+    eligible: false,
+    route: 'xuan-paper-diorama',
+    visibleTextMode: 'none',
+    whiteCatPresent: false,
+  });
+  assert.equal(validateVisualDirectionReview(accepted, {shots: matchingV3Shots(accepted)}).result, 'pass');
+
+  const rejected = buildV3Review({
+    eligible: false,
+    route: 'xuan-paper-diorama',
+    visibleTextMode: 'none',
+    whiteCatPresent: true,
+  });
+  assert.throws(
+    () => validateVisualDirectionReview(rejected, {shots: matchingV3Shots(rejected)}),
+    /white cat requires an approved imagegen-backed route|selected route is incompatible/i,
+  );
 });
 
 test('v3 accepts an explicitly selected no-cat local video with an exact presented absolute path', () => {

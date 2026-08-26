@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+import html
 import hashlib
 import json
 import re
@@ -28,6 +29,14 @@ LOCAL_VIDEO_ROUTE = "local-video-file"
 IAN_ROUTE = "ian-handdrawn-ppt"
 WHITEBOARD_STAGES = ("source_image_review", "annotation_review", "clip_review")
 WHITE_CAT_QA_ROUTES = {"imagegen", "xuan-paper-diorama"}
+WHITE_CAT_STYLE_OPTIONS = {
+    "loose-line-vivid-watercolor": (
+        "imagegen-watercolor-narrative", "warm-paper-watercolor-cohesion-v1"
+    ),
+    "twilight-neon-animation": (
+        "imagegen-twilight-neon-narrative", "twilight-luminous-cohesion-v1"
+    ),
+}
 WHITE_CAT_LIMB_IDS = {"F1", "F2", "H1", "H2"}
 WHITE_CAT_MASTER_ROLES = {
     "base/master", "white-cat-master", "recurring-character-master",
@@ -36,6 +45,8 @@ WHITE_CAT_IMAGEGEN_MASTER_QA = "ordinary-imagegen-white-cat-master-qa-v2"
 WHITE_CAT_IMAGEGEN_ACTION_QA = "ordinary-imagegen-white-cat-action-qa-v2"
 WHITE_CAT_XUAN_MASTER_QA = "xuan-paper-diorama-asset-qa-v1"
 WHITE_CAT_XUAN_ACTION_QA = "xuan-paper-diorama-action-qa-v1"
+FINAL_REVIEW_PACKAGE_CONTRACT = "final-production-asset-review-package-v1"
+FINAL_REVIEW_ASSETS_PER_PAGE = 12
 
 
 def _repository_root(value: str | Path | None) -> Path:
@@ -183,7 +194,35 @@ def _queue(state: dict[str, Any]) -> list[dict[str, Any]]:
         and item.get("status") != "superseded"
     ]
     local_video_seen = False
+    style_selection = state.get("white_cat_visual_style_selection")
+    current_style = isinstance(style_selection, dict)
+    if current_style:
+        style_id = style_selection.get("style_id")
+        option = WHITE_CAT_STYLE_OPTIONS.get(style_id)
+        selection_sha256 = style_selection.get("selection_sha256")
+        if (
+            style_selection.get("contract_version")
+            != "white-cat-visual-style-selection-v1"
+            or option is None
+            or not SHA256_RE.fullmatch(selection_sha256 or "")
+            or style_selection.get("treatment_profile_id") != option[0]
+            or style_selection.get("visual_cohesion_profile_id") != option[1]
+        ):
+            raise ValueError("white-cat visual style selection is invalid")
     for item in queue:
+        if current_style and item.get("white_cat_present") is True:
+            if (
+                item.get("visual_generation_route") != "imagegen"
+                or item.get("white_cat_visual_style_id") != style_id
+                or item.get("white_cat_visual_style_selection_sha256")
+                != selection_sha256
+                or item.get("visual_cohesion_profile_id") != option[1]
+                or item.get("treatment_profile_id") != option[0]
+            ):
+                raise ValueError(
+                    f"current white-cat asset lacks the Gate-2 ImageGen style binding: "
+                    f"{item.get('asset_id')}"
+                )
         if _is_local_video(item):
             local_video_seen = True
         elif local_video_seen:
@@ -193,6 +232,39 @@ def _queue(state: dict[str, Any]) -> list[dict[str, Any]]:
 
 def _find(queue: list[dict[str, Any]], asset_id: str) -> dict[str, Any] | None:
     return next((item for item in queue if item.get("asset_id") == asset_id), None)
+
+
+def _validate_visual_cohesion_qa(
+    state: dict[str, Any],
+    queue: list[dict[str, Any]],
+    repository_root: str | Path,
+) -> dict[str, Any] | None:
+    selection = state.get("white_cat_visual_style_selection")
+    if not isinstance(selection, dict):
+        return None
+    qa = state.get("visual_cohesion_qa")
+    expected_asset_ids = [
+        item.get("asset_id") for item in queue if not _is_local_video(item)
+    ]
+    if (
+        not isinstance(qa, dict)
+        or qa.get("contract_version") != "episode-visual-cohesion-qa-v1"
+        or qa.get("result") != "pass"
+        or qa.get("white_cat_visual_style_selection_sha256")
+        != selection.get("selection_sha256")
+        or qa.get("visual_cohesion_profile_id")
+        != selection.get("visual_cohesion_profile_id")
+        or qa.get("covered_asset_ids") != expected_asset_ids
+        or qa.get("anomalies") != []
+    ):
+        raise ValueError("episode visual cohesion QA is missing, stale, partial, or rejected")
+    overview = qa.get("overview")
+    if not isinstance(overview, dict):
+        raise ValueError("episode visual cohesion QA overview is missing")
+    file = _resolve_regular_file(repository_root, overview.get("path"))
+    if _sha256_file(file) != overview.get("checksum_sha256"):
+        raise ValueError("episode visual cohesion QA overview changed on disk")
+    return qa
 
 
 def _is_whiteboard(item: dict[str, Any]) -> bool:
@@ -378,8 +450,11 @@ def require_generation_allowed(state: dict[str, Any], asset_id: str) -> dict[str
 
     if current.get("status") not in {"pending_generation", "changes_requested"}:
         raise ValueError(f"current asset is not available for generation: {asset_id}")
-    attempt_control = current.get("white_cat_generation_attempt_control", {})
+    attempt_control = current.get("image_generation_attempt_control", {})
     if attempt_control.get("automatic_retry_status") == "stopped_user_takeover_required":
+        raise ValueError(f"automatic image retry stopped; user takeover required: {asset_id}")
+    legacy_white_cat_control = current.get("white_cat_generation_attempt_control", {})
+    if legacy_white_cat_control.get("automatic_retry_status") == "stopped_user_takeover_required":
         raise ValueError(f"white-cat automatic retry stopped; user takeover required: {asset_id}")
     if _is_local_video(current):
         raise ValueError("local-video-file must be imported only after generated visuals, not generated")
@@ -927,34 +1002,48 @@ def _require_ian_layered_scene_package(
     scene_plan = item.get("ian_scene_plan")
     plan_checksum = item.get("ian_scene_plan_sha256")
     members = item.get("ian_scene_package_members")
-    if item.get("qa_contract_version") != "ian-layered-scene-qa-v1" \
+    if item.get("qa_contract_version") != "ian-layered-scene-qa-v2" \
             or not isinstance(manifest_path, str) or not manifest_path \
             or not SHA256_RE.fullmatch(str(manifest_checksum or "")) \
             or not isinstance(scene_plan, dict) \
             or not SHA256_RE.fullmatch(str(plan_checksum or "")) \
-            or not isinstance(members, list) or len(members) < 3:
+            or not isinstance(members, list) or len(members) < 6:
         raise ValueError(f"Ian layered-scene state is incomplete: {item.get('asset_id')}")
     encoded_plan = json.dumps(
         scene_plan, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
     ).encode("utf-8")
     if hashlib.sha256(encoded_plan).hexdigest() != plan_checksum:
         raise ValueError(f"Ian layered-scene plan checksum is stale: {item.get('asset_id')}")
-    expected_roles = ["background"] + [
-        "semantic-layer" for _ in range(len(members) - 2)
-    ] + ["final-composite"]
+    layer_count = scene_plan.get("layer_count")
+    if not isinstance(layer_count, int) or layer_count < 1:
+        raise ValueError(f"Ian layered-scene plan layer count is invalid: {item.get('asset_id')}")
+    expected_roles = ["source-master", "normalized-master", "background"] + [
+        "pre-text-layer" for _ in range(layer_count)
+    ] + ["semantic-layer" for _ in range(layer_count)] + ["final-composite"]
+    if len(members) != 4 + (2 * layer_count):
+        raise ValueError(f"Ian layered-scene member count is invalid: {item.get('asset_id')}")
     if [member.get("member_role") for member in members] != expected_roles:
         raise ValueError(f"Ian layered-scene member order is invalid: {item.get('asset_id')}")
-    expected_layer_ids = ["background"] + [
-        f"L{index:02d}" for index in range(1, len(members) - 1)
-    ] + ["final-composite"]
+    layer_ids = [f"L{index:02d}" for index in range(1, layer_count + 1)]
+    expected_layer_ids = [
+        "source-master", "normalized-master", "background",
+        *layer_ids, *layer_ids, "final-composite",
+    ]
     normalized_members = []
     for index, member in enumerate(members):
+        member_role = member.get("member_role") if isinstance(member, dict) else None
+        expected_width = member.get("width") if member_role == "source-master" else 1920
+        expected_height = member.get("height") if member_role == "source-master" else 1080
         if not isinstance(member, dict) \
                 or member.get("layer_id") != expected_layer_ids[index] \
                 or not isinstance(member.get("path"), str) or not member["path"] \
                 or not SHA256_RE.fullmatch(str(member.get("checksum_sha256", ""))) \
-                or member.get("width") != 1920 or member.get("height") != 1080 \
-                or member.get("has_alpha") != (member.get("member_role") == "semantic-layer"):
+                or not isinstance(expected_width, int) or expected_width < 1 \
+                or not isinstance(expected_height, int) or expected_height < 1 \
+                or member.get("width") != expected_width \
+                or member.get("height") != expected_height \
+                or member.get("has_alpha") \
+                != (member_role in {"pre-text-layer", "semantic-layer"}):
             raise ValueError(
                 f"Ian layered-scene member is invalid: {item.get('asset_id')}:{index}"
             )
@@ -963,45 +1052,44 @@ def _require_ian_layered_scene_package(
             "layer_id": member["layer_id"],
             "path": member["path"],
             "checksum_sha256": member["checksum_sha256"],
-            "width": 1920,
-            "height": 1080,
+            "width": expected_width,
+            "height": expected_height,
             "has_alpha": member["has_alpha"],
         })
     final_member = normalized_members[-1]
     if final_member["path"] != item.get("path") \
             or final_member["checksum_sha256"] != item.get("checksum_sha256"):
         raise ValueError(f"Ian final composite is stale: {item.get('asset_id')}")
-    generated_members = normalized_members[:-1]
     lineage = item.get("generation_lineage")
-    if not isinstance(lineage, list) or len(lineage) != len(generated_members):
+    if not isinstance(lineage, list) or len(lineage) != 1:
         raise ValueError(
-            f"Ian source members lack independent generation lineage: {item.get('asset_id')}"
+            f"Ian source master lacks one generation lineage: {item.get('asset_id')}"
         )
-    for index, (stage, member) in enumerate(zip(lineage, generated_members, strict=True)):
-        if not isinstance(stage, dict) \
-                or stage.get("stage") != "independent-member-generation" \
-                or stage.get("generation_mode") \
-                != "codex-native-imagegen-independent-member-v1" \
-                or stage.get("member_role") != member["member_role"] \
-                or stage.get("layer_id") != member["layer_id"] \
-                or stage.get("selection_status") != "selected" \
-                or stage.get("reference_inputs") != item.get("actual_reference_inputs") \
-                or stage.get("output") != {
-                    "path": member["path"],
-                    "checksum_sha256": member["checksum_sha256"],
-                }:
-            raise ValueError(
-                f"Ian generation lineage is stale: {item.get('asset_id')}:{index}"
-            )
-        prompt = stage.get("prompt")
-        if not isinstance(prompt, dict) \
-                or not isinstance(prompt.get("path"), str) or not prompt["path"] \
-                or not SHA256_RE.fullmatch(str(prompt.get("checksum_sha256", ""))):
-            raise ValueError(
-                f"Ian generation prompt binding is invalid: {item.get('asset_id')}:{index}"
-            )
+    stage = lineage[0]
+    source_member = normalized_members[0]
+    if not isinstance(stage, dict) \
+            or set(stage) != {
+                "stage", "generation_mode", "model_id", "prompt",
+                "reference_inputs", "output", "selection_status",
+            } \
+            or stage.get("stage") != "complete-master-generation" \
+            or stage.get("generation_mode") \
+            != "codex-native-imagegen-gpt-image-2-text-free-master-v1" \
+            or stage.get("model_id") != "gpt-image-2" \
+            or stage.get("selection_status") != "selected" \
+            or stage.get("reference_inputs") != item.get("actual_reference_inputs") \
+            or stage.get("output") != {
+                "path": source_member["path"],
+                "checksum_sha256": source_member["checksum_sha256"],
+            }:
+        raise ValueError(f"Ian generation lineage is stale: {item.get('asset_id')}:0")
+    prompt = stage.get("prompt")
+    if not isinstance(prompt, dict) \
+            or not isinstance(prompt.get("path"), str) or not prompt["path"] \
+            or not SHA256_RE.fullmatch(str(prompt.get("checksum_sha256", ""))):
+        raise ValueError(f"Ian generation prompt binding is invalid: {item.get('asset_id')}:0")
     payload = {
-        "contract_version": "ian-knowledge-video-layered-scene-v1",
+        "contract_version": "ian-knowledge-video-layered-scene-v2",
         "manifest": {
             "path": manifest_path,
             "checksum_sha256": manifest_checksum,
@@ -1021,8 +1109,23 @@ def _require_ian_layered_scene_package(
         if _sha256_file(manifest_file) != manifest_checksum:
             raise ValueError(f"Ian package manifest changed on disk: {item.get('asset_id')}")
         manifest = json.loads(manifest_file.read_text(encoding="utf-8"))
+        master_generation = manifest.get("master_generation", {})
         manifest_members = [
+            {
+                "member_role": "source-master",
+                "layer_id": "source-master",
+                **master_generation.get("source_master", {}),
+            },
+            {
+                "member_role": "normalized-master",
+                "layer_id": "normalized-master",
+                **manifest.get("normalized_master", {}),
+            },
             {"member_role": "background", "layer_id": "background", **manifest.get("background", {})},
+            *[
+                {"member_role": "pre-text-layer", **layer}
+                for layer in manifest.get("pre_text_layers", [])
+            ],
             *[
                 {"member_role": "semantic-layer", **layer}
                 for layer in manifest.get("layers", [])
@@ -1045,11 +1148,30 @@ def _require_ian_layered_scene_package(
             }
             for member in manifest_members
         ]
-        if manifest.get("contract_version") != "ian-knowledge-video-layered-scene-v1" \
+        model_provenance = manifest.get("model_provenance", {})
+        if manifest.get("contract_version") != "ian-knowledge-video-layered-scene-v2" \
                 or manifest.get("queue_item_id") != item.get("asset_id") \
                 or manifest.get("shot_id") != item.get("shot_id") \
                 or manifest.get("scene_plan") != scene_plan \
                 or manifest.get("scene_plan_sha256") != plan_checksum \
+                or master_generation.get("contract_version") \
+                != "ian-gpt-image-2-text-free-master-v1" \
+                or master_generation.get("generator") != "codex-native-imagegen" \
+                or master_generation.get("model_id") != "gpt-image-2" \
+                or master_generation.get("prompt") != prompt \
+                or master_generation.get("reference_inputs") \
+                != item.get("actual_reference_inputs") \
+                or master_generation.get("source_master") is None \
+                or model_provenance.get("contract_version") \
+                != "codex-native-imagegen-gpt-image-2-provenance-v1" \
+                or model_provenance.get("generator") != "codex-native-imagegen" \
+                or model_provenance.get("canonical_model") != "gpt-image-2" \
+                or model_provenance.get("evidence_kind") \
+                != "embedded-c2pa-software-agent-observation-v1" \
+                or model_provenance.get("source_master_checksum_sha256") \
+                != source_member["checksum_sha256"] \
+                or model_provenance.get("expected_software_agent") \
+                != {"name": "gpt-image", "version": "2.0"} \
                 or projected_manifest_members != normalized_members:
             raise ValueError(f"Ian package manifest is stale: {item.get('asset_id')}")
         for member in normalized_members:
@@ -1058,12 +1180,9 @@ def _require_ian_layered_scene_package(
                 raise ValueError(
                     f"Ian package member changed on disk: {item.get('asset_id')}:{member['layer_id']}"
                 )
-        for index, stage in enumerate(lineage):
-            prompt_file = _resolve_regular_file(repository_root, stage["prompt"]["path"])
-            if _sha256_file(prompt_file) != stage["prompt"]["checksum_sha256"]:
-                raise ValueError(
-                    f"Ian generation prompt changed on disk: {item.get('asset_id')}:{index}"
-                )
+        prompt_file = _resolve_regular_file(repository_root, prompt["path"])
+        if _sha256_file(prompt_file) != prompt["checksum_sha256"]:
+            raise ValueError(f"Ian generation prompt changed on disk: {item.get('asset_id')}:0")
     return result
 
 
@@ -1230,6 +1349,9 @@ def validate_visual_assets_locked(
                 or final_review.get("exact_hash_list_approved") is not True \
                 or not SHA256_RE.fullmatch(final_review.get("asset_list_sha256", "")):
             raise ValueError("one-click visual lock requires complete exact hash-list approval")
+        _validate_one_click_final_review_package(
+            state, final_review, repository_root,
+        )
     if review.get("active_batch") is not None or review.get("queue_generation_allowed") is False:
         raise ValueError("visual asset review still has an active approval boundary")
     checksum_map: dict[str, str] = {}
@@ -1281,6 +1403,7 @@ def validate_visual_assets_locked(
         ):
             raise ValueError(f"approval-time disk evidence is missing or stale: {asset_id}")
         checksum_map[asset_id] = evidence["checksum_sha256"]
+    _validate_visual_cohesion_qa(state, queue, repository_root)
     payload = {
         "contract_version": "visual-assets-lock-verification-v1",
         "mode": review["mode"],
@@ -1341,6 +1464,168 @@ def _one_click_final_review_payload(state: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _validate_one_click_final_review_package(
+    state: dict[str, Any], final_review: dict[str, Any],
+    repository_root: str | Path,
+) -> dict[str, Any]:
+    package = final_review.get("review_package")
+    digest = final_review.get("presented_map_sha256")
+    workspace = state.get("workspace_path")
+    if not isinstance(package, dict) \
+            or package.get("contract_version") != FINAL_REVIEW_PACKAGE_CONTRACT:
+        raise ValueError("current image-rich unified final review package is missing")
+    if not SHA256_RE.fullmatch(digest or "") \
+            or package.get("presented_map_sha256") != digest:
+        raise ValueError("image-rich unified final review package digest is stale")
+    if not isinstance(workspace, str) or not workspace \
+            or Path(workspace).is_absolute() or ".." in Path(workspace).parts:
+        raise ValueError("episode workspace binding is invalid")
+    short_digest = digest[:8]
+    expected_manifest_path = (
+        f"{workspace}/schema/final-production-asset-review-{short_digest}.json"
+    )
+    expected_html_path = (
+        f"{workspace}/docs/final-production-asset-review-{short_digest}.html"
+    )
+    manifest_binding = package.get("manifest")
+    html_binding = package.get("html")
+    if not isinstance(manifest_binding, dict) \
+            or manifest_binding.get("path") != expected_manifest_path \
+            or not SHA256_RE.fullmatch(manifest_binding.get("checksum_sha256", "")):
+        raise ValueError("image-rich unified final review manifest binding is stale")
+    if not isinstance(html_binding, dict) \
+            or html_binding.get("path") != expected_html_path \
+            or not SHA256_RE.fullmatch(html_binding.get("checksum_sha256", "")):
+        raise ValueError("image-rich unified final review HTML binding is stale")
+
+    manifest_path = _resolve_regular_file(repository_root, expected_manifest_path)
+    if _sha256_file(manifest_path) != manifest_binding["checksum_sha256"]:
+        raise ValueError("image-rich unified final review manifest changed on disk")
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise ValueError(f"image-rich unified final review manifest is unreadable: {error}") from error
+    if manifest.get("contract_version") != FINAL_REVIEW_PACKAGE_CONTRACT \
+            or manifest.get("episode_workspace") != workspace \
+            or manifest.get("phase") != "awaiting_precomposition_visual_review" \
+            or manifest.get("presented_map_sha256") != digest \
+            or manifest.get("approval_effect") != "none-display-aid-only" \
+            or manifest.get("episode_state_mutated") is not False:
+        raise ValueError("image-rich unified final review manifest authority is stale")
+
+    counts = package.get("counts")
+    pages = package.get("pages")
+    ian_sheets = package.get("ian_stage_sheets")
+    outputs = manifest.get("outputs")
+    assets = final_review.get("assets")
+    manifest_assets = manifest.get("assets")
+    if not isinstance(counts, dict) or manifest.get("counts") != counts \
+            or not isinstance(pages, list) or not isinstance(ian_sheets, list) \
+            or not isinstance(outputs, dict) or outputs.get("html") != html_binding \
+            or outputs.get("pages") != pages \
+            or outputs.get("ian_stage_sheets") != ian_sheets:
+        raise ValueError("image-rich unified final review output map is stale")
+    if not isinstance(assets, list) or not isinstance(manifest_assets, list) \
+            or len(manifest_assets) != len(assets) \
+            or counts.get("asset_count") != len(assets) \
+            or counts.get("page_count") != len(pages) \
+            or counts.get("page_count") != (
+                len(assets) + FINAL_REVIEW_ASSETS_PER_PAGE - 1
+            ) // FINAL_REVIEW_ASSETS_PER_PAGE:
+        raise ValueError("image-rich unified final review counts are stale")
+    expected_ian_count = sum(
+        1 for item in _queue(state)
+        if item.get("visual_generation_route") == IAN_ROUTE
+    )
+    if counts.get("ian_package_count") != expected_ian_count \
+            or len(ian_sheets) != expected_ian_count:
+        raise ValueError("image-rich unified final review Ian package count is stale")
+    for expected, actual in zip(assets, manifest_assets, strict=True):
+        for field in ("asset_id", "path", "checksum_sha256", "qa_status"):
+            expected_value = expected.get(field)
+            if field == "qa_status" and final_review.get("status") == "approved":
+                expected_value = "qa_passed_pending_final_review"
+            if actual.get(field) != expected_value:
+                raise ValueError(
+                    f"image-rich unified final review asset map is stale: "
+                    f"{expected.get('asset_id')}"
+                )
+
+    html_path = _resolve_regular_file(repository_root, expected_html_path)
+    if _sha256_file(html_path) != html_binding["checksum_sha256"]:
+        raise ValueError("image-rich unified final review HTML changed on disk")
+    try:
+        html_text = html_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as error:
+        raise ValueError(f"image-rich unified final review HTML is unreadable: {error}") from error
+    required_metadata = (
+        f'<meta name="final-production-review-contract" content="{FINAL_REVIEW_PACKAGE_CONTRACT}">',
+        f'<meta name="final-production-review-map-sha256" content="{digest}">',
+        f'<meta name="final-production-review-asset-count" content="{len(assets)}">',
+        f'<meta name="final-production-review-ian-package-count" content="{expected_ian_count}">',
+    )
+    if any(marker not in html_text for marker in required_metadata) \
+            or html_text.count('data-final-review-asset="1"') != len(assets) \
+            or html_text.count('data-ian-package="1"') != expected_ian_count:
+        raise ValueError("image-rich unified final review HTML content is incomplete")
+    for asset in assets:
+        escaped_id = html.escape(asset["asset_id"], quote=True)
+        if html_text.count(f'data-asset-id="{escaped_id}"') != 1 \
+                or asset["checksum_sha256"] not in html_text:
+            raise ValueError(
+                f"image-rich unified final review HTML omits asset: {asset['asset_id']}"
+            )
+
+    for output in [*pages, *ian_sheets]:
+        if not isinstance(output, dict) or output.get("width") != 1920 \
+                or output.get("height") != 1080 \
+                or not SHA256_RE.fullmatch(output.get("checksum_sha256", "")):
+            raise ValueError("image-rich unified final review sheet binding is invalid")
+        output_path = output.get("path")
+        if not isinstance(output_path, str) or not output_path.startswith(
+            f"{workspace}/assets/image/review/final-production-assets-{short_digest}-"
+        ):
+            raise ValueError("image-rich unified final review sheet path is stale")
+        sheet = _resolve_regular_file(repository_root, output_path)
+        if _sha256_file(sheet) != output["checksum_sha256"] \
+                or _png_dimensions(sheet) != (1920, 1080):
+            raise ValueError("image-rich unified final review sheet changed on disk")
+    return package
+
+
+def bind_one_click_final_review_package(
+    state: dict[str, Any], package_report: dict[str, Any], *,
+    repository_root: str | Path,
+) -> dict[str, Any]:
+    review = _review(state)
+    final_review = review.get("final_review")
+    if state.get("phase") != "awaiting_precomposition_visual_review" \
+            or state.get("current_phase") != "awaiting_precomposition_visual_review" \
+            or not isinstance(final_review, dict) \
+            or final_review.get("status") != "pending":
+        raise ValueError("episode is not awaiting one-click final visual review")
+    if package_report.get("contract_version") != FINAL_REVIEW_PACKAGE_CONTRACT \
+            or package_report.get("presented_map_sha256") != final_review.get(
+                "presented_map_sha256"
+            ) \
+            or package_report.get("episode_state_mutated") is not False:
+        raise ValueError("final production review package report is stale")
+    package = {
+        "contract_version": package_report["contract_version"],
+        "presented_map_sha256": package_report["presented_map_sha256"],
+        "counts": copy.deepcopy(package_report.get("counts")),
+        "manifest": copy.deepcopy(package_report.get("manifest")),
+        "html": copy.deepcopy(package_report.get("html")),
+        "pages": copy.deepcopy(package_report.get("pages")),
+        "ian_stage_sheets": copy.deepcopy(package_report.get("ian_stage_sheets")),
+    }
+    candidate = copy.deepcopy(final_review)
+    candidate["review_package"] = package
+    _validate_one_click_final_review_package(state, candidate, repository_root)
+    final_review["review_package"] = package
+    return package
+
+
 def present_one_click_final_visual_review(state: dict[str, Any]) -> dict[str, Any]:
     payload = _one_click_final_review_payload(state)
     encoded = json.dumps(
@@ -1376,6 +1661,9 @@ def approve_one_click_final_visual_review(
         evidence = _disk_evidence(repository_root, item["path"], item)
         if evidence["checksum_sha256"] != item["checksum_sha256"]:
             raise ValueError(f"one-click final visual changed on disk: {item['asset_id']}")
+    review_package = _validate_one_click_final_review_package(
+        state, final_review, repository_root,
+    )
     for item in _queue(state):
         if _is_whiteboard(item):
             whiteboard = _whiteboard_review(item)
@@ -1425,6 +1713,7 @@ def approve_one_click_final_visual_review(
         "asset_list_sha256": expected["presented_map_sha256"],
         "decision_message": decision_message,
         "decision_time": decision_time,
+        "review_package": copy.deepcopy(review_package),
     }
     review["final_review"] = final_review
     review["queue_generation_allowed"] = True
@@ -1462,7 +1751,10 @@ def record_one_click_changes_requested(
         "status": "pending",
     }
     prior_final_review = review.get("final_review")
-    if prior_final_review != expected_final_review:
+    comparable_prior = copy.deepcopy(prior_final_review)
+    if isinstance(comparable_prior, dict):
+        comparable_prior.pop("review_package", None)
+    if comparable_prior != expected_final_review:
         raise ValueError("one-click final visual review is stale or malformed")
 
     affected_ids = {asset_id}
@@ -1491,7 +1783,7 @@ def record_one_click_changes_requested(
         "prior_review_status": "pending",
         "affected_asset_ids": ordered_affected_ids,
         "preserved_unaffected_asset_count": len(queue) - len(affected_ids),
-        "prior_final_review": copy.deepcopy(expected_final_review),
+        "prior_final_review": copy.deepcopy(prior_final_review),
         "prior_queue_items": prior_items,
         "user_change_request": decision_message.strip(),
         "files_deleted": False,
@@ -1504,7 +1796,7 @@ def record_one_click_changes_requested(
         "actual_reference_inputs", "state_visible_text",
         "technical_qa", "semantic_qa", "visible_text_qa", "style_qa", "visual_qa",
         "qa_contract_version", "revision_source", "ian_scene_plan_sha256",
-        "ian_scene_package_members",
+        "ian_scene_package_members", "generation_lineage",
     }
     stale_prefixes = (
         "approved_", "presented_", "batch_", "generated_source_",

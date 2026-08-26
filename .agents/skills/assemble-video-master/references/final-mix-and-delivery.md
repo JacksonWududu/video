@@ -31,6 +31,13 @@ When the user supplies a BGM for the active episode, validate that exact file, a
 - Do not change narration, scene, transition, composition timing, or the selected caption role during mixing, and do not add a subtitle stream.
 - Record `bgm.mix` with the exact composition-lock base checksum, BGM source checksum, mixed output checksum, and QA result. Never reuse a mix if either input checksum changed, even when duration is unchanged.
 
+## Ian layer-entry sound effects
+
+- Use only cues in a checksum-current `ian-layered-entry-effects-v2` map and the shared `shared-sound-effect-library-v1` manifest. In a multi-layer shot, exactly 2–3 semantically important layers have cues at their exact `entry_frame`; every other layer is silent. The pre-trimmed derived stereo 44.1 kHz WAV must bind the original source path/SHA, semantic reason, trim sample range, derived path/SHA, cue frame/sample, role, and per-asset gain. Reject more than two uses of one source per shot, adjacent audible cues from the same timbre family, and pitch/speed-only pseudo-variation.
+- Fixed class gains are paper/card 0.19, node/mechanism 0.44, contour/path 0.15, and broad-region reveal 0.23. Do not substitute a similar library item or alter one layer independently.
+- Keep narration gain at 1 and `amix`/mix normalization disabled. Measure the rendered master peak. If it exceeds -1 dBFS, lower all Ian entry SFX by one common bus multiplier and rerender; never lower or rewrite narration. Narration-only and final-mix lineage must prove the narration bytes and gain are unchanged, and narration loudness drift may not exceed 0.5 dB.
+- Missing, stale, duplicate, unapproved, wrong-frame, or wrong-gain cues block preview, render, composition lock, and delivery.
+
 ## Caption-delivery mode and shared horizontal masters
 
 - Require `caption_delivery.mode` and its exact choice evidence before rendering. Under `required_delivery_roles`, `caption_free_only` requires `caption_free_master`, `captioned_only` requires `captioned_master`, and `both` requires both master roles. Mechanically derive matching `required_internal_qa_roles`: `caption_free_opening`, `captioned_opening`, or both. Render no role outside the union of those two sets.

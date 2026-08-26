@@ -166,6 +166,58 @@ class WhiteCatAccessoryQaTests(unittest.TestCase):
         self.assertIn("selected_source_file=source", strict_text)
         self.assertIn("helper.validate_white_cat_identity_qa_v2(", action_text)
 
+    def test_gate2_twilight_style_binding_drives_prompt_and_qa(self) -> None:
+        selection = {
+            "contract_version": "white-cat-visual-style-selection-v1",
+            "gate2_script_sha256": "a" * 64,
+            "style_id": "twilight-neon-animation",
+            "treatment_profile_id": "imagegen-twilight-neon-narrative",
+            "visual_cohesion_profile_id": "twilight-luminous-cohesion-v1",
+            "style_skill_path": "/tmp/style-skill",
+            "style_skill_checksum_sha256": "b" * 64,
+            "style_profile_path": "/tmp/twilight-profile",
+            "style_profile_checksum_sha256": "c" * 64,
+            "decision": {
+                "status": "selected",
+                "exact_message": "选择暮紫霓影动画",
+                "decided_at": "2026-08-26T10:00:00+08:00",
+            },
+        }
+        selection["selection_sha256"] = self.recorder._canonical_sha256(selection)
+        item = {
+            "white_cat_visual_style_id": "twilight-neon-animation",
+            "white_cat_visual_style_selection_sha256": selection["selection_sha256"],
+            "visual_cohesion_profile_id": "twilight-luminous-cohesion-v1",
+            "treatment_profile_id": "imagegen-twilight-neon-narrative",
+        }
+        style_id, cohesion_id, current = self.recorder.resolve_white_cat_visual_style_binding(
+            {"white_cat_visual_style_selection": selection}, item
+        )
+        self.assertEqual((style_id, cohesion_id, current), (
+            "twilight-neon-animation", "twilight-luminous-cohesion-v1", True
+        ))
+        qa = {"white_cat_visual_style_binding": {
+            "style_id": style_id,
+            "selection_sha256": selection["selection_sha256"],
+            "visual_cohesion_profile_id": cohesion_id,
+        }}
+        self.recorder.validate_white_cat_style_prompt_and_qa(
+            prompt_text=(
+                "WHITE-CAT VISUAL STYLE: twilight-neon-animation. "
+                "EPISODE VISUAL COHESION: twilight-luminous-cohesion-v1."
+            ),
+            qa=qa,
+            style_id=style_id,
+            cohesion_id=cohesion_id,
+            selection_sha256=selection["selection_sha256"],
+            current_binding=current,
+        )
+        item["visual_cohesion_profile_id"] = "warm-paper-watercolor-cohesion-v1"
+        with self.assertRaisesRegex(ValueError, "stale, mixed, or substituted"):
+            self.recorder.resolve_white_cat_visual_style_binding(
+                {"white_cat_visual_style_selection": selection}, item
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

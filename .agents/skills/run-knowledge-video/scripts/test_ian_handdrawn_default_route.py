@@ -35,14 +35,15 @@ class IanHanddrawnDefaultRouteContractTest(unittest.TestCase):
             "historical still or character-led narrative illustration keeps its existing route",
         )
 
-    def test_visual_skill_uses_a_static_layered_package(self) -> None:
+    def test_visual_skill_uses_a_layered_package_and_separate_entry_plan(self) -> None:
         self.assert_file_contains(
             ".agents/skills/produce-video-visuals/SKILL.md",
             "per-shot-visual-direction-review-v3",
-            "ian-knowledge-video-layered-scene-v1",
-            "full-canvas transparent PNG",
+            "ian-knowledge-video-layered-scene-v2",
+            "one complete text-free Ian master",
+            "full-canvas transparent pre-text layers",
             "deterministic final-composite review PNG",
-            "fixed eight-frame entry fade",
+            "ian-layered-entry-effects-v2",
             "shared opening cover",
         )
         self.assert_file_excludes(
@@ -60,7 +61,7 @@ class IanHanddrawnDefaultRouteContractTest(unittest.TestCase):
             "ink-doodle-knowledge-card-route-v1",
             "one opaque 1920×1080 paper background",
             "full-canvas transparent semantic layers",
-            "Pan, zoom, translation, rotation",
+            "maximum-10-px soft settle",
             "exact prompt/reference/style fingerprints",
         )
         self.assert_file_excludes(
@@ -74,7 +75,7 @@ class IanHanddrawnDefaultRouteContractTest(unittest.TestCase):
         self.assert_file_contains(
             ".agents/skills/build-video-storyboard/references/storyboard-contract.md",
             "ian-handdrawn-ppt-default-v1",
-            "ian-knowledge-video-layered-scene-v1",
+            "ian-knowledge-video-layered-scene-v2",
             "Ian 分层场景计划",
             "contiguous exact UTF-8 byte ranges",
             "meaningful_change_events",
@@ -87,13 +88,14 @@ class IanHanddrawnDefaultRouteContractTest(unittest.TestCase):
             "Data visualizations are editable",
         )
 
-    def test_remotion_only_fades_approved_layers(self) -> None:
+    def test_remotion_consumes_only_approved_entry_effects(self) -> None:
         self.assert_file_contains(
             ".agents/skills/assemble-video-master/references/remotion-assembly-and-render.md",
             "IanLayeredScene",
-            "only changing property is opacity",
-            "linear 0→1 over exactly eight local frames",
-            "Forbid scene and layer translation, scaling, rotation",
+            "ian-layered-entry-effects-renderer-v2",
+            "soft-settle-v1",
+            "ink-draw-reveal-v1",
+            "at most two entry-motion language families",
             "ComicScene",
             "legacy decoder/consumer implementation",
             "Do not invoke it for a new output or derivative",
@@ -107,10 +109,11 @@ class IanHanddrawnDefaultRouteContractTest(unittest.TestCase):
         self.assert_file_contains(
             ".agents/skills/run-knowledge-video/references/workflow-state-machine.md",
             "ian-handdrawn-ppt-default-v1",
-            "ian-knowledge-video-layered-scene-v1",
+            "ian-knowledge-video-layered-scene-v2",
+            "one complete text-free master",
             "opaque paper background",
-            "full-canvas transparent semantic layers",
-            "only layer opacity",
+            "full-canvas transparent pre-text layers",
+            "ian-layered-entry-effects-v2",
             "completed-history evidence only",
         )
         self.assert_file_excludes(
@@ -121,7 +124,8 @@ class IanHanddrawnDefaultRouteContractTest(unittest.TestCase):
     def test_ian_skill_publishes_v3_bound_layered_adapter(self) -> None:
         self.assert_file_contains(
             ".agents/skills/ian-handdrawn-ppt/SKILL.md",
-            "ian-knowledge-video-layered-scene-v1",
+            "ian-knowledge-video-layered-scene-v2",
+            "one complete text-free Ian master",
             "one opaque paper background",
             "ordered full-canvas transparent semantic-element PNGs",
             "per-shot-visual-direction-review-v3",
@@ -132,7 +136,8 @@ class IanHanddrawnDefaultRouteContractTest(unittest.TestCase):
             "label, signature, watermark",
             "contact sheet is an outer Visual Asset Review artifact only",
             "validate_knowledge_video_layered_scene.mjs",
-            "eight-frame fade",
+            "soft-settle-v1",
+            "ink-draw-reveal-v1",
         )
 
 

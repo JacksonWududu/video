@@ -81,6 +81,20 @@ export const buildFinalStoryboardTitle = (topic) => {
   return `# 《${title}》知识视频分镜 v1\n`;
 };
 
+export const extractLockedNarrationBody = ({lockedBytes, openingByteStart}) => {
+  if (!Buffer.isBuffer(lockedBytes)
+    || !Number.isInteger(openingByteStart)
+    || openingByteStart < 0
+    || openingByteStart >= lockedBytes.length) {
+    throw new Error('locked narration opening byte start is invalid');
+  }
+  try {
+    return new TextDecoder('utf-8', {fatal: true}).decode(lockedBytes.subarray(openingByteStart));
+  } catch {
+    throw new Error('locked narration body is not valid UTF-8');
+  }
+};
+
 export const openingDetailCutMarker = (firstSentenceEndFrame) => {
   if (!Number.isInteger(firstSentenceEndFrame) || firstSentenceEndFrame <= 0) {
     throw new Error('first_sentence_end_frame must be a positive integer');
@@ -175,8 +189,10 @@ export const validateOpeningFirstSentenceRecord = ({
   if (openSourceText !== evidence.exact_first_sentence) {
     throw new Error('OPEN-00 source_text does not match opening first-sentence evidence');
   }
-  if (evidence.brand_prefix_validation !== 'not_applicable'
-    || evidence.topic_extraction !== 'not_performed') {
+  if ((evidence.brand_prefix_validation !== undefined
+      && evidence.brand_prefix_validation !== 'not_applicable')
+    || (evidence.topic_extraction !== undefined
+      && evidence.topic_extraction !== 'not_performed')) {
     throw new Error('opening evidence must not enforce brand wording or extract a topic');
   }
   return {
@@ -315,10 +331,12 @@ export const validateFinalStoryboard = (episodeWorkspace, storyboardRelativePath
     evidence: state.opening_narration_evidence,
     openSourceText: sourceTexts[0],
   });
-  const lockedLines = lockedBytes.toString('utf8').split(/\r?\n/);
-  const lockedBody = lockedLines.slice(2).join('\n');
+  const lockedBody = extractLockedNarrationBody({
+    lockedBytes,
+    openingByteStart: state.opening_narration_evidence.byte_start,
+  });
   const reconstructedBody = `${sourceTexts.join('\n')}${lockedBody.endsWith('\n') ? '\n' : ''}`;
-  if (lockedLines[1] !== '' || reconstructedBody !== lockedBody) {
+  if (reconstructedBody !== lockedBody) {
     throw new Error('storyboard narration does not cover the locked body exactly once in order');
   }
 

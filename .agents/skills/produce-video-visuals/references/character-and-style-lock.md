@@ -36,29 +36,25 @@ Label the sheet as `identity/composition reference`, never as a multi-cat layout
 
 ## Locked style
 
-For ordinary `imagegen`, use style ID `loose-line-vivid-watercolor` (松线明彩水彩) on a landscape canvas targeting 16:9 within `0.5%` relative aspect-ratio error; exact 1920×1080 is required for the later composition derivative:
+Use the exact episode-wide `white-cat-visual-style-selection-v1`; never default, mix, or override it per shot. Both choices target a 16:9 landscape canvas within `0.5%` relative aspect-ratio error; exact 1920×1080 is required for the later composition derivative.
 
-- warm off-white cold-press paper;
-- transparent luminous watercolor washes;
-- irregular brushed edges and exposed paper;
-- sparse loose broken black-brown charcoal/dry-ink contours.
+- `loose-line-vivid-watercolor` (松线明彩水彩): warm off-white cold-press paper, transparent luminous watercolor washes, irregular brushed edges/exposed paper, and sparse loose broken black-brown charcoal/dry-ink contours.
+- `twilight-neon-animation` (暮紫霓影动画): use the exact saved profile's twilight blue-violet animation language, luminous periwinkle/rose-coral accents, restrained bloom, clean cinematic forms, and its negative rules; preserve the same canonical cat identity without importing any prior pose, text, or scene geometry.
 
-Use the saved style profile only for visual language. Prevent the style or identity reference from leaking old scene geometry, pose-sheet layouts, text, or unrelated props.
-
-For `xuan-paper-diorama`, this watercolor profile is replaced—not blended—with the checksum-pinned `$generate-visual-styles` profile. Preserve the same canonical cat identity while rendering four-to-seven 宣纸 depth planes, visible paper fibers/cut/fold edges, warm paper neutrals, restrained mineral accents, miniature tabletop lighting, and no visible text. Do not transfer the canonical reference's watercolor background or pose-sheet layout.
+Use the selected saved style profile only for visual language. Every white-cat prompt and QA record carries its style ID, mapped treatment, `visual_cohesion_profile_id`, and selection SHA-256. Current new or modified white-cat work uses only `imagegen`; `xuan-paper-diorama` is no-cat only. Historical exact-byte-approved white-cat 宣纸 outputs remain read-only.
 
 ## Master-frame prompt contract
 
 Use concise English fields for scene, subject, action, emotion, camera/framing, geometry, props, style, identity invariants, composition invariants, subtitle-safe area, visible-text mode, and avoid rules. Preserve culturally specific Chinese concepts bilingually when English alone could change meaning. Every white-cat prompt must include the exact marker `WHITE-CAT SATCHEL STRAP LOCK:` followed by the two strap paths, one-per-opposite-bag-end attachments, and the prohibition against using patterned himation trim as a strap.
 
-- For ordinary `imagegen` with `white_cat_present: true` and every `xuan-paper-diorama` shot, require `visible_text_mode: none` and explicitly request no visible words, title, numeral, label, sign, interface string, signature, watermark, or accidental lettering. A `required` row is invalid and must return to `$build-video-storyboard`.
+- For `imagegen` with `white_cat_present: true` and every no-cat `xuan-paper-diorama` shot, require `visible_text_mode: none` and explicitly request no visible words, title, numeral, label, sign, interface string, signature, watermark, or accidental lettering. A `required` white-cat row or any current white-cat Xuan row is invalid and must return to `$build-video-storyboard`.
 - Do not use this white-cat reference to decide text for a no-cat imagegen, Ian, Ink Doodle Knowledge Card, or Whiteboard shot. Those routes follow their own approved text contracts.
 
 Record the Chinese source beat, final English prompt, reference version/checksum, style ID, intended beat, output path, and output checksum.
 
 ## Storyboard-image visible-text lock
 
-Apply this lock to ordinary `imagegen` shots whose approved row has `white_cat_present: true` and to every `xuan-paper-diorama` shot. They are unconditionally text-free: keep `visible_text_mode: none`, require null exact copy and placement, and forbid narrator captions, top titles, clocks rendered as numerals, data or explanatory labels, signs, book-spine lettering, interface text, decorative lettering, signatures, watermarks, and accidental glyph-like marks. Express time, comparison, causality, values, and emphasis only through pose, expression, props, icons, color, lighting, and composition. Repeat the prohibition in every master and action-variant prompt.
+Apply this lock to `imagegen` shots whose approved row has `white_cat_present: true` and to every no-cat `xuan-paper-diorama` shot. They are unconditionally text-free: keep `visible_text_mode: none`, require null exact copy and placement, and forbid narrator captions, top titles, clocks rendered as numerals, data or explanatory labels, signs, book-spine lettering, interface text, decorative lettering, signatures, watermarks, and accidental glyph-like marks. Express time, comparison, causality, values, and emphasis only through pose, expression, props, icons, color, lighting, and composition. Repeat the prohibition in every master and action-variant prompt.
 
 Do not create a second text-approval checkpoint in visual production and never override the checksum-bound v3 row without changing the storyboard. A requested text, mode, or placement change returns to Per-Shot Visual Direction Review and then Storyboard Review before production resumes.
 
