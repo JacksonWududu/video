@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 import re
 import stat
@@ -1131,11 +1132,24 @@ def _validate_sound_effect_design_state(
         artifact_file.relative_to(workspace_schema)
     except ValueError:
         errors.append("Sound-effect design must be stored under the active episode schema")
+    contract_version = artifact.get("contract_version")
+    binding_contract_version = binding.get("contract_version")
+    current_v2 = (
+        contract_version == "knowledge-video-sound-design-v2"
+        and binding_contract_version == contract_version
+    )
+    legacy_v1 = (
+        contract_version == "knowledge-video-sound-design-v1"
+        and binding_contract_version == contract_version
+        and (
+            state.get("current_phase") == "delivered"
+            or artifact.get("resume_mode") == "revoice_variant"
+        )
+    )
     if (
-        binding.get("contract_version") != "knowledge-video-sound-design-v1"
-        or binding.get("status") != "qa_passed"
-        or artifact.get("contract_version") != "knowledge-video-sound-design-v1"
+        not (current_v2 or legacy_v1)
         or artifact.get("status") != "qa_passed"
+        or binding.get("status") != "qa_passed"
         or artifact.get("result") != "pass"
         or artifact.get("episode_workspace") != workspace.relative_to(repo).as_posix()
         or artifact.get("fps") != 30
@@ -1148,11 +1162,98 @@ def _validate_sound_effect_design_state(
     ):
         errors.append("sound_effect_design state binding is incomplete or stale")
         return errors
+    if current_v2:
+        policy = artifact.get("bindings", {}).get("sound_design_policy")
+        if binding.get("sound_design_policy") != policy:
+            errors.append("sound_effect_design policy binding is incomplete or stale")
+        _, policy_errors = _resolve_bound_regular_file(
+            repo,
+            policy.get("path") if isinstance(policy, dict) else None,
+            policy.get("checksum_sha256") if isinstance(policy, dict) else None,
+            "Sound-design policy",
+        )
+        errors.extend(policy_errors)
     projection = dict(artifact)
     projection.pop("event_map_sha256", None)
     projection.pop("result", None)
     if artifact.get("event_map_sha256") != _canonical_sha256(projection):
         errors.append("Sound-effect design canonical event-map checksum is stale")
+    return errors
+
+
+def _validate_sound_effect_audio_preflight_state(
+    repo: Path,
+    workspace: Path,
+) -> list[str]:
+    state_file = workspace / "schema" / "episode-state.json"
+    if not state_file.exists() or state_file.is_symlink() or not state_file.is_file():
+        return []
+    try:
+        state = json.loads(state_file.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return []
+    if not isinstance(state, dict):
+        return []
+    sound_design = state.get("sound_effect_design")
+    if not isinstance(sound_design, dict) or sound_design.get(
+        "contract_version"
+    ) != "knowledge-video-sound-design-v2":
+        return []
+    required_phases = {
+        "final_rendering",
+        "revoice_variant_rendering",
+        "awaiting_post_delivery_bgm_recommendation",
+        "delivered",
+    }
+    if state.get("current_phase") not in required_phases:
+        return []
+    binding = state.get("sound_effect_audio_preflight")
+    if not isinstance(binding, dict):
+        return ["current render phase requires a passing audio-only sound preflight"]
+    artifact_file, errors = _resolve_bound_regular_file(
+        repo,
+        binding.get("path"),
+        binding.get("checksum_sha256"),
+        "Sound-effect audio preflight",
+    )
+    if artifact_file is None:
+        return errors
+    try:
+        artifact = json.loads(artifact_file.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return errors + ["Sound-effect audio preflight is not valid UTF-8 JSON"]
+    try:
+        artifact_file.relative_to(workspace / "schema")
+    except ValueError:
+        errors.append("Sound-effect audio preflight must be stored under the active episode schema")
+    projection_sha = artifact.get("sound_effects_projection_sha256")
+    if (
+        binding.get("contract_version")
+        != "knowledge-video-sound-audio-preflight-v1"
+        or binding.get("status") != "qa_passed"
+        or artifact.get("contract_version")
+        != "knowledge-video-sound-audio-preflight-v1"
+        or artifact.get("result") != "pass"
+        or binding.get("sound_effects_projection_sha256") != projection_sha
+        or not isinstance(projection_sha, str)
+        or re.fullmatch(r"[a-f0-9]{64}", projection_sha) is None
+        or binding.get("bus_gain_multiplier")
+        != artifact.get("bus_gain_multiplier")
+        or artifact.get("bus_gain_multiplier")
+        != sound_design.get("bus_gain_multiplier")
+        or artifact.get("narration", {}).get("gain") != 1
+        or artifact.get("normalization") != "disabled"
+        or artifact.get("sample_rate_hz") != 44100
+        or artifact.get("peak_ceiling_dbfs") != -1
+        or not isinstance(artifact.get("measured_peak_dbfs"), (int, float))
+        or not math.isfinite(artifact.get("measured_peak_dbfs"))
+        or artifact.get("measured_peak_dbfs") > -1
+        or artifact.get("full_video_rendered") is not False
+        or not isinstance(artifact.get("cue_groups"), list)
+        or not isinstance(artifact.get("full_master_frames"), int)
+        or artifact.get("full_master_frames") < 1
+    ):
+        errors.append("sound_effect_audio_preflight state binding is incomplete or stale")
     return errors
 
 
@@ -1232,6 +1333,7 @@ def validate_episode_workspace(repo_root: Path, workspace_arg: Path) -> list[str
     errors.extend(_validate_active_ian_layered_scene_queue(repo, workspace))
     errors.extend(_validate_visible_text_batch_review(repo, workspace))
     errors.extend(_validate_sound_effect_design_state(repo, workspace))
+    errors.extend(_validate_sound_effect_audio_preflight_state(repo, workspace))
     errors.extend(_validate_post_delivery_bgm_recommendation(repo, workspace))
 
     return sorted(set(errors))

@@ -64,7 +64,10 @@ import {
   validateIanLayeredEntryEffectsPlan,
 } from '../ian-layered-entry-effects/contract.mjs';
 import {loadAndValidateSharedSoundEffectLibrary} from '../sound-effects/contract.mjs';
-import {loadAndValidateKnowledgeVideoSoundDesign} from '../sound-effects/sound-design.mjs';
+import {
+  KNOWLEDGE_VIDEO_SOUND_DESIGN_POLICY_BINDING,
+  loadAndValidateKnowledgeVideoSoundDesign,
+} from '../sound-effects/sound-design.mjs';
 import {validateIanStoryboardLayeredSceneSection} from '../storyboard/validate-final-storyboard.mjs';
 
 const SHA256 = /^[a-f0-9]{64}$/;
@@ -950,6 +953,7 @@ const buildExpectedSoundDesignBindings = (input, visualRhythmEvidence) => ({
     checksum_sha256: visualRhythmEvidence?.checksum_sha256,
   }, 'visual rhythm'),
   transition_review: requireSoundDesignBinding(input.transitionSelectionReview, 'transition review'),
+  sound_design_policy: structuredClone(KNOWLEDGE_VIDEO_SOUND_DESIGN_POLICY_BINDING),
   sound_effect_library: requireSoundDesignBinding(input.soundEffectLibrary, 'sound-effect library'),
 });
 
@@ -968,19 +972,23 @@ const verifySoundDesignEvidence = (input, {shots, durationFrames, expectedBindin
 const validateSoundDesignEvidence = ({evidence, input, expectedBindings, revoiceVariant}) => {
   const soundDesign = requireSoundDesignBinding(input.soundDesign, 'sound design');
   const validation = evidence?.validation;
+  const currentV2 = validation?.contract_version === 'knowledge-video-sound-design-validation-v2';
+  const legacyRevoice = revoiceVariant
+    && validation?.contract_version === 'knowledge-video-sound-design-validation-v1';
   if (evidence?.path !== soundDesign.path
       || evidence?.checksum_sha256 !== soundDesign.checksum_sha256
-      || validation?.contract_version !== 'knowledge-video-sound-design-validation-v1'
+      || (!currentV2 && !legacyRevoice)
       || validation?.result !== 'pass'
       || validation?.resume_mode !== (revoiceVariant ? 'revoice_variant' : 'standard')
       || !SHA256.test(validation?.event_map_sha256 ?? '')
       || typeof validation?.bus_gain_multiplier !== 'number'
+      || !Number.isFinite(validation.bus_gain_multiplier)
       || validation.bus_gain_multiplier <= 0
-      || validation.bus_gain_multiplier > 1
       || !Array.isArray(validation?.audible_cues)) {
     throw new Error('passing current sound-design evidence is required');
   }
   for (const [key, binding] of Object.entries(expectedBindings)) {
+    if (legacyRevoice && key === 'sound_design_policy') continue;
     if (JSON.stringify(validation.bindings?.[key]) !== JSON.stringify(binding)) {
       throw new Error(`sound-design evidence has a stale ${key} binding`);
     }
@@ -1530,17 +1538,25 @@ export const buildKnowledgeVideoAssemblyPlan = (input, options = {}) => {
     bgm: input.bgm ?? {mode: 'disabled', source: null, track: null},
     ...(soundDesignEvidence === null ? {} : {
       sound_effects: {
-        contract_version: 'knowledge-video-sound-effect-track-v1',
+        contract_version: soundDesignEvidence.contract_version
+          === 'knowledge-video-sound-design-validation-v2'
+          ? 'knowledge-video-sound-effect-track-v2'
+          : 'knowledge-video-sound-effect-track-v1',
+        resume_mode: soundDesignEvidence.resume_mode,
         design: {
           path: soundDesignEvidence.path,
           checksum_sha256: soundDesignEvidence.checksum_sha256,
           event_map_sha256: soundDesignEvidence.event_map_sha256,
         },
         library: structuredClone(soundDesignEvidence.bindings.sound_effect_library),
+        policy: soundDesignEvidence.bindings.sound_design_policy == null
+          ? null
+          : structuredClone(soundDesignEvidence.bindings.sound_design_policy),
         narration_gain: 1,
         normalization: 'disabled',
         peak_ceiling_dbfs: -1,
         overflow_action: 'lower-sfx-bus-uniformly',
+        audio_preflight_policy: 'required-before-first-full-render-v1',
         bus_gain_multiplier: soundDesignEvidence.bus_gain_multiplier,
         cues: structuredClone(soundDesignEvidence.audible_cues),
       },

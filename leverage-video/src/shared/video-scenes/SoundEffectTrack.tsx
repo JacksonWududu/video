@@ -5,19 +5,33 @@ import type {CurrentKnowledgeVideoAssemblyPlan} from './types';
 type SoundEffectTrackPlan = CurrentKnowledgeVideoAssemblyPlan['sound_effects'];
 
 const validateTrack = (soundEffects: SoundEffectTrackPlan, durationInFrames: number) => {
-  if (soundEffects.contract_version !== 'knowledge-video-sound-effect-track-v1'
+  if (!['knowledge-video-sound-effect-track-v1', 'knowledge-video-sound-effect-track-v2']
+        .includes(soundEffects.contract_version)
+      || (soundEffects.contract_version === 'knowledge-video-sound-effect-track-v1'
+        && soundEffects.resume_mode !== 'revoice_variant')
+      || (soundEffects.contract_version === 'knowledge-video-sound-effect-track-v2'
+        && (!['standard', 'revoice_variant'].includes(soundEffects.resume_mode)
+          || soundEffects.policy == null
+          || soundEffects.audio_preflight_policy !== 'required-before-first-full-render-v1'))
       || soundEffects.narration_gain !== 1
       || soundEffects.normalization !== 'disabled'
       || soundEffects.peak_ceiling_dbfs !== -1
       || soundEffects.overflow_action !== 'lower-sfx-bus-uniformly'
       || typeof soundEffects.bus_gain_multiplier !== 'number'
-      || soundEffects.bus_gain_multiplier <= 0
-      || soundEffects.bus_gain_multiplier > 1) {
+      || !Number.isFinite(soundEffects.bus_gain_multiplier)
+      || soundEffects.bus_gain_multiplier <= 0) {
     throw new Error('SoundEffectTrack requires a valid unified SFX bus contract');
   }
   const ids = new Set<string>();
   for (const cue of soundEffects.cues) {
     if (ids.has(cue.event_id)
+        || (soundEffects.contract_version === 'knowledge-video-sound-effect-track-v2'
+          && (typeof cue.cue_group_id !== 'string' || cue.cue_group_id === ''
+            || cue.primary_render_event_id !== cue.event_id
+            || !Array.isArray(cue.covered_event_ids)
+            || !cue.covered_event_ids.includes(cue.event_id)
+            || !Number.isInteger(cue.sync_frame)
+            || cue.sync_frame! < cue.cue_frame))
         || !Number.isInteger(cue.cue_frame) || cue.cue_frame < 0
         || !Number.isInteger(cue.derived_asset.duration_in_frames)
         || cue.derived_asset.duration_in_frames < 1
@@ -44,7 +58,7 @@ export const SoundEffectTrack: React.FC<{
   readonly durationInFrames: number;
 }> = ({soundEffects, durationInFrames}) => validateTrack(soundEffects, durationInFrames).map((cue) => (
   <Sequence
-    key={cue.event_id}
+    key={cue.cue_group_id ?? cue.event_id}
     from={cue.cue_frame}
     durationInFrames={cue.derived_asset.duration_in_frames}
     name={`SFX ${cue.semantic_role}`}

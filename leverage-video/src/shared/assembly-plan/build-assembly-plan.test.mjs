@@ -546,12 +546,13 @@ const passingSoundDesignVerifier = (input, {shots, expectedBindings}) => ({
   path: input.soundDesign.path,
   checksum_sha256: input.soundDesign.checksum_sha256,
   validation: {
-    contract_version: 'knowledge-video-sound-design-validation-v1',
+    contract_version: 'knowledge-video-sound-design-validation-v2',
     result: 'pass',
     resume_mode: input.resumeMode === 'revoice_variant' ? 'revoice_variant' : 'standard',
     bindings: structuredClone(expectedBindings),
     event_map_sha256: 'c'.repeat(64),
-    bus_gain_multiplier: 1,
+    bus_gain_multiplier: 1.12,
+    structural_coverage_result: 'pass',
     events: [],
     audible_cues: shots.flatMap((shot) => (
       shot.ian_layered_scene?.entry_effects?.layers ?? []
@@ -559,6 +560,10 @@ const passingSoundDesignVerifier = (input, {shots, expectedBindings}) => ({
       event_id: `${shot.shot_id}:ian-layer:${entry.layer_id}`,
       shot_id: shot.shot_id,
       cue_frame: shot.start_frame + entry.sound_effect.cue_frame,
+      sync_frame: shot.start_frame + entry.sound_effect.cue_frame,
+      cue_group_id: `cue:${shot.shot_id}:ian-layer:${entry.layer_id}`,
+      primary_render_event_id: `${shot.shot_id}:ian-layer:${entry.layer_id}`,
+      covered_event_ids: [`${shot.shot_id}:ian-layer:${entry.layer_id}`],
       semantic_role: entry.sound_effect.role,
       intensity: 'micro',
       render_owner: 'ian_layered_scene',
@@ -1074,8 +1079,9 @@ test('routes explicit imagegen visuals to narrative and exact Ian markers to gra
 test('v3 continuity cut adds no transition duration and records semantic boundary counts', () => {
   const plan = buildKnowledgeVideoAssemblyPlan(buildV3Input(), {verifySharedReuseEvidence: passingVerifier});
   assert.equal(plan.schema_version, 'knowledge-video-assembly-plan-v3');
-  assert.equal(plan.sound_effects.contract_version, 'knowledge-video-sound-effect-track-v1');
-  assert.equal(plan.sound_effects.bus_gain_multiplier, 1);
+  assert.equal(plan.sound_effects.contract_version, 'knowledge-video-sound-effect-track-v2');
+  assert.equal(plan.sound_effects.resume_mode, 'standard');
+  assert.equal(plan.sound_effects.bus_gain_multiplier, 1.12);
   assert.deepEqual(plan.sound_effects.cues, []);
   assert.equal(plan.qa_contract.sound_design.result, 'pass');
   assert.equal(plan.scenes[0].transition.kind, 'cut');

@@ -20,6 +20,14 @@ const input = {
   event_decisions: [{
     event_id: 'S01:semantic:reveal', decision: 'audible', semantic_role: 'exact_reveal',
     reason: '纸卡真实入场', intensity: 'micro', gain_multiplier: 0.2,
+    selection_basis: {
+      selection_method: 'hard-gates-then-deterministic-ranking-v1',
+      semantic_role: 'exact_reveal',
+      selected_asset_id: 'exact-reveal',
+      hard_gate_results: {
+        license: true, media: true, semantic_role: true, motion_direction: true,
+      },
+    },
     acquisition_request: {
       asset_id: 'exact-reveal', title: 'Exact reveal', semantic_roles: ['exact_reveal'],
     },
@@ -72,6 +80,18 @@ test('blocks absent licensing input and never substitutes an approximate role', 
       assets: [{asset_id: 'approximate', semantic_roles: ['other_role']}],
     }),
   }), /exact official acquisition request/);
+});
+
+test('blocks failed hard-gate evidence before reuse or acquisition', async () => {
+  const blocked = structuredClone(input);
+  blocked.event_decisions[0].selection_basis.hard_gate_results.motion_direction = false;
+  let acquisitionCalls = 0;
+  await assert.rejects(() => prepareKnowledgeVideoSoundDesign(blocked, {
+    repositoryRoot: '/tmp/repository',
+    loadLibraryImpl: () => ({manifest: manifest(3), assets: [asset]}),
+    acquireImpl: async () => { acquisitionCalls += 1; },
+  }), /hard-gate selection evidence/);
+  assert.equal(acquisitionCalls, 0);
 });
 
 test('cleans only derivatives created by the failed preparation transaction', async (t) => {

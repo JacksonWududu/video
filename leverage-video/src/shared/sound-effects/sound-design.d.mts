@@ -1,21 +1,30 @@
-export const KNOWLEDGE_VIDEO_SOUND_DESIGN_VERSION: 'knowledge-video-sound-design-v1';
+export const LEGACY_KNOWLEDGE_VIDEO_SOUND_DESIGN_VERSION: 'knowledge-video-sound-design-v1';
+export const KNOWLEDGE_VIDEO_SOUND_DESIGN_VERSION: 'knowledge-video-sound-design-v2';
 export const GLOBAL_SOUND_EFFECT_RENDER_OWNER: 'global_sound_effect_track_v1';
 export const IAN_SOUND_EFFECT_RENDER_OWNER: 'ian_layered_scene';
 
 export type SoundDesignBinding = {readonly path: string; readonly checksum_sha256: string};
+export const KNOWLEDGE_VIDEO_SOUND_DESIGN_POLICY_BINDING: Readonly<SoundDesignBinding>;
+export const KNOWLEDGE_VIDEO_SOUND_DESIGN_POLICY: Readonly<Record<string, unknown>>;
 
 export type KnowledgeVideoSoundDesignEvent = {
   readonly event_id: string;
   readonly shot_id: string;
   readonly anchor_kind: string;
   readonly cue_frame: number;
+  readonly sync_frame: number;
+  readonly required_audible: boolean;
   readonly candidate_source: 'mechanical' | 'semantic';
   readonly decision: 'audible' | 'silent';
   readonly reason: string;
   readonly semantic_role: string | null;
-  readonly intensity: 'micro' | 'strong' | null;
+  readonly intensity: 'micro' | 'standard' | 'strong' | null;
   readonly render_owner: 'global_sound_effect_track_v1' | 'ian_layered_scene' | null;
   readonly gain_multiplier: number | null;
+  readonly cue_group_id: string | null;
+  readonly primary_render_event_id: string | null;
+  readonly covered_event_ids: readonly string[] | null;
+  readonly selection_basis: Readonly<Record<string, unknown>> | null;
   readonly source: null | {
     readonly asset_id: string;
     readonly path: string;
@@ -45,6 +54,8 @@ export function deriveSoundDesignCandidateEvents(shots: readonly unknown[]): rea
   readonly shot_id: string;
   readonly anchor_kind: string;
   readonly cue_frame: number;
+  readonly sync_frame: number;
+  readonly required_audible: boolean;
   readonly candidate_source: 'mechanical';
 }[];
 
@@ -60,8 +71,11 @@ export function validateKnowledgeVideoSoundDesign(value: unknown, options: {
   verifyFiles?: boolean;
   revoiceVariant?: boolean;
   parentDesign?: null | {binding: SoundDesignBinding; value: unknown};
+  allowLegacyReadOnly?: boolean;
 }): {
-  contract_version: 'knowledge-video-sound-design-validation-v1';
+  contract_version:
+    | 'knowledge-video-sound-design-validation-v1'
+    | 'knowledge-video-sound-design-validation-v2';
   result: 'pass';
   resume_mode: 'standard' | 'revoice_variant';
   bindings: Record<string, SoundDesignBinding>;
@@ -93,7 +107,7 @@ export function retimeKnowledgeVideoSoundDesignForRevoice(options: {
   durationFrames: number;
   episodeWorkspace: string;
   bindings: Record<string, SoundDesignBinding>;
-  semanticCueFramesByEventId?: Record<string, number>;
+  semanticCueFramesByEventId?: Record<string, number | {readonly sync_frame: number}>;
   repositoryRoot: string;
   libraryValidation: unknown;
   verifyFiles?: boolean;

@@ -8,7 +8,8 @@ export const PROOF_DURATION_FRAMES = 70;
 export const PROOF_BUS_GAIN = 0.25;
 
 const soundEffects = {
-  contract_version: 'knowledge-video-sound-effect-track-v1',
+  contract_version: 'knowledge-video-sound-effect-track-v2',
+  resume_mode: 'standard',
   design: {
     path: 'schema/render-proof-sound-design.json',
     checksum_sha256: '0000000000000000000000000000000000000000000000000000000000000000',
@@ -18,15 +19,24 @@ const soundEffects = {
     path: 'leverage-video/src/shared/sound-effects/manifest-v3.json',
     checksum_sha256: 'f3ad47ac039682c9482c9984c3e02c158b629c25b21915f325ecc0e20bfa60d4',
   },
+  policy: {
+    path: 'leverage-video/src/shared/sound-effects/sound-design-policy-v2.json',
+    checksum_sha256: '3333333333333333333333333333333333333333333333333333333333333333',
+  },
   narration_gain: 1,
   normalization: 'disabled',
   peak_ceiling_dbfs: -1,
   overflow_action: 'lower-sfx-bus-uniformly',
+  audio_preflight_policy: 'required-before-first-full-render-v1',
   bus_gain_multiplier: PROOF_BUS_GAIN,
   cues: [{
     event_id: 'S01:semantic:paper-card-entrance',
     shot_id: 'S01',
     cue_frame: PROOF_CUE_FRAME,
+    sync_frame: PROOF_CUE_FRAME,
+    cue_group_id: 'cue:S01:semantic:paper-card-entrance',
+    primary_render_event_id: 'S01:semantic:paper-card-entrance',
+    covered_event_ids: ['S01:semantic:paper-card-entrance'],
     semantic_role: 'paper_card_entrance',
     intensity: 'micro',
     render_owner: 'global_sound_effect_track_v1',

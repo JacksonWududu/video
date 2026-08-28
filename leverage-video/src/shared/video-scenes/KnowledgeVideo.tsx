@@ -28,7 +28,8 @@ export const KnowledgeVideo: React.FC<{
     throw new Error('comic-imagegen is historical read-only and cannot create a preview or render');
   }
   if (plan.schema_version === 'knowledge-video-assembly-plan-v3'
-      && plan.sound_effects.contract_version !== 'knowledge-video-sound-effect-track-v1') {
+      && !['knowledge-video-sound-effect-track-v1', 'knowledge-video-sound-effect-track-v2']
+        .includes(plan.sound_effects.contract_version)) {
     throw new Error('Current knowledge-video assembly requires sound effects');
   }
   const soundEffectBusGain = plan.schema_version === 'knowledge-video-assembly-plan-v3'

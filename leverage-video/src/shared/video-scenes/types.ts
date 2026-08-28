@@ -251,8 +251,12 @@ export type KnowledgeVideoSoundEffectCue = {
   readonly event_id: string;
   readonly shot_id: string;
   readonly cue_frame: number;
+  readonly sync_frame?: number;
+  readonly cue_group_id?: string;
+  readonly primary_render_event_id?: string;
+  readonly covered_event_ids?: readonly string[];
   readonly semantic_role: string;
-  readonly intensity: 'micro' | 'strong';
+  readonly intensity: 'micro' | 'standard' | 'strong';
   readonly render_owner: 'global_sound_effect_track_v1' | 'ian_layered_scene';
   readonly gain_multiplier: number;
   readonly derived_asset: {
@@ -302,10 +306,7 @@ export type LegacyKnowledgeVideoAssemblyPlan = KnowledgeVideoAssemblyPlanCommon 
   readonly sound_effects?: never;
 };
 
-export type CurrentKnowledgeVideoAssemblyPlan = KnowledgeVideoAssemblyPlanCommon & {
-  readonly schema_version: 'knowledge-video-assembly-plan-v3';
-  readonly sound_effects: {
-    readonly contract_version: 'knowledge-video-sound-effect-track-v1';
+type KnowledgeVideoSoundEffectTrackCommon = {
     readonly design: {
       readonly path: string;
       readonly checksum_sha256: string;
@@ -318,7 +319,26 @@ export type CurrentKnowledgeVideoAssemblyPlan = KnowledgeVideoAssemblyPlanCommon
     readonly overflow_action: 'lower-sfx-bus-uniformly';
     readonly bus_gain_multiplier: number;
     readonly cues: readonly KnowledgeVideoSoundEffectCue[];
-  };
+};
+
+export type KnowledgeVideoSoundEffectTrack = KnowledgeVideoSoundEffectTrackCommon & (
+  | {
+    readonly contract_version: 'knowledge-video-sound-effect-track-v1';
+    readonly resume_mode?: 'revoice_variant';
+    readonly policy?: null;
+    readonly audio_preflight_policy?: 'required-before-first-full-render-v1';
+  }
+  | {
+    readonly contract_version: 'knowledge-video-sound-effect-track-v2';
+    readonly resume_mode: 'standard' | 'revoice_variant';
+    readonly policy: {readonly path: string; readonly checksum_sha256: string};
+    readonly audio_preflight_policy: 'required-before-first-full-render-v1';
+  }
+);
+
+export type CurrentKnowledgeVideoAssemblyPlan = KnowledgeVideoAssemblyPlanCommon & {
+  readonly schema_version: 'knowledge-video-assembly-plan-v3';
+  readonly sound_effects: KnowledgeVideoSoundEffectTrack;
 };
 
 export type KnowledgeVideoAssemblyPlan =

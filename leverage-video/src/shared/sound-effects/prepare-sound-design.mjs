@@ -53,6 +53,18 @@ const validateAcquisitionRequest = (decision) => {
   return request;
 };
 
+const validateSelectionGateEvidence = (decision) => {
+  const basis = decision.selection_basis;
+  const gates = basis?.hard_gate_results;
+  if (basis?.selection_method !== 'hard-gates-then-deterministic-ranking-v1'
+      || basis.semantic_role !== decision.semantic_role
+      || typeof basis.selected_asset_id !== 'string' || basis.selected_asset_id === ''
+      || gates?.license !== true || gates?.media !== true
+      || gates?.semantic_role !== true || gates?.motion_direction !== true) {
+    throw new Error(`${decision.event_id} has incomplete hard-gate selection evidence`);
+  }
+};
+
 const buildDerivative = ({decision, input, library, repositoryRoot, buildDerivedImpl}) => {
   if (decision.derived_asset) return null;
   const request = decision.derivative_request;
@@ -89,6 +101,7 @@ export const prepareKnowledgeVideoSoundDesign = async (input, {
   try {
     for (const decision of prepared.event_decisions ?? []) {
       if (decision.decision !== 'audible') continue;
+      validateSelectionGateEvidence(decision);
       let asset = selectExistingAsset(decision, library);
       if (!asset) {
         const request = validateAcquisitionRequest(decision);
@@ -99,6 +112,9 @@ export const prepareKnowledgeVideoSoundDesign = async (input, {
         if (!asset) {
           throw new Error(`${decision.event_id} acquisition did not publish the exact semantic role`);
         }
+      }
+      if (decision.selection_basis.selected_asset_id !== asset.asset_id) {
+        throw new Error(`${decision.event_id} selected asset differs from its ranking evidence`);
       }
       decision.asset_id = asset.asset_id;
       const derivative = buildDerivative({

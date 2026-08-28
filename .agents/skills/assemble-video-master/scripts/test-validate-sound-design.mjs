@@ -16,7 +16,10 @@ export const Video = () => <KnowledgeVideo plan={plan} />;
 `;
 const cue = {
   event_id: 'S01:semantic:reveal', shot_id: 'S01', cue_frame: 30,
-  semantic_role: 'fact_pop_in', intensity: 'micro',
+  sync_frame: 30, cue_group_id: 'cue:S01:semantic:reveal',
+  primary_render_event_id: 'S01:semantic:reveal',
+  covered_event_ids: ['S01:semantic:reveal'],
+  semantic_role: 'fact_pop_in', intensity: 'standard',
   render_owner: 'global_sound_effect_track_v1', gain_multiplier: 0.2,
   source: {asset_id: 'source', path: 'source.wav', checksum_sha256: 'a'.repeat(64)},
   derived_asset: {
@@ -29,6 +32,7 @@ const cue = {
 };
 const soundDesign = binding('d');
 const library = binding('e');
+const policy = binding('a');
 const goodPlan = {
   schema_version: 'knowledge-video-assembly-plan-v3',
   full_master_frames: 120,
@@ -36,14 +40,17 @@ const goodPlan = {
   narration_asset: 'example/assets/audio/narration.mp3',
   bgm: {mode: 'disabled', source: null, track: null},
   sound_effects: {
-    contract_version: 'knowledge-video-sound-effect-track-v1',
+    contract_version: 'knowledge-video-sound-effect-track-v2',
+    resume_mode: 'standard',
     design: {...soundDesign, event_map_sha256: 'f'.repeat(64)},
     library,
+    policy,
     narration_gain: 1,
     normalization: 'disabled',
     peak_ceiling_dbfs: -1,
     overflow_action: 'lower-sfx-bus-uniformly',
-    bus_gain_multiplier: 0.8,
+    audio_preflight_policy: 'required-before-first-full-render-v1',
+    bus_gain_multiplier: 1.12,
     cues: [cue],
   },
   scenes: [{
@@ -52,22 +59,24 @@ const goodPlan = {
   }],
   qa_contract: {
     sound_design: {
-      contract_version: 'knowledge-video-sound-design-validation-v1',
+      contract_version: 'knowledge-video-sound-design-validation-v2',
+      resume_mode: 'standard',
       result: 'pass',
       ...soundDesign,
       event_map_sha256: 'f'.repeat(64),
-      bindings: {sound_effect_library: library},
+      bindings: {sound_effect_library: library, sound_design_policy: policy},
+      structural_coverage_result: 'pass',
     },
   },
 };
 
 assert.deepEqual(validateSoundDesignPlan({plan: goodPlan, source}), {
-  contract_version: 'knowledge-video-sound-effect-track-v1',
+  contract_version: 'knowledge-video-sound-effect-track-v2',
   result: 'pass',
   cue_count: 1,
   global_cue_count: 1,
   ian_cue_count: 0,
-  bus_gain_multiplier: 0.8,
+  bus_gain_multiplier: 1.12,
   narration_gain: 1,
   bgm: 'disabled',
 });
@@ -86,10 +95,35 @@ assert.throws(
   /duplicate sound-effect cue/i,
 );
 
+const legacyStandard = structuredClone(goodPlan);
+legacyStandard.sound_effects.contract_version = 'knowledge-video-sound-effect-track-v1';
+legacyStandard.qa_contract.sound_design.contract_version = 'knowledge-video-sound-design-validation-v1';
+assert.throws(
+  () => validateSoundDesignPlan({plan: legacyStandard, source}),
+  /missing or stale sound-design/i,
+);
+
+const legacyRevoice = structuredClone(legacyStandard);
+legacyRevoice.sound_effects.resume_mode = 'revoice_variant';
+legacyRevoice.sound_effects.policy = null;
+legacyRevoice.qa_contract.sound_design.resume_mode = 'revoice_variant';
+delete legacyRevoice.qa_contract.sound_design.bindings.sound_design_policy;
+delete legacyRevoice.qa_contract.sound_design.structural_coverage_result;
+for (const legacyCue of legacyRevoice.sound_effects.cues) {
+  delete legacyCue.sync_frame;
+  delete legacyCue.cue_group_id;
+  delete legacyCue.primary_render_event_id;
+  delete legacyCue.covered_event_ids;
+}
+assert.equal(validateSoundDesignPlan({plan: legacyRevoice, source}).result, 'pass');
+
 const duplicateRender = structuredClone(goodPlan);
 duplicateRender.sound_effects.cues.push({
   ...structuredClone(cue),
   event_id: 'S01:semantic:duplicate-render',
+  cue_group_id: 'cue:S01:semantic:duplicate-render',
+  primary_render_event_id: 'S01:semantic:duplicate-render',
+  covered_event_ids: ['S01:semantic:duplicate-render'],
 });
 assert.throws(
   () => validateSoundDesignPlan({plan: duplicateRender, source}),

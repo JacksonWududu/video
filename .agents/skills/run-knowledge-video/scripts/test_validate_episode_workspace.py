@@ -908,8 +908,15 @@ class EpisodeWorkspaceValidatorTests(unittest.TestCase):
             "path": "leverage-video/src/shared/sound-effects/manifest-v3.json",
             "checksum_sha256": "e" * 64,
         }
+        policy_file = self.repo / "leverage-video/src/shared/sound-effects/sound-design-policy-v2.json"
+        policy_file.parent.mkdir(parents=True, exist_ok=True)
+        policy_file.write_text('{"contract_version":"knowledge-video-sound-design-policy-v2"}\n', encoding="utf-8")
+        policy = {
+            "path": policy_file.relative_to(self.repo).as_posix(),
+            "checksum_sha256": sha256(policy_file),
+        }
         artifact = {
-            "contract_version": "knowledge-video-sound-design-v1",
+            "contract_version": "knowledge-video-sound-design-v2",
             "status": "qa_passed",
             "resume_mode": "standard",
             "revoice": None,
@@ -917,8 +924,11 @@ class EpisodeWorkspaceValidatorTests(unittest.TestCase):
             "fps": 30,
             "duration_frames": 90,
             "policy": {},
-            "bindings": {"sound_effect_library": library},
-            "bus_gain_multiplier": 1,
+            "bindings": {
+                "sound_effect_library": library,
+                "sound_design_policy": policy,
+            },
+            "bus_gain_multiplier": 1.12,
             "shot_analysis": [],
             "events": [],
             "event_map_sha256": "",
@@ -928,19 +938,20 @@ class EpisodeWorkspaceValidatorTests(unittest.TestCase):
         projection.pop("event_map_sha256")
         projection.pop("result")
         artifact["event_map_sha256"] = MODULE._canonical_sha256(projection)
-        artifact_file = self.workspace / "schema/knowledge-video-sound-design-v1.json"
+        artifact_file = self.workspace / "schema/knowledge-video-sound-design-v2.json"
         artifact_file.write_text(
             json.dumps(artifact, ensure_ascii=False, indent=2) + "\n",
             encoding="utf-8",
         )
         binding = {
-            "contract_version": "knowledge-video-sound-design-v1",
+            "contract_version": "knowledge-video-sound-design-v2",
             "status": "qa_passed",
             "path": artifact_file.relative_to(self.repo).as_posix(),
             "checksum_sha256": sha256(artifact_file),
             "event_map_sha256": artifact["event_map_sha256"],
-            "bus_gain_multiplier": 1,
+            "bus_gain_multiplier": 1.12,
             "sound_effect_library": library,
+            "sound_design_policy": policy,
         }
         self.write_state(
             self.item(
@@ -952,6 +963,89 @@ class EpisodeWorkspaceValidatorTests(unittest.TestCase):
             extra_state={"sound_effect_design": binding},
         )
         self.assertEqual(self.errors(), [])
+
+        self.write_state(
+            self.item(
+                status="approved",
+                qa_contract="ordinary-imagegen-white-cat-master-qa-v1",
+                include_anatomy=False,
+            ),
+            current_phase="final_rendering",
+            extra_state={"sound_effect_design": binding},
+        )
+        self.assertTrue(any(
+            "audio-only sound preflight" in error for error in self.errors()
+        ))
+
+        preflight = {
+            "contract_version": "knowledge-video-sound-audio-preflight-v1",
+            "result": "pass",
+            "sound_effects_projection_sha256": "f" * 64,
+            "narration": {
+                "asset": "topic99/assets/audio/narration.wav",
+                "checksum_sha256": "c" * 64,
+                "gain": 1,
+            },
+            "normalization": "disabled",
+            "bus_gain_multiplier": 1.12,
+            "cue_groups": [],
+            "full_master_frames": 90,
+            "sample_rate_hz": 44100,
+            "measured_peak_dbfs": -1.2,
+            "peak_ceiling_dbfs": -1,
+            "full_video_rendered": False,
+        }
+        preflight_file = self.workspace / "schema/sound-effect-audio-preflight-v1.json"
+        preflight_file.write_text(
+            json.dumps(preflight, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        preflight_binding = {
+            "contract_version": "knowledge-video-sound-audio-preflight-v1",
+            "status": "qa_passed",
+            "path": preflight_file.relative_to(self.repo).as_posix(),
+            "checksum_sha256": sha256(preflight_file),
+            "sound_effects_projection_sha256": "f" * 64,
+            "bus_gain_multiplier": 1.12,
+        }
+        self.write_state(
+            self.item(
+                status="approved",
+                qa_contract="ordinary-imagegen-white-cat-master-qa-v1",
+                include_anatomy=False,
+            ),
+            current_phase="final_rendering",
+            extra_state={
+                "sound_effect_design": binding,
+                "sound_effect_audio_preflight": preflight_binding,
+            },
+        )
+        self.assertEqual(self.errors(), [])
+
+        artifact["contract_version"] = "knowledge-video-sound-design-v1"
+        projection = dict(artifact)
+        projection.pop("event_map_sha256")
+        projection.pop("result")
+        artifact["event_map_sha256"] = MODULE._canonical_sha256(projection)
+        artifact_file.write_text(
+            json.dumps(artifact, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        binding["contract_version"] = "knowledge-video-sound-design-v1"
+        binding["checksum_sha256"] = sha256(artifact_file)
+        binding["event_map_sha256"] = artifact["event_map_sha256"]
+        self.write_state(
+            self.item(
+                status="approved",
+                qa_contract="ordinary-imagegen-white-cat-master-qa-v1",
+                include_anatomy=False,
+            ),
+            current_phase="composition_locked",
+            extra_state={"sound_effect_design": binding},
+        )
+        self.assertTrue(any(
+            "incomplete or stale" in error for error in self.errors()
+        ))
 
     def test_malformed_episode_state_fails_closed(self) -> None:
         (self.workspace / "schema/episode-state.json").write_text(

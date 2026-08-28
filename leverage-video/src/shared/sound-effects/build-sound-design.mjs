@@ -9,6 +9,7 @@ import {
   GLOBAL_SOUND_EFFECT_RENDER_OWNER,
   IAN_SOUND_EFFECT_RENDER_OWNER,
   KNOWLEDGE_VIDEO_SOUND_DESIGN_POLICY,
+  KNOWLEDGE_VIDEO_SOUND_DESIGN_POLICY_BINDING,
   KNOWLEDGE_VIDEO_SOUND_DESIGN_VERSION,
   buildSoundDesignMapSha256,
   deriveSoundDesignCandidateEvents,
@@ -28,6 +29,10 @@ const silentDecision = (candidate, reason) => ({
   source: null,
   derived_asset: null,
   gain_multiplier: null,
+  cue_group_id: null,
+  primary_render_event_id: null,
+  covered_event_ids: null,
+  selection_basis: null,
   qa_result: null,
 });
 
@@ -53,6 +58,10 @@ const buildAudibleDecision = ({candidate, decision, library, defaultOwner = null
     },
     derived_asset: structuredClone(decision.derived_asset),
     gain_multiplier: decision.gain_multiplier,
+    cue_group_id: decision.cue_group_id ?? `cue:${candidate.event_id}`,
+    primary_render_event_id: decision.primary_render_event_id ?? candidate.event_id,
+    covered_event_ids: structuredClone(decision.covered_event_ids ?? [candidate.event_id]),
+    selection_basis: structuredClone(decision.selection_basis),
     qa_result: 'pass',
   };
 };
@@ -94,6 +103,30 @@ const buildIanDecision = ({candidate, shot, library}) => {
         ) * 30),
         runtime_transform: 'forbidden',
       },
+      cue_group_id: `cue:${candidate.event_id}`,
+      primary_render_event_id: candidate.event_id,
+      covered_event_ids: [candidate.event_id],
+      selection_basis: {
+        selection_method: 'hard-gates-then-deterministic-ranking-v1',
+        visible_event: cue.selection_reason,
+        visual_route: 'ian-handdrawn-ppt',
+        material: asset.timbre_family,
+        motion_direction: 'none',
+        energy: 'micro',
+        attack_class: 'soft',
+        duration_fit: 'pretrimmed',
+        narration_masking_risk: 'low',
+        semantic_role: cue.role,
+        selected_asset_id: asset.asset_id,
+        selected_reason: cue.selection_reason,
+        hard_gate_results: {
+          license: true,
+          media: true,
+          semantic_role: true,
+          motion_direction: true,
+        },
+        rejected_candidates: [],
+      },
     },
   });
 };
@@ -110,6 +143,8 @@ export const buildKnowledgeVideoSoundDesign = (input, {
   const mechanical = deriveSoundDesignCandidateEvents(input.shots);
   const semantic = (input.semantic_events ?? []).map((event) => ({
     ...structuredClone(event),
+    sync_frame: event.sync_frame ?? event.cue_frame,
+    required_audible: false,
     candidate_source: 'semantic',
   }));
   const candidates = [...mechanical, ...semantic];
@@ -144,8 +179,12 @@ export const buildKnowledgeVideoSoundDesign = (input, {
     fps: 30,
     duration_frames: input.duration_frames,
     policy: structuredClone(KNOWLEDGE_VIDEO_SOUND_DESIGN_POLICY),
-    bindings: structuredClone(input.bindings),
-    bus_gain_multiplier: input.bus_gain_multiplier ?? 1,
+    bindings: {
+      ...structuredClone(input.bindings),
+      sound_design_policy: structuredClone(KNOWLEDGE_VIDEO_SOUND_DESIGN_POLICY_BINDING),
+    },
+    bus_gain_multiplier: input.bus_gain_multiplier
+      ?? KNOWLEDGE_VIDEO_SOUND_DESIGN_POLICY.initial_bus_gain_multiplier,
     shot_analysis: input.shots.map((shot) => ({
       shot_id: shot.shot_id,
       storyboard_content_analyzed: true,
@@ -165,7 +204,7 @@ export const buildKnowledgeVideoSoundDesign = (input, {
     episodeWorkspace: input.episode_workspace,
     repositoryRoot,
     libraryValidation: library,
-    expectedBindings: input.bindings,
+    expectedBindings: value.bindings,
     verifyFiles,
   });
   return value;

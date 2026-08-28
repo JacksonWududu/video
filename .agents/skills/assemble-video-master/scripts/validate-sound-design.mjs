@@ -32,12 +32,18 @@ const expandSharedSource = (source) => {
   ].join('\n');
 };
 
-const validateCue = (cue, durationFrames) => {
+const validateCue = (cue, durationFrames, currentV2) => {
   const derived = cue?.derived_asset;
   if (typeof cue?.event_id !== 'string' || cue.event_id === ''
       || typeof cue.shot_id !== 'string' || cue.shot_id === ''
+      || (currentV2 && (typeof cue.cue_group_id !== 'string' || cue.cue_group_id === ''
+        || cue.primary_render_event_id !== cue.event_id
+        || !Array.isArray(cue.covered_event_ids) || cue.covered_event_ids.length < 1
+        || !cue.covered_event_ids.includes(cue.event_id)
+        || !Number.isInteger(cue.sync_frame) || cue.sync_frame < cue.cue_frame))
       || ![GLOBAL_OWNER, IAN_OWNER].includes(cue.render_owner)
       || !Number.isInteger(cue.cue_frame) || cue.cue_frame < 0
+      || (currentV2 && cue.sync_frame >= durationFrames)
       || typeof cue.gain_multiplier !== 'number'
       || cue.gain_multiplier <= 0 || cue.gain_multiplier > 1
       || typeof derived?.asset !== 'string' || !derived.asset.endsWith('.wav')
@@ -81,8 +87,15 @@ export const validateSoundDesignPlan = ({plan, source}) => {
   }
   const sound = plan.sound_effects;
   const qa = plan.qa_contract?.sound_design;
-  if (sound?.contract_version !== 'knowledge-video-sound-effect-track-v1'
-      || qa?.contract_version !== 'knowledge-video-sound-design-validation-v1'
+  const currentV2 = sound?.contract_version === 'knowledge-video-sound-effect-track-v2'
+    && qa?.contract_version === 'knowledge-video-sound-design-validation-v2'
+    && ['standard', 'revoice_variant'].includes(qa?.resume_mode)
+    && sound?.resume_mode === qa.resume_mode;
+  const legacyRevoice = sound?.contract_version === 'knowledge-video-sound-effect-track-v1'
+    && qa?.contract_version === 'knowledge-video-sound-design-validation-v1'
+    && qa?.resume_mode === 'revoice_variant'
+    && sound?.resume_mode === 'revoice_variant';
+  if ((!currentV2 && !legacyRevoice)
       || qa?.result !== 'pass'
       || qa.path !== sound.design?.path
       || qa.checksum_sha256 !== sound.design?.checksum_sha256
@@ -90,25 +103,35 @@ export const validateSoundDesignPlan = ({plan, source}) => {
       || !SHA256.test(sound.design?.checksum_sha256 ?? '')
       || !SHA256.test(sound.design?.event_map_sha256 ?? '')
       || JSON.stringify(qa.bindings?.sound_effect_library) !== JSON.stringify(sound.library)
+      || (currentV2 && (JSON.stringify(qa.bindings?.sound_design_policy)
+        !== JSON.stringify(sound.policy)
+        || qa.structural_coverage_result !== 'pass'))
       || sound.narration_gain !== 1
       || sound.normalization !== 'disabled'
       || sound.peak_ceiling_dbfs !== -1
       || sound.overflow_action !== 'lower-sfx-bus-uniformly'
+      || sound.audio_preflight_policy !== 'required-before-first-full-render-v1'
       || typeof sound.bus_gain_multiplier !== 'number'
-      || sound.bus_gain_multiplier <= 0 || sound.bus_gain_multiplier > 1
+      || !Number.isFinite(sound.bus_gain_multiplier) || sound.bus_gain_multiplier <= 0
       || !Array.isArray(sound.cues)
       || plan.bgm?.mode !== 'disabled'
       || plan.bgm?.source !== null || plan.bgm?.track !== null) {
     throw new Error('current assembly has missing or stale sound-design/mix evidence');
   }
   const ids = new Set();
+  const cueGroups = new Set();
   const cueKeys = new Set();
   for (const cue of sound.cues) {
-    validateCue(cue, plan.full_master_frames);
+    validateCue(cue, plan.full_master_frames, currentV2);
+    const cueGroupId = currentV2 ? cue.cue_group_id : `legacy:${cue.event_id}`;
     if (ids.has(cue.event_id)) throw new Error(`duplicate sound-effect cue: ${cue.event_id}`);
+    if (cueGroups.has(cueGroupId)) {
+      throw new Error(`duplicate sound-effect cue group: ${cueGroupId}`);
+    }
     const cueKey = `${cue.render_owner}:${cue.cue_frame}:${cue.source?.asset_id}`;
     if (cueKeys.has(cueKey)) throw new Error(`duplicate rendered sound-effect cue: ${cue.event_id}`);
     ids.add(cue.event_id);
+    cueGroups.add(cueGroupId);
     cueKeys.add(cueKey);
   }
   const ianOwned = sound.cues.filter(({render_owner: owner}) => owner === IAN_OWNER);
@@ -142,7 +165,7 @@ export const validateSoundDesignPlan = ({plan, source}) => {
     throw new Error('SoundEffectTrack performs a forbidden runtime audio transform');
   }
   return {
-    contract_version: 'knowledge-video-sound-effect-track-v1',
+    contract_version: sound.contract_version,
     result: 'pass',
     cue_count: sound.cues.length,
     global_cue_count: sound.cues.length - ianOwned.length,

@@ -1,0 +1,66 @@
+{
+  "contract_version": "knowledge-video-sound-design-policy-v2",
+  "mandatory_structural_anchor_kinds": [
+    "shot-opening",
+    "shot-boundary",
+    "intra-shot-transition"
+  ],
+  "opening_rule": "s01-frame-zero-audible-v1",
+  "boundary_rule": "incoming-boundary-covers-outgoing-transition-and-next-opening-v1",
+  "terminal_clean_hold_exempt": true,
+  "selection_method": "hard-gates-then-deterministic-ranking-v1",
+  "selection_hard_gates": [
+    "license",
+    "media",
+    "semantic_role",
+    "motion_direction"
+  ],
+  "selection_rank_order": [
+    "route_material_fit",
+    "motion_direction",
+    "energy_attack_fit",
+    "duration_sync_fit",
+    "narration_masking",
+    "adjacent_timbre_diversity",
+    "episode_reuse_count",
+    "asset_id"
+  ],
+  "intensity_levels": [
+    "micro",
+    "standard",
+    "strong"
+  ],
+  "optional_global_cue_budgets": [
+    {
+      "maximum_shot_seconds": 6,
+      "maximum_cue_groups": 1
+    },
+    {
+      "maximum_shot_seconds": 12,
+      "maximum_cue_groups": 2
+    },
+    {
+      "maximum_shot_seconds": 18,
+      "maximum_cue_groups": 3
+    },
+    {
+      "maximum_shot_seconds": null,
+      "maximum_cue_groups": 4
+    }
+  ],
+  "strong_min_gap_frames": 30,
+  "maximum_cue_group_onsets_per_30_frames": 3,
+  "ian_conflict_rule": "merge-when-compatible-otherwise-retain-and-intensity-manage-v1",
+  "average_audible_interval_advisory_seconds": {
+    "minimum": 2.5,
+    "maximum": 4.5
+  },
+  "visible_event_gap_advisory_seconds": 6,
+  "narration_gain": 1,
+  "normalization": "disabled",
+  "runtime_audio_transform": "forbidden",
+  "initial_bus_gain_multiplier": 1.12,
+  "peak_ceiling_dbfs": -1,
+  "overflow_action": "lower-sfx-bus-uniformly",
+  "audio_preflight": "required-before-first-full-render-v1"
+}
