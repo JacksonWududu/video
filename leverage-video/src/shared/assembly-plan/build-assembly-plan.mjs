@@ -11,6 +11,7 @@ import {
   ACTION_STATE_SCHEDULE_V3_VERSION,
   ACTION_STATE_SCHEDULE_V4_VERSION,
   buildActionStatePlanSha256,
+  calculateActionStateCadenceAdvisory,
   validateActionStateSchedule,
 } from '../action-state-schedule/contract.mjs';
 import {
@@ -46,6 +47,7 @@ import {
 import {validateStoryboardVisualRhythm} from '../storyboard-visual-rhythm/contract.mjs';
 import {
   assertOneClickProtectedActionAllowed,
+  validateLegacyStylelessApprovalSelectionSequence,
   validateApprovalSelectionSequence,
 } from '../workflow-approval/contract.mjs';
 import {
@@ -62,6 +64,7 @@ import {
   validateIanLayeredEntryEffectsPlan,
 } from '../ian-layered-entry-effects/contract.mjs';
 import {loadAndValidateSharedSoundEffectLibrary} from '../sound-effects/contract.mjs';
+import {loadAndValidateKnowledgeVideoSoundDesign} from '../sound-effects/sound-design.mjs';
 import {validateIanStoryboardLayeredSceneSection} from '../storyboard/validate-final-storyboard.mjs';
 
 const SHA256 = /^[a-f0-9]{64}$/;
@@ -930,6 +933,73 @@ const verifyStoryboardVisualRhythmEvidence = (input) => {
   };
 };
 
+const requireSoundDesignBinding = (value, label) => {
+  if (typeof value?.path !== 'string' || value.path === ''
+      || !SHA256.test(value?.checksum_sha256 ?? '')) {
+    throw new Error(`${label} path and checksum are required`);
+  }
+  return {path: value.path, checksum_sha256: value.checksum_sha256};
+};
+
+const buildExpectedSoundDesignBindings = (input, visualRhythmEvidence) => ({
+  storyboard: requireSoundDesignBinding(input.visualDirectionReview?.storyboard, 'storyboard'),
+  narration_master: requireSoundDesignBinding(input.narrationMaster, 'narration master'),
+  visual_manifest: requireSoundDesignBinding(input.visualManifest, 'visual manifest'),
+  visual_rhythm: requireSoundDesignBinding({
+    path: visualRhythmEvidence?.path,
+    checksum_sha256: visualRhythmEvidence?.checksum_sha256,
+  }, 'visual rhythm'),
+  transition_review: requireSoundDesignBinding(input.transitionSelectionReview, 'transition review'),
+  sound_effect_library: requireSoundDesignBinding(input.soundEffectLibrary, 'sound-effect library'),
+});
+
+const verifySoundDesignEvidence = (input, {shots, durationFrames, expectedBindings}) => (
+  loadAndValidateKnowledgeVideoSoundDesign({
+    repositoryRoot: REPOSITORY_ROOT,
+    episodeWorkspace: input.episodeWorkspace,
+    binding: input.soundDesign,
+    shots,
+    durationFrames,
+    expectedBindings,
+    revoiceVariant: input.resumeMode === 'revoice_variant',
+  })
+);
+
+const validateSoundDesignEvidence = ({evidence, input, expectedBindings, revoiceVariant}) => {
+  const soundDesign = requireSoundDesignBinding(input.soundDesign, 'sound design');
+  const validation = evidence?.validation;
+  if (evidence?.path !== soundDesign.path
+      || evidence?.checksum_sha256 !== soundDesign.checksum_sha256
+      || validation?.contract_version !== 'knowledge-video-sound-design-validation-v1'
+      || validation?.result !== 'pass'
+      || validation?.resume_mode !== (revoiceVariant ? 'revoice_variant' : 'standard')
+      || !SHA256.test(validation?.event_map_sha256 ?? '')
+      || typeof validation?.bus_gain_multiplier !== 'number'
+      || validation.bus_gain_multiplier <= 0
+      || validation.bus_gain_multiplier > 1
+      || !Array.isArray(validation?.audible_cues)) {
+    throw new Error('passing current sound-design evidence is required');
+  }
+  for (const [key, binding] of Object.entries(expectedBindings)) {
+    if (JSON.stringify(validation.bindings?.[key]) !== JSON.stringify(binding)) {
+      throw new Error(`sound-design evidence has a stale ${key} binding`);
+    }
+  }
+  const cueIds = new Set();
+  for (const cue of validation.audible_cues) {
+    if (typeof cue?.event_id !== 'string' || cueIds.has(cue.event_id)
+        || !['global_sound_effect_track_v1', 'ian_layered_scene'].includes(cue.render_owner)) {
+      throw new Error('sound-design audible cues have duplicate identities or invalid render owners');
+    }
+    cueIds.add(cue.event_id);
+  }
+  return {
+    path: soundDesign.path,
+    checksum_sha256: soundDesign.checksum_sha256,
+    ...structuredClone(validation),
+  };
+};
+
 const verifyRootRelativeBinding = (binding, label, episodeWorkspace, {schemaOnly = false} = {}) => {
   if (typeof binding?.path !== 'string' || binding.path === '' || path.isAbsolute(binding.path)) {
     throw new Error(`${label} path must be repository-relative`);
@@ -1147,38 +1217,96 @@ export const validateIanLayeredSceneEvidence = ({evidence, input}) => {
   };
 };
 
+const extendFirstSceneToFrameZero = (scene, leadInFrames) => {
+  if (leadInFrames === 0) return scene;
+  if (scene.start_frame !== leadInFrames || scene.shot_id !== 'S01') {
+    throw new Error('legacy first-shot lead-in must end exactly where S01 begins');
+  }
+  if (scene.ian_layered_scene || scene.whiteboard || scene.local_video
+    || !Array.isArray(scene.image_sequence) || scene.image_sequence.length === 0) {
+    throw new Error('legacy first-shot lead-in migration requires an approved raster state family');
+  }
+  const extendOccurrence = (occurrence, index, recordSemanticReason = false) => index === 0
+    ? {
+        ...occurrence,
+        end_frame: occurrence.end_frame + leadInFrames,
+        duration_in_frames: occurrence.duration_in_frames + leadInFrames,
+        clean_hold_in_frames: occurrence.clean_hold_in_frames + leadInFrames,
+        ...(recordSemanticReason && !occurrence.semantic_hold_reason ? {
+          semantic_hold_reason: 'approved S01 state replaces the retired fixed opening cover',
+        } : {}),
+      }
+    : {
+        ...occurrence,
+        at_frame: occurrence.at_frame + leadInFrames,
+        end_frame: occurrence.end_frame + leadInFrames,
+      };
+  const shiftTransition = (transition) => ({
+    ...transition,
+    at_frame: transition.at_frame + leadInFrames,
+  });
+  const imageSequence = scene.image_sequence.map((image, index) => index === 0
+    ? {...image, duration_in_frames: image.duration_in_frames + leadInFrames}
+    : {...image, from: image.from + leadInFrames});
+  const intraShotTransitions = scene.intra_shot_transitions.map(shiftTransition);
+  const actionStateSchedule = scene.action_state_schedule ? {
+    ...scene.action_state_schedule,
+    total_frames: scene.action_state_schedule.total_frames + leadInFrames,
+    shot_start_frame: 0,
+    cadence_advisory: calculateActionStateCadenceAdvisory(
+      scene.action_state_schedule.total_frames + leadInFrames,
+    ),
+    occurrences: scene.action_state_schedule.occurrences
+      .map((occurrence, index) => extendOccurrence(occurrence, index, true)),
+    occurrence_asset_bindings: scene.action_state_schedule.occurrence_asset_bindings?.map(extendOccurrence),
+    intra_shot_transitions: scene.action_state_schedule.intra_shot_transitions.map(shiftTransition),
+  } : null;
+  if (actionStateSchedule) {
+    actionStateSchedule.validation = validateActionStateSchedule(actionStateSchedule, {
+      totalFrames: scene.duration_frames + leadInFrames,
+      fps: actionStateSchedule.fps,
+      densityMode: actionStateSchedule.density_mode ?? null,
+      densitySelectionSha256: actionStateSchedule.visual_density_selection_sha256 ?? null,
+    });
+  }
+  return {
+    ...scene,
+    start_frame: 0,
+    duration_frames: scene.duration_frames + leadInFrames,
+    image_sequence: imageSequence,
+    intra_shot_transitions: intraShotTransitions,
+    ...(actionStateSchedule ? {action_state_schedule: actionStateSchedule} : {}),
+    legacy_first_shot_lead_in: {
+      contract_version: 'legacy-first-shot-approved-state-hold-v1',
+      duration_frames: leadInFrames,
+      source_asset_id: imageSequence[0].asset_id,
+      source_asset_checksum_sha256: imageSequence[0].checksum_sha256 ?? null,
+      image_regeneration: false,
+    },
+  };
+};
+
 export const buildKnowledgeVideoAssemblyPlan = (input, options = {}) => {
   if (!input || typeof input !== 'object') throw new Error('assembly input object required');
   const fps = requireInteger(input.fps, 'fps', 1);
   if (fps !== 30) throw new Error('knowledge-video assembly requires 30 fps');
   const narrationFrames = requireInteger(input.narrationFrames, 'narrationFrames', 1);
   const revoiceVariant = input.resumeMode === 'revoice_variant';
+  if (input.timeline?.contractVersion !== 'direct-first-shot-v1'
+    || input.timeline?.narrationStartFrame !== 0
+    || input.timeline?.firstShotId !== 'S01') {
+    throw new Error('assembly input must declare direct-first-shot-v1 at frame zero');
+  }
   const firstSentenceEndFrame = requireInteger(
-    input.opening?.firstSentenceEndFrame,
-    'opening.firstSentenceEndFrame',
+    input.timeline.firstSentenceEndFrame,
+    'timeline.firstSentenceEndFrame',
     1,
   );
-  if (firstSentenceEndFrame >= narrationFrames) throw new Error('opening must end before narration master');
-  if (typeof input.opening?.coverAsset !== 'string' || input.opening.coverAsset === '') {
-    throw new Error('opening.coverAsset is required');
-  }
-  if (input.opening?.coverSource !== '/Users/jackson/Desktop/video-edit/video-resource/cover.png') {
-    throw new Error('opening.coverSource must be the canonical shared cover');
-  }
-  if (input.opening.sourceIsRegularFile !== true || input.opening.sourceIsSymlink !== false) {
-    throw new Error('opening source type evidence is invalid');
-  }
-  if (input.opening.sourceFormat !== 'png' || input.opening.sourceDecodeResult !== 'pass') {
-    throw new Error('opening PNG decode evidence is invalid');
-  }
-  if (typeof input.opening.sourceAspectRatioRelativeError !== 'number'
-    || input.opening.sourceAspectRatioRelativeError < 0
-    || input.opening.sourceAspectRatioRelativeError > 0.005) {
-    throw new Error('opening source aspect ratio is outside tolerance');
-  }
-  if (input.opening.normalizedWidth !== 1920 || input.opening.normalizedHeight !== 1080) {
-    throw new Error('opening normalized raster must be 1920x1080');
-  }
+  if (firstSentenceEndFrame >= narrationFrames) throw new Error('first sentence must end before narration master');
+  const legacyFirstShotLeadInFrames = requireInteger(
+    input.timeline.legacyFirstShotLeadInFrames ?? 0,
+    'timeline.legacyFirstShotLeadInFrames',
+  );
   if (typeof input.narrationAsset !== 'string' || input.narrationAsset === '') {
     throw new Error('narrationAsset is required');
   }
@@ -1204,7 +1332,7 @@ export const buildKnowledgeVideoAssemblyPlan = (input, options = {}) => {
     shots: input.shots,
   });
   input.shots.forEach((shot, index) => {
-    const expectedStart = index === 0 ? firstSentenceEndFrame : input.shots[index - 1].end_frame;
+    const expectedStart = index === 0 ? legacyFirstShotLeadInFrames : input.shots[index - 1].end_frame;
     if (shot.start_frame !== expectedStart) throw new Error('narration-bound shots must be consecutive');
   });
   if (input.shots.at(-1).end_frame !== narrationFrames) {
@@ -1240,21 +1368,32 @@ export const buildKnowledgeVideoAssemblyPlan = (input, options = {}) => {
     if (!workflow || typeof workflow !== 'object') {
       throw new Error('new storyboard assembly requires workflow approval selection evidence');
     }
-    workflowApprovalValidation = validateApprovalSelectionSequence({
-      gate2ScriptSha256: workflow.gate2ScriptSha256,
-      whiteCatStyle: workflow.whiteCatStyle,
-      density: workflow.density,
-      mode: workflow.mode,
-      policy: workflow.policy ?? null,
-    });
+    workflowApprovalValidation = workflow.legacyStylelessCompatibility === true
+      ? validateLegacyStylelessApprovalSelectionSequence({
+          gate2ScriptSha256: workflow.gate2ScriptSha256,
+          density: workflow.density,
+          mode: workflow.mode,
+          policy: workflow.policy ?? null,
+        })
+      : validateApprovalSelectionSequence({
+          gate2ScriptSha256: workflow.gate2ScriptSha256,
+          whiteCatStyle: workflow.whiteCatStyle,
+          density: workflow.density,
+          mode: workflow.mode,
+          policy: workflow.policy ?? null,
+        });
     const styleBinding = visualDirectionReview.white_cat_visual_style_binding;
-    if (!styleBinding
+    if (workflow.legacyStylelessCompatibility === true) {
+      if (styleBinding !== null && styleBinding !== undefined) {
+        throw new Error('legacy styleless workflow cannot carry a visual-direction style binding');
+      }
+    } else if (!styleBinding
       || styleBinding.style_id !== workflow.whiteCatStyle.style_id
       || styleBinding.treatment_profile_id !== workflow.whiteCatStyle.treatment_profile_id
       || styleBinding.visual_cohesion_profile_id
         !== workflow.whiteCatStyle.visual_cohesion_profile_id
       || styleBinding.selection_sha256 !== workflow.whiteCatStyle.selection_sha256) {
-      throw new Error('workflow white-cat style selection differs from visual direction binding');
+        throw new Error('workflow white-cat style selection differs from visual direction binding');
     }
     if (workflow.density.selection_sha256
       !== visualRhythmEvidence.artifact.visual_density_selection_sha256
@@ -1286,7 +1425,7 @@ export const buildKnowledgeVideoAssemblyPlan = (input, options = {}) => {
   const ianLayeredSceneByShot = new Map(
     (ianLayeredSceneEvidence?.records ?? []).map((record) => [record.shot_id, record]),
   );
-  const scenes = input.shots.map((shot, index) => buildScene(
+  const sourceScenes = input.shots.map((shot, index) => buildScene(
     shot,
     index,
     input.shots,
@@ -1298,7 +1437,7 @@ export const buildKnowledgeVideoAssemblyPlan = (input, options = {}) => {
     ianLayeredSceneByShot.get(shot.shot_id) ?? null,
   ));
   if (requireV3Contracts) {
-    scenes.forEach((scene, index) => {
+    sourceScenes.forEach((scene, index) => {
       const rhythmShot = visualRhythmEvidence.artifact.shots[index];
       if (scene.visual_generation_route === IAN_ROUTE) {
         const layeredEvidence = ianLayeredSceneByShot.get(scene.shot_id);
@@ -1329,6 +1468,9 @@ export const buildKnowledgeVideoAssemblyPlan = (input, options = {}) => {
       }
     });
   }
+  const scenes = sourceScenes.map((scene, index) => index === 0
+    ? extendFirstSceneToFrameZero(scene, legacyFirstShotLeadInFrames)
+    : scene);
   const transitionSelectionReview = input.transitionSelectionReview;
   if (transitionSelectionReview?.status !== 'approved'
     || transitionSelectionReview?.catalog_version !== transitionCatalog
@@ -1348,37 +1490,61 @@ export const buildKnowledgeVideoAssemblyPlan = (input, options = {}) => {
       throw new Error(`transition review checksum mismatch: ${scene.shot_id}`);
     }
   }
+  const expectedSoundDesignBindings = requireV3Contracts
+    ? buildExpectedSoundDesignBindings(input, visualRhythmEvidence)
+    : null;
+  const soundDesignEvidence = requireV3Contracts
+    ? validateSoundDesignEvidence({
+        evidence: (options.verifySoundDesignEvidence ?? verifySoundDesignEvidence)(input, {
+          shots: scenes,
+          durationFrames: narrationFrames,
+          expectedBindings: expectedSoundDesignBindings,
+        }),
+        input,
+        expectedBindings: expectedSoundDesignBindings,
+        revoiceVariant,
+      })
+    : null;
   return {
-    schema_version: 'knowledge-video-assembly-plan-v1',
+    schema_version: requireV3Contracts
+      ? 'knowledge-video-assembly-plan-v3'
+      : 'knowledge-video-assembly-plan-v2',
     episode_id: input.episodeId,
     canvas: {width: 1920, height: 1080, fps, aspect: '16:9'},
     full_master_frames: narrationFrames,
     narration_frames: narrationFrames,
-    opening: {
-      contract_version: 'cover-only-v1',
-      shot_id: 'OPEN-00',
-      cover_source: input.opening.coverSource,
-      cover_asset: input.opening.coverAsset,
-      source_is_regular_file: input.opening.sourceIsRegularFile,
-      source_is_symlink: input.opening.sourceIsSymlink,
-      source_format: input.opening.sourceFormat,
-      source_decode_result: input.opening.sourceDecodeResult,
-      source_aspect_ratio_relative_error: input.opening.sourceAspectRatioRelativeError,
-      normalized_width: input.opening.normalizedWidth,
-      normalized_height: input.opening.normalizedHeight,
-      text_overlay: false,
-      start_frame: 0,
+    timeline: {
+      contract_version: 'direct-first-shot-v1',
+      fixed_opening_cover: false,
+      first_shot_id: 'S01',
+      first_shot_start_frame: 0,
       first_sentence_end_frame: firstSentenceEndFrame,
-      episode_opening_frames: firstSentenceEndFrame,
       narration_start_frame: 0,
       narration_master_frames: narrationFrames,
       final_master_frames: narrationFrames,
-      first_post_opening_shot: input.shots[0].shot_id,
-      outgoing_transition: null,
+      legacy_first_shot_lead_in_frames: legacyFirstShotLeadInFrames,
+      publishing_cover_timeline_consumed: false,
     },
     narration_asset: input.narrationAsset,
     captions: input.captions ?? {mode: 'caption-neutral-base', cues: []},
     bgm: input.bgm ?? {mode: 'disabled', source: null, track: null},
+    ...(soundDesignEvidence === null ? {} : {
+      sound_effects: {
+        contract_version: 'knowledge-video-sound-effect-track-v1',
+        design: {
+          path: soundDesignEvidence.path,
+          checksum_sha256: soundDesignEvidence.checksum_sha256,
+          event_map_sha256: soundDesignEvidence.event_map_sha256,
+        },
+        library: structuredClone(soundDesignEvidence.bindings.sound_effect_library),
+        narration_gain: 1,
+        normalization: 'disabled',
+        peak_ceiling_dbfs: -1,
+        overflow_action: 'lower-sfx-bus-uniformly',
+        bus_gain_multiplier: soundDesignEvidence.bus_gain_multiplier,
+        cues: structuredClone(soundDesignEvidence.audible_cues),
+      },
+    }),
     scenes,
     qa_contract: {
       shared_reuse_decision: sharedReuseDecision,
@@ -1403,6 +1569,7 @@ export const buildKnowledgeVideoAssemblyPlan = (input, options = {}) => {
       },
       workflow_approval: workflowApprovalValidation,
       ian_layered_scene_packages: ianLayeredSceneEvidence,
+      sound_design: soundDesignEvidence,
       intra_shot_transition_contract: requireV3Contracts
         ? INTRA_SHOT_TRANSITION_VERSION
         : INTRA_SHOT_WATERCOLOR_BLOOM_RULE_ID,
@@ -1417,7 +1584,7 @@ export const buildKnowledgeVideoAssemblyPlan = (input, options = {}) => {
         .filter((scene) => scene.transition.kind !== 'cut').length,
       ordinary_boundaries_with_cuts: scenes.slice(0, -1)
         .filter((scene) => scene.transition.kind === 'cut').length,
-      opening_hard_cut_exceptions: ['OPEN-00→S01'],
+      opening_hard_cut_exceptions: [],
     },
   };
 };

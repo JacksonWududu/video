@@ -1,6 +1,6 @@
 # Visual Asset Review v2
 
-Manual applies `visual-asset-review-v2`/`hybrid_batch_v1` unchanged. One-click applies `visual-asset-review-v3`/`one_click_final_review_v1` to every generated asset, Whiteboard stage, and local-video source. `sequential_per_image` and `batch_final_review` remain legacy read-only. The shared `cover.png` does not enter the queue.
+Manual applies `visual-asset-review-v2`/`hybrid_batch_v1` unchanged. One-click applies `visual-asset-review-v3`/`one_click_final_review_v1` to every generated asset, Whiteboard stage, and local-video source. `sequential_per_image` and `batch_final_review` remain legacy read-only. Publishing covers never enter the queue; historical shared `cover.png` evidence stays read-only.
 
 In one-click, every candidate still passes all route, technical, semantic, identity, continuity, white-cat and dependency QA. A passing item is `qa_passed_pending_final_review`; this status may unlock only true dependent generation and is never user approval. Do not create batch or per-item decision evidence. After all items pass, build one ordered exact ID/path/SHA-256 map, set `awaiting_precomposition_visual_review`, then run `approve-one-click-final-review.py present`. It must generate and bind `final-production-asset-review-package-v1`: one digest-named image-rich HTML page, its JSON manifest, 1920×1080 paged overview sheets, and one cumulative-layer sheet per Ian package. Present that page and stop. Only explicit approval bound to that complete current map and checksum-current package changes items to `approved` and locks visuals. Then immediately ask the caption three-choice question. Before the choice, still, Studio, preview, composition, and render are forbidden.
 
@@ -22,7 +22,7 @@ The output argument may be a bare filename, which is placed under
 `<episode-workspace>/assets/image/review/`, or a repository-root-relative path
 inside that directory. Select exactly one representative per shot in storyboard
 order: the master for ImageGen/Xuan/Ink, Ian's final composite, and Whiteboard's
-region preview. Exclude the fixed cover and local-video shots. The overview is an
+region preview. Exclude publishing covers, historical opening covers, and local-video shots. The overview is an
 exact `1920×1080` PNG; every thumbnail uses proportional contain plus padding
 and is never stretched.
 

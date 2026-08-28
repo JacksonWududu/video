@@ -1,0 +1,46 @@
+{
+  "contract_version": "shared-sound-effect-library-v2",
+  "catalog_revision": 20,
+  "status": "active",
+  "created_at": "2026-08-28T05:18:36.527Z",
+  "parent_manifest": {
+    "path": "leverage-video/src/shared/sound-effects/manifest-v19.json",
+    "checksum_sha256": "6f32ebcf62af88ad6405a94449d93958cb0c95038e6e22e4ce39f1c3d201b96b"
+  },
+  "semantic_profiles": [],
+  "additions": [
+    {
+      "asset_id": "human-heartbeat-mixkit-490",
+      "source_item_id": "490",
+      "title": "Human single heart beat",
+      "semantic_roles": [
+        "human_heartbeat"
+      ],
+      "timbre_family": "heartbeat",
+      "path": "leverage-video/src/shared/sound-effects/assets/human-heartbeat-mixkit-490.wav",
+      "checksum_sha256": "c7719e58bf79c3067f608b4859e54f66c0ebdd2f58b059290569fc597c380cac",
+      "provider": "Mixkit",
+      "source_item_url": "https://mixkit.co/free-sound-effects/download/490/?context=item+grid",
+      "source_download_url": "https://assets.mixkit.co/active_storage/sfx/490/490.wav",
+      "license_observation": {
+        "verified_at": "2026-08-28T05:14:09.153Z",
+        "license_url": "https://mixkit.co/free-sound-effects/",
+        "commercial_use": true,
+        "cross_platform": true,
+        "attribution_required": false,
+        "observation": "Mixkit official Sound Effects page states that clips are royalty-free, usable without attribution, and usable in commercial and personal projects; upstream terms remain authoritative and standalone redistribution is prohibited.",
+        "verified_phrases": [
+          "royalty-free and can be used without attribution",
+          "both commercial and personal projects"
+        ]
+      },
+      "format": "wav",
+      "codec": "pcm_s16le",
+      "sample_rate_hz": 44100,
+      "channels": 2,
+      "duration_seconds": 1.100612,
+      "byte_size": 194192,
+      "downloaded_at": "2026-08-28T05:18:36.527Z"
+    }
+  ]
+}

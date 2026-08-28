@@ -1,0 +1,20 @@
+{
+  "schema_version": "knowledge-video-assembly-plan-v3",
+  "bgm": {"mode": "disabled", "source": null, "track": null},
+  "sound_effects": {
+    "contract_version": "knowledge-video-sound-effect-track-v1",
+    "narration_gain": 1,
+    "normalization": "disabled",
+    "peak_ceiling_dbfs": -1,
+    "overflow_action": "lower-sfx-bus-uniformly",
+    "bus_gain_multiplier": 0.25,
+    "cues": [{
+      "event_id": "S01:semantic:paper-card-entrance",
+      "shot_id": "S01",
+      "cue_frame": 30,
+      "semantic_role": "paper_card_entrance",
+      "render_owner": "global_sound_effect_track_v1",
+      "derived_asset": "proof-sfx.wav"
+    }]
+  }
+}

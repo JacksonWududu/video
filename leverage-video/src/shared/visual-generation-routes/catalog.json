@@ -9,7 +9,8 @@
       "compatible_scene_classes": ["narrative_illustration"],
       "white_cat_policy": "gate2-style-selected-imagegen-only-v1",
       "white_cat_style_selection_contract": "white-cat-visual-style-selection-v1",
-      "white_cat_style_ids": ["loose-line-vivid-watercolor", "twilight-neon-animation"],
+      "white_cat_style_selection_contracts": ["white-cat-visual-style-selection-v1", "white-cat-visual-style-selection-v2"],
+      "white_cat_style_ids": ["loose-line-vivid-watercolor", "twilight-neon-animation", "gilded-mythic-storybook", "cover-derived-episode-style"],
       "visible_text_policy": "approved-raster-v1",
       "white_cat_visible_text_policy": "text-free-v1",
       "assembly_text_policy": "asset-owned-no-timeline-overlay-v1",
@@ -27,7 +28,7 @@
       "recommended_by_default": false,
       "production_contract": "xuan-paper-diorama-route-v1",
       "style_skill_path": "/Users/jackson/.codex/skills/generate-visual-styles/SKILL.md",
-      "style_skill_checksum_sha256": "a7423ee693a637e75ef2a3ff623f8a5a4e951af8136c7acadc694b72be0d2502",
+      "style_skill_checksum_sha256": "319f127e6ce025db47b8a3d7af4c92136090ebaaf8116da1f84b5bcb9c236013",
       "style_profile_id": "xuan-paper-diorama",
       "style_profile_path": "/Users/jackson/.codex/skills/generate-visual-styles/references/xuan-paper-diorama.md",
       "style_profile_checksum_sha256": "f4fca8d3e00dfeaa69c9c6eef5d4b04375872e51ae1785e4a2ac9ac83f3e7f89"
@@ -72,7 +73,7 @@
       "recommended_by_default": false,
       "production_contract": "ink-doodle-knowledge-card-route-v1",
       "style_skill_path": "/Users/jackson/.codex/skills/generate-visual-styles/SKILL.md",
-      "style_skill_checksum_sha256": "a7423ee693a637e75ef2a3ff623f8a5a4e951af8136c7acadc694b72be0d2502",
+      "style_skill_checksum_sha256": "319f127e6ce025db47b8a3d7af4c92136090ebaaf8116da1f84b5bcb9c236013",
       "style_profile_id": "ink-doodle-knowledge-card",
       "style_profile_path": "/Users/jackson/.codex/skills/generate-visual-styles/references/ink-doodle-knowledge-card.md",
       "style_profile_checksum_sha256": "f993cf7c84bd1a738d84c90385502864ba83c54c10d5accb564ec23be06d2588"

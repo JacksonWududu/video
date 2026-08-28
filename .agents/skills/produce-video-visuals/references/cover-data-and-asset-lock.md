@@ -1,5 +1,7 @@
 # Cover, data graphics, and asset lock
 
+Active publishing covers are created upstream by `$imagegen-calligraphy-cover` and are forbidden from visual production, storyboard, Remotion, masters, and internal QA. Every `cover-only-v1` opening-cover rule retained in this file is completed-history validation evidence only; it must not consume or transform `publishing-cover-generation-v1` assets.
+
 ## Route-approved data and transition graphics
 
 - Validate the shot against `visual-generation-route-catalog-v2`, `visual-language-catalog-v1`, and its approved v3 review row before opening a generator or resolving a local file. Narrative work uses `imagegen`, including comic-styled treatments and separately generated sequential states; structured routes are Ian/Ink Doodle Knowledge Card/optional Whiteboard. `local-video-file` is an explicit no-cat, no-added-text route for either scene class and is processed only after all generated visual items are approved. Reject retired `comic-imagegen` and `doodle-slides`.

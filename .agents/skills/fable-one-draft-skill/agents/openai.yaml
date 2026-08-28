@@ -1,0 +1,3 @@
+display_name: 寓言故事一稿通
+short_description: 自动把中文短词条转成小红书漫画、最终叠字图、封面图、小红书HTML、知乎图文HTML和知乎发布推荐。
+default_prompt: 请使用 fable-one-draft-skill，主题为空，自动选题并完整生成小红书漫画分镜；如果当前环境具备 Image2 / image generation 能力，请实际生成 9 张无字底图并继续输出 9 张最终叠字上传图；再生成小红书封面图、知乎封面图、小红书发布文案 Markdown 与 HTML、知乎寓言成稿 Markdown 与图文插入版 HTML、知乎发布推荐包（搜索关键词、3 个话题、1 个投稿方向），并在 QA 中检查图片、封面、HTML 文件和知乎推荐包真实存在。不要发布平台，不要读取凭据。

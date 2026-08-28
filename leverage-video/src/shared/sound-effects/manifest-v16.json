@@ -1,0 +1,46 @@
+{
+  "contract_version": "shared-sound-effect-library-v2",
+  "catalog_revision": 16,
+  "status": "active",
+  "created_at": "2026-08-28T05:17:47.255Z",
+  "parent_manifest": {
+    "path": "leverage-video/src/shared/sound-effects/manifest-v15.json",
+    "checksum_sha256": "42cc23efa519d08d6c8e2b490ef80a8e63cc5d58cdf86438910e23a4d9f661c7"
+  },
+  "semantic_profiles": [],
+  "additions": [
+    {
+      "asset_id": "mechanical-movements-mixkit-3117",
+      "source_item_id": "3117",
+      "title": "Mechanical technology movements",
+      "semantic_roles": [
+        "mechanical_movement"
+      ],
+      "timbre_family": "mechanical",
+      "path": "leverage-video/src/shared/sound-effects/assets/mechanical-movements-mixkit-3117.wav",
+      "checksum_sha256": "f486f7f66d21795c54371ef2d06ee696376d1e77ea01c546d6f4c91d942c1a39",
+      "provider": "Mixkit",
+      "source_item_url": "https://mixkit.co/free-sound-effects/download/3117/?context=item+grid",
+      "source_download_url": "https://assets.mixkit.co/active_storage/sfx/3117/3117.wav",
+      "license_observation": {
+        "verified_at": "2026-08-28T05:14:09.153Z",
+        "license_url": "https://mixkit.co/free-sound-effects/",
+        "commercial_use": true,
+        "cross_platform": true,
+        "attribution_required": false,
+        "observation": "Mixkit official Sound Effects page states that clips are royalty-free, usable without attribution, and usable in commercial and personal projects; upstream terms remain authoritative and standalone redistribution is prohibited.",
+        "verified_phrases": [
+          "royalty-free and can be used without attribution",
+          "both commercial and personal projects"
+        ]
+      },
+      "format": "wav",
+      "codec": "pcm_s16le",
+      "sample_rate_hz": 44100,
+      "channels": 2,
+      "duration_seconds": 2.5,
+      "byte_size": 442732,
+      "downloaded_at": "2026-08-28T05:17:47.255Z"
+    }
+  ]
+}

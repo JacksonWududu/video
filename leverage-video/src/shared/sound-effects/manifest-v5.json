@@ -1,0 +1,46 @@
+{
+  "contract_version": "shared-sound-effect-library-v2",
+  "catalog_revision": 5,
+  "status": "active",
+  "created_at": "2026-08-28T05:14:26.705Z",
+  "parent_manifest": {
+    "path": "leverage-video/src/shared/sound-effects/manifest-v4.json",
+    "checksum_sha256": "e34895f7c31c18bfc2d57739fbe7987c63f72caa727413bed4dc70fefee991c4"
+  },
+  "semantic_profiles": [],
+  "additions": [
+    {
+      "asset_id": "light-rain-loop-mixkit-2393",
+      "source_item_id": "2393",
+      "title": "Light rain loop",
+      "semantic_roles": [
+        "rain_ambience_loop"
+      ],
+      "timbre_family": "rain",
+      "path": "leverage-video/src/shared/sound-effects/assets/light-rain-loop-mixkit-2393.wav",
+      "checksum_sha256": "0e90fa5f678cca6966e66477b75b8fe608bf845d54e4b3e3efff839b9cc6805e",
+      "provider": "Mixkit",
+      "source_item_url": "https://mixkit.co/free-sound-effects/download/2393/?context=item+grid",
+      "source_download_url": "https://assets.mixkit.co/active_storage/sfx/2393/2393.wav",
+      "license_observation": {
+        "verified_at": "2026-08-28T05:14:09.153Z",
+        "license_url": "https://mixkit.co/free-sound-effects/",
+        "commercial_use": true,
+        "cross_platform": true,
+        "attribution_required": false,
+        "observation": "Mixkit official Sound Effects page states that clips are royalty-free, usable without attribution, and usable in commercial and personal projects; upstream terms remain authoritative and standalone redistribution is prohibited.",
+        "verified_phrases": [
+          "royalty-free and can be used without attribution",
+          "both commercial and personal projects"
+        ]
+      },
+      "format": "wav",
+      "codec": "pcm_s16le",
+      "sample_rate_hz": 44100,
+      "channels": 2,
+      "duration_seconds": 15,
+      "byte_size": 2646730,
+      "downloaded_at": "2026-08-28T05:14:26.705Z"
+    }
+  ]
+}

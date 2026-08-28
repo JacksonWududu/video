@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 
 export const WHITE_CAT_VISUAL_STYLE_SELECTION_VERSION = 'white-cat-visual-style-selection-v1';
+export const WHITE_CAT_VISUAL_STYLE_SELECTION_VERSION_V2 = 'white-cat-visual-style-selection-v2';
 export const VISUAL_DENSITY_SELECTION_VERSION = 'visual-density-selection-v1';
 export const WORKFLOW_APPROVAL_MODE_VERSION = 'workflow-approval-mode-v1';
 export const ONE_CLICK_APPROVAL_POLICY_VERSION = 'one-click-approval-policy-v1';
@@ -16,7 +17,7 @@ export const WHITE_CAT_VISUAL_STYLE_OPTIONS = Object.freeze({
     treatment_profile_id: 'imagegen-watercolor-narrative',
     visual_cohesion_profile_id: 'warm-paper-watercolor-cohesion-v1',
     style_skill_path: '/Users/jackson/.codex/skills/generate-visual-styles/SKILL.md',
-    style_skill_checksum_sha256: 'a7423ee693a637e75ef2a3ff623f8a5a4e951af8136c7acadc694b72be0d2502',
+    style_skill_checksum_sha256: '319f127e6ce025db47b8a3d7af4c92136090ebaaf8116da1f84b5bcb9c236013',
     style_profile_path: '/Users/jackson/.codex/skills/generate-visual-styles/references/loose-line-vivid-watercolor.md',
     style_profile_checksum_sha256: 'cdf1fc7f6b70f4e6a888e03803ce60cbe8b0ef2ff3ff9a7a566c7be2c3956f36',
   }),
@@ -24,14 +25,28 @@ export const WHITE_CAT_VISUAL_STYLE_OPTIONS = Object.freeze({
     treatment_profile_id: 'imagegen-twilight-neon-narrative',
     visual_cohesion_profile_id: 'twilight-luminous-cohesion-v1',
     style_skill_path: '/Users/jackson/.codex/skills/generate-visual-styles/SKILL.md',
-    style_skill_checksum_sha256: 'a7423ee693a637e75ef2a3ff623f8a5a4e951af8136c7acadc694b72be0d2502',
+    style_skill_checksum_sha256: '319f127e6ce025db47b8a3d7af4c92136090ebaaf8116da1f84b5bcb9c236013',
     style_profile_path: '/Users/jackson/.codex/skills/generate-visual-styles/references/twilight-neon-animation.md',
     style_profile_checksum_sha256: 'dcf85c2fbf05d5d798a4a4635f5076362b933fb6f82b990673d9924fad8ed335',
+  }),
+  'gilded-mythic-storybook': Object.freeze({
+    treatment_profile_id: 'imagegen-gilded-mythic-narrative',
+    visual_cohesion_profile_id: 'gilded-mythic-cohesion-v1',
+    style_skill_path: '/Users/jackson/.codex/skills/generate-visual-styles/SKILL.md',
+    style_skill_checksum_sha256: '319f127e6ce025db47b8a3d7af4c92136090ebaaf8116da1f84b5bcb9c236013',
+    style_profile_path: '/Users/jackson/.codex/skills/generate-visual-styles/references/gilded-mythic-storybook.md',
+    style_profile_checksum_sha256: 'c5f6e16744e5d5d825b4d97b92d8446577c6f4f179f1752d0ce28ffc7bce1428',
   }),
 });
 const DENSITY_MODES = new Set(['standard', 'rich']);
 const APPROVAL_MODES = new Set(['manual', 'one_click']);
 const NARRATION_AUDIO_SOURCE_MODES = new Set(['colocated_voice', 'edge_tts']);
+const DYNAMIC_STYLE_SOURCES = new Set(['episode_cover', 'registered_custom']);
+const DYNAMIC_STYLE_OPTION = Object.freeze({
+  style_id: 'cover-derived-episode-style',
+  treatment_profile_id: 'imagegen-cover-derived-narrative',
+  visual_cohesion_profile_id: 'cover-derived-cohesion-v1',
+});
 const EDGE_TTS_VOICE = 'zh-CN-YunjianNeural';
 const EDGE_TTS_RATE = '+20%';
 const REQUIRED_PREAUTHORIZATIONS = Object.freeze([
@@ -69,44 +84,91 @@ const requireDecision = (value, label) => {
 export const resolveWhiteCatVisualStyleOption = (styleId) => {
   const option = WHITE_CAT_VISUAL_STYLE_OPTIONS[styleId];
   if (!option) {
-    throw new Error('white-cat visual style must be loose-line-vivid-watercolor or twilight-neon-animation');
+    throw new Error(`white-cat visual style must be one of: ${Object.keys(WHITE_CAT_VISUAL_STYLE_OPTIONS).join(', ')}`);
   }
   return option;
 };
 
-const whiteCatVisualStyleProjection = (selection) => ({
-  contract_version: WHITE_CAT_VISUAL_STYLE_SELECTION_VERSION,
-  gate2_script_sha256: selection.gate2_script_sha256,
-  style_id: selection.style_id,
-  treatment_profile_id: selection.treatment_profile_id,
-  visual_cohesion_profile_id: selection.visual_cohesion_profile_id,
-  style_skill_path: selection.style_skill_path,
-  style_skill_checksum_sha256: selection.style_skill_checksum_sha256,
-  style_profile_path: selection.style_profile_path,
-  style_profile_checksum_sha256: selection.style_profile_checksum_sha256,
-  decision: {
-    status: selection.decision?.status,
-    exact_message: selection.decision?.exact_message,
-    decided_at: selection.decision?.decided_at,
-  },
-});
+const whiteCatVisualStyleProjection = (selection) => {
+  const common = {
+    contract_version: selection.contract_version,
+    gate2_script_sha256: selection.gate2_script_sha256,
+    style_id: selection.style_id,
+    treatment_profile_id: selection.treatment_profile_id,
+    visual_cohesion_profile_id: selection.visual_cohesion_profile_id,
+    style_profile_path: selection.style_profile_path,
+    style_profile_checksum_sha256: selection.style_profile_checksum_sha256,
+    decision: {
+      status: selection.decision?.status,
+      exact_message: selection.decision?.exact_message,
+      decided_at: selection.decision?.decided_at,
+    },
+  };
+  if (selection.contract_version === WHITE_CAT_VISUAL_STYLE_SELECTION_VERSION_V2) {
+    return {
+      ...common,
+      style_source: selection.style_source,
+      source_style_id: selection.source_style_id ?? null,
+      style_label: selection.style_label,
+      publishing_cover_package_path: selection.publishing_cover_package_path ?? null,
+      publishing_cover_package_sha256: selection.publishing_cover_package_sha256 ?? null,
+    };
+  }
+  return {
+    ...common,
+    contract_version: WHITE_CAT_VISUAL_STYLE_SELECTION_VERSION,
+    style_skill_path: selection.style_skill_path,
+    style_skill_checksum_sha256: selection.style_skill_checksum_sha256,
+  };
+};
 
 export const buildWhiteCatVisualStyleSelectionSha256 = (selection) => (
   sha256(whiteCatVisualStyleProjection(selection))
 );
 
 export const validateWhiteCatVisualStyleSelection = (selection, {gate2ScriptSha256}) => {
-  if (selection?.contract_version !== WHITE_CAT_VISUAL_STYLE_SELECTION_VERSION) {
+  if (![WHITE_CAT_VISUAL_STYLE_SELECTION_VERSION, WHITE_CAT_VISUAL_STYLE_SELECTION_VERSION_V2]
+    .includes(selection?.contract_version)) {
     throw new Error('white-cat visual style selection authority mismatch');
   }
   requireSha256(gate2ScriptSha256, 'current Gate 2 script checksum');
   if (selection.gate2_script_sha256 !== gate2ScriptSha256) {
     throw new Error('white-cat visual style selection is stale after Gate 2 change');
   }
-  const option = resolveWhiteCatVisualStyleOption(selection.style_id);
-  for (const [field, expected] of Object.entries(option)) {
-    if (selection[field] !== expected) {
-      throw new Error(`white-cat visual style selection has stale or substituted ${field}`);
+  let option;
+  if (selection.contract_version === WHITE_CAT_VISUAL_STYLE_SELECTION_VERSION) {
+    option = resolveWhiteCatVisualStyleOption(selection.style_id);
+    for (const [field, expected] of Object.entries(option)) {
+      if (selection[field] !== expected) {
+        throw new Error(`white-cat visual style selection has stale or substituted ${field}`);
+      }
+    }
+  } else {
+    option = DYNAMIC_STYLE_OPTION;
+    if (!DYNAMIC_STYLE_SOURCES.has(selection.style_source)) {
+      throw new Error('white-cat visual style v2 source must be episode_cover or registered_custom');
+    }
+    if (selection.style_id !== option.style_id
+      || selection.treatment_profile_id !== option.treatment_profile_id
+      || selection.visual_cohesion_profile_id !== option.visual_cohesion_profile_id) {
+      throw new Error('white-cat visual style v2 runtime treatment is stale or substituted');
+    }
+    if (typeof selection.style_label !== 'string' || selection.style_label.trim() === ''
+      || typeof selection.style_profile_path !== 'string' || selection.style_profile_path.trim() === '') {
+      throw new Error('white-cat visual style v2 requires an episode-local label and profile path');
+    }
+    requireSha256(selection.style_profile_checksum_sha256, 'white-cat visual style v2 profile checksum');
+    if (selection.style_source === 'episode_cover') {
+      if (selection.source_style_id !== null
+        || typeof selection.publishing_cover_package_path !== 'string'
+        || selection.publishing_cover_package_path.trim() === '') {
+        throw new Error('episode-cover style must bind its publishing-cover package');
+      }
+      requireSha256(selection.publishing_cover_package_sha256, 'publishing-cover package checksum');
+    } else if (typeof selection.source_style_id !== 'string' || selection.source_style_id.trim() === ''
+      || selection.publishing_cover_package_path !== null
+      || selection.publishing_cover_package_sha256 !== null) {
+      throw new Error('registered custom style must bind its source ID without an episode cover');
     }
   }
   requireDecision(selection.decision, 'white-cat visual style');
@@ -117,8 +179,12 @@ export const validateWhiteCatVisualStyleSelection = (selection, {gate2ScriptSha2
   return {
     result: 'pass',
     style_id: selection.style_id,
+    style_source: selection.style_source ?? 'core_catalog',
+    source_style_id: selection.source_style_id ?? null,
     treatment_profile_id: option.treatment_profile_id,
     visual_cohesion_profile_id: option.visual_cohesion_profile_id,
+    style_profile_path: selection.style_profile_path,
+    style_profile_checksum_sha256: selection.style_profile_checksum_sha256,
     selection_sha256: expected,
   };
 };
@@ -321,13 +387,63 @@ export const validateApprovalSelectionSequence = ({
   };
 };
 
+export const validateLegacyStylelessApprovalSelectionSequence = ({
+  gate2ScriptSha256,
+  density,
+  mode,
+  policy = null,
+}) => {
+  requireSha256(gate2ScriptSha256, 'current Gate 2 script checksum');
+  if (density?.contract_version !== VISUAL_DENSITY_SELECTION_VERSION
+    || density.gate2_script_sha256 !== gate2ScriptSha256
+    || density.white_cat_visual_style_selection_sha256 !== undefined
+    || !DENSITY_MODES.has(density.density_mode)) {
+    throw new Error('legacy styleless density selection authority mismatch');
+  }
+  requireDecision(density.decision, 'legacy styleless visual density');
+  const densitySha256 = buildVisualDensitySelectionSha256(density);
+  if (density.selection_sha256 !== densitySha256) {
+    throw new Error('legacy styleless density selection checksum is stale');
+  }
+  const modeResult = validateWorkflowApprovalMode(mode, {
+    gate2ScriptSha256,
+    visualDensitySelectionSha256: densitySha256,
+  });
+  if (mode.approval_mode === 'manual') {
+    if (policy !== null) throw new Error('manual mode must not carry one-click policy');
+  } else {
+    if (policy?.white_cat_visual_style_selection_sha256 !== undefined) {
+      throw new Error('legacy styleless policy must not carry a style selection checksum');
+    }
+    validateOneClickApprovalPolicy(policy, {
+      gate2ScriptSha256,
+      whiteCatVisualStyleSelectionSha256: undefined,
+      visualDensitySelectionSha256: densitySha256,
+      workflowApprovalModeSelectionSha256: modeResult.selection_sha256,
+    });
+  }
+  return {
+    result: 'pass',
+    legacy_compatibility: 'started-before-white-cat-style-selection-v1',
+    white_cat_visual_style_id: null,
+    visual_cohesion_profile_id: null,
+    density_mode: density.density_mode,
+    approval_mode: mode.approval_mode,
+  };
+};
+
 export const resolveLegacyDensity = ({episodeStarted, densitySelection, explicitRebuild = false}) => {
   if (densitySelection) return densitySelection.density_mode;
   if (episodeStarted && !explicitRebuild) return 'legacy_standard';
   throw new Error('new or explicitly rebuilt episode requires visual density selection');
 };
 
-export const calculateSelectionInvalidation = ({change, lockedScriptValid = true, audioValid = true}) => {
+export const calculateSelectionInvalidation = ({
+  change,
+  lockedScriptValid = true,
+  audioValid = true,
+  usesCoverDerivedStyle = false,
+}) => {
   if (change === 'gate2_script') return {
     keep_locked_script: false,
     keep_audio: false,
@@ -345,6 +461,16 @@ export const calculateSelectionInvalidation = ({change, lockedScriptValid = true
     invalidate_workflow_approval_mode: true,
     invalidate_narration_audio_source_selection: true,
     invalidate_from: 'awaiting_visual_density_selection',
+  };
+  if (change === 'publishing_cover') return {
+    keep_locked_script: lockedScriptValid,
+    keep_audio: audioValid,
+    invalidate_publishing_cover: false,
+    invalidate_white_cat_visual_style_selection: usesCoverDerivedStyle,
+    invalidate_visual_density_selection: usesCoverDerivedStyle,
+    invalidate_workflow_approval_mode: usesCoverDerivedStyle,
+    invalidate_narration_audio_source_selection: usesCoverDerivedStyle,
+    invalidate_from: usesCoverDerivedStyle ? 'awaiting_white_cat_visual_style_selection' : null,
   };
   if (change === 'visual_density') return {
     keep_locked_script: lockedScriptValid,

@@ -78,6 +78,14 @@ def record(args: argparse.Namespace) -> dict:
         if is_white_cat_action
         else ("loose-line-vivid-watercolor", "warm-paper-watercolor-cohesion-v1", False)
     )
+    active_style_selection = state.get("white_cat_visual_style_selection", {})
+    expected_style_profile_sha256 = (
+        active_style_selection.get("style_profile_checksum_sha256")
+        if current_style_binding
+        and active_style_selection.get("contract_version")
+        == helper.WHITE_CAT_STYLE_SELECTION_VERSION_V2
+        else None
+    )
     if (
         item.get("visual_generation_route") != "imagegen"
         or (item.get("strict_review") is not False and not is_strict_revision)
@@ -119,6 +127,7 @@ def record(args: argparse.Namespace) -> dict:
             cohesion_id=expected_cohesion_id,
             selection_sha256=item.get("white_cat_visual_style_selection_sha256"),
             current_binding=current_style_binding,
+            style_profile_checksum_sha256=expected_style_profile_sha256,
         )
 
     source = helper.checksum_bound_file(qa["selected_source"], "selected source")

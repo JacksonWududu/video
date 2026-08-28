@@ -31,7 +31,6 @@ import {
 } from '../../../../leverage-video/src/shared/ian-layered-entry-effects/contract.mjs';
 
 const LEGACY_ALLOWED_KINDS = new Set(TRANSITION_KINDS);
-const COVER_SOURCE = '/Users/jackson/Desktop/video-edit/video-resource/cover.png';
 const SHA256 = /^[a-f0-9]{64}$/;
 const IAN_ROUTE = 'ian-handdrawn-ppt';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -42,7 +41,6 @@ const expandSharedRendererSource = (source) => {
   return [
     source,
     fs.readFileSync(path.join(REPOSITORY_ROOT, 'leverage-video/src/shared/video-scenes/KnowledgeVideo.tsx'), 'utf8'),
-    fs.readFileSync(path.join(REPOSITORY_ROOT, 'leverage-video/src/shared/video-scenes/EpisodeOpening.tsx'), 'utf8'),
     fs.readFileSync(path.join(REPOSITORY_ROOT, 'leverage-video/src/shared/video-scenes/ComicScene.tsx'), 'utf8'),
     fs.readFileSync(path.join(REPOSITORY_ROOT, 'leverage-video/src/shared/video-scenes/NarrativeScene.tsx'), 'utf8'),
     fs.readFileSync(path.join(REPOSITORY_ROOT, 'leverage-video/src/shared/video-scenes/GraphicScene.tsx'), 'utf8'),
@@ -122,68 +120,38 @@ const validateIanLayeredSceneCoverage = ({evidence, scenes}) => {
   };
 };
 
-const validateCoverOnlyOpening = ({plan, source}) => {
-  const opening = plan?.opening;
-  if (opening?.contract_version !== 'cover-only-v1') throw new Error('assembly plan does not declare cover-only-v1');
-  if (opening?.shot_id !== 'OPEN-00') throw new Error('cover-only opening must use OPEN-00');
-  if (opening?.cover_source !== COVER_SOURCE) throw new Error('cover-only opening uses the wrong shared source');
-  if (opening?.source_is_regular_file !== true || opening?.source_is_symlink !== false) {
-    throw new Error('cover-only opening source type evidence is invalid');
+const validateDirectFirstShot = ({plan, source}) => {
+  const timeline = plan?.timeline;
+  if (!['knowledge-video-assembly-plan-v2', 'knowledge-video-assembly-plan-v3']
+    .includes(plan?.schema_version)
+    || timeline?.contract_version !== 'direct-first-shot-v1'
+    || timeline?.fixed_opening_cover !== false
+    || timeline?.publishing_cover_timeline_consumed !== false) {
+    throw new Error('assembly plan does not declare direct-first-shot-v1 without a timeline cover');
   }
-  if (opening?.source_format !== 'png' || opening?.source_decode_result !== 'pass') {
-    throw new Error('cover-only opening PNG decode evidence is invalid');
+  if (timeline?.narration_start_frame !== 0 || timeline?.first_shot_start_frame !== 0
+    || timeline?.first_shot_id !== 'S01' || plan.scenes[0]?.shot_id !== 'S01'
+    || plan.scenes[0]?.start_frame !== 0) {
+    throw new Error('S01 and narration must begin at frame zero');
   }
-  if (typeof opening?.source_aspect_ratio_relative_error !== 'number'
-    || opening.source_aspect_ratio_relative_error < 0
-    || opening.source_aspect_ratio_relative_error > 0.005) {
-    throw new Error('cover-only opening source aspect ratio is outside tolerance');
+  if (!Number.isInteger(timeline?.first_sentence_end_frame)
+    || timeline.first_sentence_end_frame <= 0
+    || timeline.first_sentence_end_frame >= plan.narration_frames
+    || timeline.final_master_frames !== timeline.narration_master_frames
+    || timeline.final_master_frames !== plan.full_master_frames) {
+    throw new Error('direct-first-shot timeline duration evidence is invalid');
   }
-  if (opening?.normalized_width !== 1920 || opening?.normalized_height !== 1080) {
-    throw new Error('cover-only opening normalized raster is not 1920x1080');
+  if (Object.hasOwn(plan, 'opening')
+    || JSON.stringify(plan?.qa_contract?.opening_hard_cut_exceptions) !== '[]') {
+    throw new Error('retired opening data or hard-cut exceptions remain active');
   }
-  if (opening?.text_overlay !== false) throw new Error('cover-only opening must not add a text overlay');
-  if (opening?.start_frame !== 0 || opening?.narration_start_frame !== 0) {
-    throw new Error('cover-only opening and narration must start at frame zero');
+  if (/EpisodeOpening|OPEN-0[01]|cover-only-v1|plan\.opening|opening\.cover/.test(source)) {
+    throw new Error('composition still consumes a retired fixed opening cover');
   }
-  if (!Number.isInteger(opening?.first_sentence_end_frame) || opening.first_sentence_end_frame <= 0) {
-    throw new Error('cover-only opening has invalid first_sentence_end_frame');
-  }
-  if (opening?.episode_opening_frames !== opening.first_sentence_end_frame) {
-    throw new Error('cover-only opening duration must equal first_sentence_end_frame');
-  }
-  if (opening?.final_master_frames !== opening?.narration_master_frames) {
-    throw new Error('cover-only final master must have no opening frame offset');
-  }
-
-  const firstShotId = plan.scenes[0].shot_id;
-  if (firstShotId !== 'S01') throw new Error('cover-only first content shot must be S01');
-  const exceptions = [`OPEN-00→${firstShotId}`];
-  if (plan.scenes[0].start_frame !== opening.first_sentence_end_frame) {
-    throw new Error('first content shot does not begin at the cover-only hard cut');
-  }
-  if (JSON.stringify(plan?.qa_contract?.opening_hard_cut_exceptions) !== JSON.stringify(exceptions)) {
-    throw new Error('opening hard-cut exceptions are missing or overbroad');
-  }
-
-  if (!/cover-only-v1/.test(source) || !/<EpisodeOpening\b/.test(source)) {
-    throw new Error('composition does not consume the cover-only EpisodeOpening');
-  }
-  if (!/coverSource=\{opening\.cover_source\}/.test(source)
-    && !/coverAsset=\{plan\.opening\.cover_asset\}/.test(source)) {
-    throw new Error('composition does not bind opening.cover_source');
-  }
-  if (!/durationInFrames=\{opening\.first_sentence_end_frame\}/.test(source)
-    && !/durationInFrames=\{plan\.opening\.first_sentence_end_frame\}/.test(source)) {
-    throw new Error('composition does not bind the cover hold to first_sentence_end_frame');
-  }
-  if (!/narrationStartFrame=\{0\}/.test(source) && !/from=\{0\}/.test(source)) {
+  if (!/<NarrationTrack[\s\S]*?from=\{0\}/.test(source)) {
     throw new Error('composition does not bind narration to frame zero');
   }
-  if (/titleCard|topicCard|OPEN-01/.test(source)) {
-    throw new Error('composition retains a retired second opening stage');
-  }
-
-  return exceptions;
+  return [];
 };
 
 export const validateSceneTransitions = ({plan, source}) => {
@@ -217,7 +185,7 @@ export const validateSceneTransitions = ({plan, source}) => {
       || transitionSelectionReview?.ordinary_boundary_count !== plan.scenes.length - 1)) {
     throw new Error('assembly plan lacks a passing transition selection review');
   }
-  const openingExceptions = validateCoverOnlyOpening({plan, source});
+  const openingExceptions = validateDirectFirstShot({plan, source});
   const sceneRoutingContract = plan?.qa_contract?.scene_routing_contract;
   if (![
     'explicit-visual-generation-route-v1',
@@ -258,7 +226,8 @@ export const validateSceneTransitions = ({plan, source}) => {
   }
   let ianLayeredSceneValidation = null;
   if (sceneRoutingContract === 'explicit-visual-generation-route-v3') {
-    if (visualDirectionArtifactPolicy?.result !== 'pass'
+    if (plan.schema_version !== 'knowledge-video-assembly-plan-v3'
+      || visualDirectionArtifactPolicy?.result !== 'pass'
       || visualDirectionArtifactPolicy?.artifact_mode !== 'current_v3'
       || visualDirectionArtifactPolicy?.contract_version !== 'per-shot-visual-direction-review-v3') {
       throw new Error('new or modified assembly requires current_v3 visual direction evidence');
@@ -285,7 +254,8 @@ export const validateSceneTransitions = ({plan, source}) => {
     if (/FullFrameMaskSweep|full-frame-mask-sweep/.test(source)) {
       throw new Error('Ian renderer still consumes forbidden full-frame mask sweep code');
     }
-  } else if (visualDirectionArtifactPolicy?.result !== 'pass'
+  } else if (plan.schema_version !== 'knowledge-video-assembly-plan-v2'
+    || visualDirectionArtifactPolicy?.result !== 'pass'
     || visualDirectionArtifactPolicy?.artifact_mode !== 'legacy_read_only'
     || visualDirectionArtifactPolicy?.contract_version !== expectedDirectionContract
     || modifiedShotIds.length !== 0) {
@@ -679,7 +649,7 @@ export const validateSceneTransitions = ({plan, source}) => {
     ian_layered_scene_contract: sceneRoutingContract === 'explicit-visual-generation-route-v3'
       ? ianLayeredSceneValidation.contract_version
       : null,
-    opening_contract_version: 'cover-only-v1',
+    opening_contract_version: 'direct-first-shot-v1',
     opening_hard_cut_exceptions: openingExceptions,
   };
 };

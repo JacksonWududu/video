@@ -247,30 +247,81 @@ export type LegacyNarrativeScene = {
 
 export type KnowledgeVideoScene = CurrentKnowledgeVideoScene | LegacyNarrativeScene;
 
-export type KnowledgeVideoAssemblyPlan = {
+export type KnowledgeVideoSoundEffectCue = {
+  readonly event_id: string;
+  readonly shot_id: string;
+  readonly cue_frame: number;
+  readonly semantic_role: string;
+  readonly intensity: 'micro' | 'strong';
+  readonly render_owner: 'global_sound_effect_track_v1' | 'ian_layered_scene';
+  readonly gain_multiplier: number;
+  readonly derived_asset: {
+    readonly asset: string;
+    readonly checksum_sha256: string;
+    readonly sample_rate_hz: 44100;
+    readonly channels: 2;
+    readonly format: 'wav';
+    readonly source_sample_rate_hz: number;
+    readonly trim_start_sample: number;
+    readonly trim_end_sample: number;
+    readonly duration_in_frames: number;
+    readonly runtime_transform: 'forbidden';
+  };
+};
+
+type KnowledgeVideoAssemblyPlanCommon = {
+  readonly full_master_frames: number;
+  readonly narration_frames: number;
+  readonly narration_asset: string;
+  readonly timeline: {
+    readonly contract_version: 'direct-first-shot-v1';
+    readonly fixed_opening_cover: false;
+    readonly first_shot_id: 'S01';
+    readonly first_shot_start_frame: 0;
+    readonly first_sentence_end_frame: number;
+    readonly narration_start_frame: 0;
+    readonly narration_master_frames: number;
+    readonly final_master_frames: number;
+    readonly legacy_first_shot_lead_in_frames: number;
+    readonly publishing_cover_timeline_consumed: false;
+  };
+  readonly scenes: readonly KnowledgeVideoScene[];
+};
+
+export type HistoricalKnowledgeVideoAssemblyPlan = {
   readonly schema_version: 'knowledge-video-assembly-plan-v1';
   readonly full_master_frames: number;
   readonly narration_frames: number;
   readonly narration_asset: string;
-  readonly opening: {
-    readonly contract_version: 'cover-only-v1';
-    readonly shot_id: 'OPEN-00';
-    readonly cover_source: '/Users/jackson/Desktop/video-edit/video-resource/cover.png';
-    readonly cover_asset: string;
-    readonly source_is_regular_file: true;
-    readonly source_is_symlink: false;
-    readonly source_format: 'png';
-    readonly source_decode_result: 'pass';
-    readonly source_aspect_ratio_relative_error: number;
-    readonly normalized_width: 1920;
-    readonly normalized_height: 1080;
-    readonly text_overlay: false;
-    readonly start_frame: 0;
-    readonly first_sentence_end_frame: number;
-    readonly episode_opening_frames: number;
-    readonly narration_start_frame: 0;
-    readonly narration_master_frames: number;
-    readonly final_master_frames: number;
-  };
-  readonly scenes: readonly KnowledgeVideoScene[];
+  readonly opening: Readonly<Record<string, unknown>>;
+  readonly scenes: readonly unknown[];
 };
+
+export type LegacyKnowledgeVideoAssemblyPlan = KnowledgeVideoAssemblyPlanCommon & {
+  readonly schema_version: 'knowledge-video-assembly-plan-v2';
+  readonly sound_effects?: never;
+};
+
+export type CurrentKnowledgeVideoAssemblyPlan = KnowledgeVideoAssemblyPlanCommon & {
+  readonly schema_version: 'knowledge-video-assembly-plan-v3';
+  readonly sound_effects: {
+    readonly contract_version: 'knowledge-video-sound-effect-track-v1';
+    readonly design: {
+      readonly path: string;
+      readonly checksum_sha256: string;
+      readonly event_map_sha256: string;
+    };
+    readonly library: {readonly path: string; readonly checksum_sha256: string};
+    readonly narration_gain: 1;
+    readonly normalization: 'disabled';
+    readonly peak_ceiling_dbfs: -1;
+    readonly overflow_action: 'lower-sfx-bus-uniformly';
+    readonly bus_gain_multiplier: number;
+    readonly cues: readonly KnowledgeVideoSoundEffectCue[];
+  };
+};
+
+export type KnowledgeVideoAssemblyPlan =
+  | HistoricalKnowledgeVideoAssemblyPlan
+  | LegacyKnowledgeVideoAssemblyPlan
+  | CurrentKnowledgeVideoAssemblyPlan;

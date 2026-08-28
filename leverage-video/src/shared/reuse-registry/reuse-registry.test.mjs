@@ -185,10 +185,12 @@ test('accepts real source imports for mandatory shared modules', () => {
     "import {KnowledgeVideo} from '../../shared/video-scenes';",
     "import {validateIanLayeredScenePlan} from '../../shared/ian-layered-scene/contract.mjs';",
     "import {validateIanLayeredEntryEffectsPlan} from '../../shared/ian-layered-entry-effects/contract.mjs';",
+    "import {buildKnowledgeVideoSoundDesign} from '../../shared/sound-effects/build-sound-design.mjs';",
     'void buildKnowledgeVideoAssemblyPlan;',
     'void KnowledgeVideo;',
     'void validateIanLayeredScenePlan;',
     'void validateIanLayeredEntryEffectsPlan;',
+    'void buildKnowledgeVideoSoundDesign;',
     '',
   ].join('\n'));
   try {
@@ -221,6 +223,12 @@ test('accepts real source imports for mandatory shared modules', () => {
         checksum_sha256: sha256File(sourcePath),
         shared_import_marker: 'shared/ian-layered-entry-effects',
       }],
+      'sound-effects': [{
+        kind: 'source',
+        path: consumerPath,
+        checksum_sha256: sha256File(sourcePath),
+        shared_import_marker: 'shared/sound-effects',
+      }],
     };
     for (const item of decision.decisions) item.consumers = consumers[item.module_id] ?? [];
     assert.equal(
@@ -244,10 +252,12 @@ test('accepts an explicitly authorized legacy migration with an exact current sc
     "import {KnowledgeVideo} from '../../shared/video-scenes';",
     "import {validateIanLayeredScenePlan} from '../../shared/ian-layered-scene/contract.mjs';",
     "import {validateIanLayeredEntryEffectsPlan} from '../../shared/ian-layered-entry-effects/contract.mjs';",
+    "import {buildKnowledgeVideoSoundDesign} from '../../shared/sound-effects/build-sound-design.mjs';",
     'void buildKnowledgeVideoAssemblyPlan;',
     'void KnowledgeVideo;',
     'void validateIanLayeredScenePlan;',
     'void validateIanLayeredEntryEffectsPlan;',
+    'void buildKnowledgeVideoSoundDesign;',
     '',
   ].join('\n'));
   try {
@@ -280,6 +290,12 @@ test('accepts an explicitly authorized legacy migration with an exact current sc
         checksum_sha256: sha256File(sourcePath),
         shared_import_marker: 'shared/ian-layered-entry-effects',
       }],
+      'sound-effects': [{
+        kind: 'source',
+        path: consumerPath,
+        checksum_sha256: sha256File(sourcePath),
+        shared_import_marker: 'shared/sound-effects',
+      }],
     };
     for (const item of decision.decisions) item.consumers = consumers[item.module_id] ?? [];
 
@@ -309,10 +325,12 @@ test('legacy migration and consumption use the same bytewise inventory order', (
     "import {KnowledgeVideo} from '../../../../shared/video-scenes';",
     "import {validateIanLayeredScenePlan} from '../../../../shared/ian-layered-scene/contract.mjs';",
     "import {validateIanLayeredEntryEffectsPlan} from '../../../../shared/ian-layered-entry-effects/contract.mjs';",
+    "import {buildKnowledgeVideoSoundDesign} from '../../../../shared/sound-effects/build-sound-design.mjs';",
     'void buildKnowledgeVideoAssemblyPlan;',
     'void KnowledgeVideo;',
     'void validateIanLayeredScenePlan;',
     'void validateIanLayeredEntryEffectsPlan;',
+    'void buildKnowledgeVideoSoundDesign;',
     '',
   ].join('\n'));
   fs.writeFileSync(demoPath, 'export const demo = true;\n');
@@ -357,6 +375,14 @@ test('legacy migration and consumption use the same bytewise inventory order', (
           path: consumerPath,
           checksum_sha256: sha256File(openingPath),
           shared_import_marker: 'shared/ian-layered-entry-effects',
+        }];
+      }
+      if (item.module_id === 'sound-effects') {
+        item.consumers = [{
+          kind: 'source',
+          path: consumerPath,
+          checksum_sha256: sha256File(openingPath),
+          shared_import_marker: 'shared/sound-effects',
         }];
       }
     }

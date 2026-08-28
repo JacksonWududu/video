@@ -36,12 +36,14 @@ Label the sheet as `identity/composition reference`, never as a multi-cat layout
 
 ## Locked style
 
-Use the exact episode-wide `white-cat-visual-style-selection-v1`; never default, mix, or override it per shot. Both choices target a 16:9 landscape canvas within `0.5%` relative aspect-ratio error; exact 1920×1080 is required for the later composition derivative.
+Use the exact episode-wide readable v1 or current `white-cat-visual-style-selection-v2`; never default, mix, or override it per shot. V2 binds an immutable episode-local profile checksum even when its source was registered globally. All storyboard choices target a 16:9 landscape canvas within `0.5%` relative aspect-ratio error; exact 1920×1080 is required for the later composition derivative.
 
 - `loose-line-vivid-watercolor` (松线明彩水彩): warm off-white cold-press paper, transparent luminous watercolor washes, irregular brushed edges/exposed paper, and sparse loose broken black-brown charcoal/dry-ink contours.
 - `twilight-neon-animation` (暮紫霓影动画): use the exact saved profile's twilight blue-violet animation language, luminous periwinkle/rose-coral accents, restrained bloom, clean cinematic forms, and its negative rules; preserve the same canonical cat identity without importing any prior pose, text, or scene geometry.
+- `gilded-mythic-storybook` (鎏金秘境绘本): use the exact saved profile's ivory-gold radiance, cobalt structure, mulberry-plum depth, sparse jewel accents, painterly faceting, controlled ornament, and negative rules; preserve the same canonical cat identity without importing the reference's objects, symbols, architecture, pose, text, or bilateral layout.
+- `cover-derived-episode-style` (封面派生/注册风格): use the episode profile's ten transferable axes. Ordinary ImageGen may use the full style envelope; Ian and every other fixed route inherit only palette, luminance, and negative space. Never import cover title/calligraphy, subject matter, symbols, scene geometry, pose, or layout.
 
-Use the selected saved style profile only for visual language. Every white-cat prompt and QA record carries its style ID, mapped treatment, `visual_cohesion_profile_id`, and selection SHA-256. Current new or modified white-cat work uses only `imagegen`; `xuan-paper-diorama` is no-cat only. Historical exact-byte-approved white-cat 宣纸 outputs remain read-only.
+Use the selected saved style profile only for visual language. Every white-cat prompt and QA record carries its style ID, mapped treatment, `visual_cohesion_profile_id`, selection SHA-256, and for v2 the episode profile SHA-256. Current new or modified white-cat work uses only `imagegen`; `xuan-paper-diorama` is no-cat only. Historical exact-byte-approved white-cat 宣纸 outputs remain read-only.
 
 ## Master-frame prompt contract
 

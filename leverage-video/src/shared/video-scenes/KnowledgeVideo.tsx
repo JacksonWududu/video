@@ -1,30 +1,41 @@
-import {AbsoluteFill, Sequence} from 'remotion';
+import {AbsoluteFill} from 'remotion';
 
 import {TransitionedScene} from '../scene-transitions';
 import {DoodleScene} from './DoodleScene';
-import {EpisodeOpening} from './EpisodeOpening';
 import {GraphicScene} from './GraphicScene';
 import {IanLayeredScene} from './IanLayeredScene';
 import {NarrationTrack} from './NarrationTrack';
 import {NarrativeScene} from './NarrativeScene';
 import {LocalVideoScene} from './LocalVideoScene';
+import {SoundEffectTrack} from './SoundEffectTrack';
 import {WhiteboardScene} from './WhiteboardScene';
 import type {KnowledgeVideoAssemblyPlan} from './types';
 
 export const KnowledgeVideo: React.FC<{
   readonly plan: KnowledgeVideoAssemblyPlan;
 }> = ({plan}) => {
-  if (plan.schema_version !== 'knowledge-video-assembly-plan-v1') {
+  if (plan.schema_version === 'knowledge-video-assembly-plan-v1') {
+    throw new Error('Historical v1 assembly plans are read-only and cannot create a preview or render');
+  }
+  if (plan.timeline.contract_version !== 'direct-first-shot-v1'
+    || plan.timeline.fixed_opening_cover !== false
+    || plan.timeline.first_shot_start_frame !== 0
+    || plan.scenes[0]?.shot_id !== 'S01'
+    || plan.scenes[0]?.start_frame !== 0) {
     throw new Error('Unsupported knowledge-video assembly plan');
   }
   if (plan.scenes.some((scene) => scene.visual_generation_route === 'comic-imagegen')) {
     throw new Error('comic-imagegen is historical read-only and cannot create a preview or render');
   }
+  if (plan.schema_version === 'knowledge-video-assembly-plan-v3'
+      && plan.sound_effects.contract_version !== 'knowledge-video-sound-effect-track-v1') {
+    throw new Error('Current knowledge-video assembly requires sound effects');
+  }
+  const soundEffectBusGain = plan.schema_version === 'knowledge-video-assembly-plan-v3'
+    ? plan.sound_effects.bus_gain_multiplier
+    : 1;
   return (
     <AbsoluteFill style={{backgroundColor: '#f5efe2'}}>
-      <Sequence from={0} durationInFrames={plan.opening.first_sentence_end_frame} name="OPEN-00">
-        <EpisodeOpening coverAsset={plan.opening.cover_asset} />
-      </Sequence>
       {plan.scenes.map((scene, sceneIndex) => (
         <TransitionedScene
           key={scene.shot_id}
@@ -52,6 +63,7 @@ export const KnowledgeVideo: React.FC<{
               scene={scene.ian_layered_scene!}
               durationInFrames={scene.duration_frames}
               visualGenerationRoute={scene.visual_generation_route}
+              soundEffectBusGain={soundEffectBusGain}
             />
           ) : scene.scene_type === 'graphic' ? (
             <GraphicScene
@@ -80,6 +92,12 @@ export const KnowledgeVideo: React.FC<{
           )}
         </TransitionedScene>
       ))}
+      {plan.schema_version === 'knowledge-video-assembly-plan-v3' ? (
+        <SoundEffectTrack
+          soundEffects={plan.sound_effects}
+          durationInFrames={plan.full_master_frames}
+        />
+      ) : null}
       <NarrationTrack asset={plan.narration_asset} durationInFrames={plan.narration_frames} from={0} />
     </AbsoluteFill>
   );

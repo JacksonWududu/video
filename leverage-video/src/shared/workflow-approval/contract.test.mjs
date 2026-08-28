@@ -1,8 +1,11 @@
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
+import fs from 'node:fs';
 import test from 'node:test';
 
 import {
   WHITE_CAT_VISUAL_STYLE_OPTIONS,
+  WHITE_CAT_VISUAL_STYLE_SELECTION_VERSION_V2,
   approveOneClickFinalVisualReview,
   assertOneClickProtectedActionAllowed,
   buildOneClickApprovalPolicySha256,
@@ -93,16 +96,80 @@ test('selection order requires white-cat style, density, approval mode, and exac
   );
 });
 
-test('Gate 2 white-cat style selection accepts only the two pinned profiles', () => {
+test('Gate 2 white-cat style selection accepts all three pinned profiles and exact bytes', () => {
+  for (const styleId of [
+    'loose-line-vivid-watercolor',
+    'twilight-neon-animation',
+    'gilded-mythic-storybook',
+  ]) {
+    const selection = buildSelections({whiteCatStyleId: styleId}).whiteCatStyle;
+    assert.equal(
+      validateWhiteCatVisualStyleSelection(selection, {gate2ScriptSha256: gate2}).style_id,
+      styleId,
+    );
+    const checksum = (filePath) => crypto.createHash('sha256').update(fs.readFileSync(filePath)).digest('hex');
+    assert.equal(checksum(selection.style_skill_path), selection.style_skill_checksum_sha256);
+    assert.equal(checksum(selection.style_profile_path), selection.style_profile_checksum_sha256);
+  }
   const twilight = buildSelections({whiteCatStyleId: 'twilight-neon-animation'}).whiteCatStyle;
-  assert.equal(validateWhiteCatVisualStyleSelection(twilight, {gate2ScriptSha256: gate2}).style_id,
-    'twilight-neon-animation');
   const substituted = structuredClone(twilight);
   substituted.style_profile_checksum_sha256 = '0'.repeat(64);
   substituted.selection_sha256 = buildWhiteCatVisualStyleSelectionSha256(substituted);
   assert.throws(
     () => validateWhiteCatVisualStyleSelection(substituted, {gate2ScriptSha256: gate2}),
     /stale or substituted style_profile_checksum_sha256/,
+  );
+});
+
+test('cover-derived style selection v2 binds an immutable episode-local profile and cover package', () => {
+  const selection = {
+    contract_version: WHITE_CAT_VISUAL_STYLE_SELECTION_VERSION_V2,
+    gate2_script_sha256: gate2,
+    style_source: 'episode_cover',
+    style_id: 'cover-derived-episode-style',
+    source_style_id: null,
+    style_label: '当前封面风格',
+    treatment_profile_id: 'imagegen-cover-derived-narrative',
+    visual_cohesion_profile_id: 'cover-derived-cohesion-v1',
+    style_profile_path: 'topic/schema/cover-derived-style-profile-v1.json',
+    style_profile_checksum_sha256: '4'.repeat(64),
+    publishing_cover_package_path: 'topic/schema/publishing-cover-generation-v1.json',
+    publishing_cover_package_sha256: '5'.repeat(64),
+    decision: decision('使用当前封面风格'),
+  };
+  selection.selection_sha256 = buildWhiteCatVisualStyleSelectionSha256(selection);
+  const result = validateWhiteCatVisualStyleSelection(selection, {gate2ScriptSha256: gate2});
+  assert.equal(result.style_source, 'episode_cover');
+  assert.equal(result.style_profile_checksum_sha256, '4'.repeat(64));
+
+  const stale = structuredClone(selection);
+  stale.style_profile_checksum_sha256 = '6'.repeat(64);
+  assert.throws(
+    () => validateWhiteCatVisualStyleSelection(stale, {gate2ScriptSha256: gate2}),
+    /checksum is stale/,
+  );
+});
+
+test('registered custom style v2 keeps its source ID but uses the generic runtime treatment', () => {
+  const selection = {
+    contract_version: WHITE_CAT_VISUAL_STYLE_SELECTION_VERSION_V2,
+    gate2_script_sha256: gate2,
+    style_source: 'registered_custom',
+    style_id: 'cover-derived-episode-style',
+    source_style_id: 'moonlit-paper-v1',
+    style_label: '月夜纸艺',
+    treatment_profile_id: 'imagegen-cover-derived-narrative',
+    visual_cohesion_profile_id: 'cover-derived-cohesion-v1',
+    style_profile_path: 'topic/schema/episode-style-profile-moonlit-paper-v1.json',
+    style_profile_checksum_sha256: '7'.repeat(64),
+    publishing_cover_package_path: null,
+    publishing_cover_package_sha256: null,
+    decision: decision('使用月夜纸艺'),
+  };
+  selection.selection_sha256 = buildWhiteCatVisualStyleSelectionSha256(selection);
+  assert.equal(
+    validateWhiteCatVisualStyleSelection(selection, {gate2ScriptSha256: gate2}).source_style_id,
+    'moonlit-paper-v1',
   );
 });
 
@@ -134,6 +201,29 @@ test('white-cat style change preserves valid script and audio but restarts post-
     invalidate_workflow_approval_mode: true,
     invalidate_narration_audio_source_selection: true,
     invalidate_from: 'awaiting_visual_density_selection',
+  });
+});
+
+test('publishing-cover change only reopens style when the episode uses its derived profile', () => {
+  assert.deepEqual(calculateSelectionInvalidation({change: 'publishing_cover', usesCoverDerivedStyle: true}), {
+    keep_locked_script: true,
+    keep_audio: true,
+    invalidate_publishing_cover: false,
+    invalidate_white_cat_visual_style_selection: true,
+    invalidate_visual_density_selection: true,
+    invalidate_workflow_approval_mode: true,
+    invalidate_narration_audio_source_selection: true,
+    invalidate_from: 'awaiting_white_cat_visual_style_selection',
+  });
+  assert.deepEqual(calculateSelectionInvalidation({change: 'publishing_cover', usesCoverDerivedStyle: false}), {
+    keep_locked_script: true,
+    keep_audio: true,
+    invalidate_publishing_cover: false,
+    invalidate_white_cat_visual_style_selection: false,
+    invalidate_visual_density_selection: false,
+    invalidate_workflow_approval_mode: false,
+    invalidate_narration_audio_source_selection: false,
+    invalidate_from: null,
   });
 });
 

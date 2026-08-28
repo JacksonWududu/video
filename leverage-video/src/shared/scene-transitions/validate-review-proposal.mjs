@@ -227,7 +227,16 @@ export const validateEpisodeTransitionReviewProposal = (episodeWorkspace) => {
     throw new Error('transition user-request override coverage is incomplete');
   }
   const expectedDiversity = applyTransitionRecommendationDiversity(baseRows);
-  if (!sameCanonical(proposal.diversity_policy, expectedDiversity.policy)) {
+  const recordedDiversityPolicy = proposal.diversity_policy?.rule_id === 'scene-transition-recommendation-diversity-v2'
+    && proposal.diversity_policy.white_cat_imagegen_watercolor_bloom_priority === true
+    && proposal.diversity_policy.white_cat_style_bound_priority === undefined
+    ? {
+        ...proposal.diversity_policy,
+        white_cat_style_bound_priority: true,
+        white_cat_imagegen_watercolor_bloom_priority: undefined,
+      }
+    : proposal.diversity_policy;
+  if (!sameCanonical(recordedDiversityPolicy, expectedDiversity.policy)) {
     throw new Error('transition diversity policy is stale');
   }
   proposal.rows.forEach((row, index) => {

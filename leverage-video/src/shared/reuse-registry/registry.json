@@ -10,7 +10,7 @@
     {
       "module_id": "assembly-plan",
       "path": "leverage-video/src/shared/assembly-plan",
-      "use_when": "Building a knowledge-video assembly plan from locked timing, active approved rasters, approved Ian layered-scene packages, approved whiteboard clips, and exact-frame matched local videos while rejecting retired Comic routes.",
+      "use_when": "Building current v3 knowledge-video assembly plans from locked timing, approved visual inputs, checksum-current whole-storyboard sound design, and exact render-owner cues while keeping legacy v2 plans read-only.",
       "required_for_new_episode_script": true
     },
     {
@@ -62,6 +62,12 @@
       "required_for_new_episode_script": false
     },
     {
+      "module_id": "publishing-cover",
+      "path": "leverage-video/src/shared/publishing-cover",
+      "use_when": "Validating the separate publishing-only cover package and cover-derived style profile without allowing cover bytes into storyboard, Remotion, or delivery timelines.",
+      "required_for_new_episode_script": false
+    },
+    {
       "module_id": "render-qa",
       "path": "leverage-video/src/shared/render-qa",
       "use_when": "Probing and fully decoding still, preview, master, or delivery media.",
@@ -82,8 +88,8 @@
     {
       "module_id": "sound-effects",
       "path": "leverage-video/src/shared/sound-effects",
-      "use_when": "Selecting semantically varied discrete sound effects, checksum-validating sources, creating exact trimmed derivatives, and binding only key Ian layer-entry frames while enforcing repetition and timbre limits.",
-      "required_for_new_episode_script": false
+      "use_when": "Analyzing every locked shot for audible or silent events, validating and atomically extending immutable official-source manifests, creating exact episode WAV derivatives, retiming revoice cues, and enforcing the unified SFX bus.",
+      "required_for_new_episode_script": true
     },
     {
       "module_id": "storyboard",
@@ -100,7 +106,7 @@
     {
       "module_id": "video-scenes",
       "path": "leverage-video/src/shared/video-scenes",
-      "use_when": "Composing cover, narration, active imagegen/Ink GraphicScene/IanLayeredScene/WhiteboardScene/LocalVideoScene output, with DoodleScene and ComicScene retained only for historical read-only parsing.",
+      "use_when": "Composing narration, imagegen, Ink GraphicScene, IanLayeredScene, WhiteboardScene, LocalVideoScene, generic SoundEffectTrack cues, and Ian-owned cues with one shared SFX bus; DoodleScene and ComicScene remain historical read-only.",
       "required_for_new_episode_script": true
     },
     {

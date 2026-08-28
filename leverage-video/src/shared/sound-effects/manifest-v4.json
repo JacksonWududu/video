@@ -1,0 +1,35 @@
+{
+  "contract_version": "shared-sound-effect-library-v2",
+  "catalog_revision": 4,
+  "status": "active",
+  "created_at": "2026-08-28T00:00:00Z",
+  "parent_manifest": {
+    "path": "leverage-video/src/shared/sound-effects/manifest-v3.json",
+    "checksum_sha256": "f3ad47ac039682c9482c9984c3e02c158b629c25b21915f325ecc0e20bfa60d4"
+  },
+  "semantic_profiles": [
+    {"asset_id": "paper-slide-mixkit-1530", "semantic_roles": ["paper_card_entrance", "paper_slide"], "timbre_family": "paper"},
+    {"asset_id": "writing-pencil-mixkit-3194", "semantic_roles": ["handdrawn_annotation", "writing_reveal", "writing_pencil"], "timbre_family": "writing"},
+    {"asset_id": "typewriter-soft-click-mixkit-1125", "semantic_roles": ["restrained_object_accent", "conclusion_accent", "typewriter_click"], "timbre_family": "click"},
+    {"asset_id": "short-transition-sweep-mixkit-175", "semantic_roles": ["grouped_reveal", "watercolor_expansion", "short_sweep"], "timbre_family": "sweep"},
+    {"asset_id": "air-woosh-mixkit-1489", "semantic_roles": ["camera_direction_accent", "soft_layer_motion", "air_woosh"], "timbre_family": "woosh"},
+    {"asset_id": "arrow-whoosh-mixkit-1491", "semantic_roles": ["directional_arrow", "path_growth", "arrow_whoosh"], "timbre_family": "woosh"},
+    {"asset_id": "explainer-pop-whoosh-mixkit-3005", "semantic_roles": ["card_pop_in", "fact_pop_in", "icon_pop_in", "explainer_pop"], "timbre_family": "pop"},
+    {"asset_id": "message-pop-alert-mixkit-2354", "semantic_roles": ["secondary_information", "small_node_pop_in", "message_pop"], "timbre_family": "pop"},
+    {"asset_id": "relaxing-bell-chime-mixkit-3109", "semantic_roles": ["insight", "key_takeaway", "resolution", "insight_chime"], "timbre_family": "chime"},
+    {"asset_id": "page-turn-single-mixkit-1104", "semantic_roles": ["page_change", "paper_layer_change", "section_change", "page_turn"], "timbre_family": "paper"},
+    {"asset_id": "mechanical-tool-click-mixkit-1131", "semantic_roles": ["mechanism_control", "state_lock", "mechanical_click"], "timbre_family": "mechanical"},
+    {"asset_id": "writing-scribble-mixkit-2369", "semantic_roles": ["contour_draw", "handdrawn_path_growth", "writing_scribble"], "timbre_family": "writing"},
+    {"asset_id": "fast-small-sweep-transition-mixkit-166", "semantic_roles": ["fast_micro_transition", "fast_sweep"], "timbre_family": "sweep"},
+    {"asset_id": "technology-transition-slide-mixkit-3120", "semantic_roles": ["data_slide", "ui_slide", "technology_slide"], "timbre_family": "technology"},
+    {"asset_id": "select-click-mixkit-1109", "semantic_roles": ["neutral_selection", "state_change", "select_click"], "timbre_family": "click"},
+    {"asset_id": "click-error-mixkit-1110", "semantic_roles": ["error_state", "negative_feedback", "error_click"], "timbre_family": "click"},
+    {"asset_id": "success-software-tone-mixkit-2865", "semantic_roles": ["resolution_confirmation", "success", "success_tone"], "timbre_family": "tone"},
+    {"asset_id": "confirmation-tone-mixkit-2867", "semantic_roles": ["neutral_confirmation", "validated_step", "confirmation_tone"], "timbre_family": "tone"},
+    {"asset_id": "pen-marker-line-mixkit-2998", "semantic_roles": ["marker_annotation", "underline_reveal", "marker_line"], "timbre_family": "writing"},
+    {"asset_id": "paper-quick-movement-mixkit-2380", "semantic_roles": ["paper_card_change", "quick_paper_motion", "paper_quick"], "timbre_family": "paper"},
+    {"asset_id": "chalk-line-sound-mixkit-2372", "semantic_roles": ["chalk_annotation", "diagram_reveal", "chalk_line"], "timbre_family": "writing"},
+    {"asset_id": "quick-zoom-impact-mixkit-772", "semantic_roles": ["fact_impact", "zoom_emphasis", "quick_zoom_impact"], "timbre_family": "impact"}
+  ],
+  "additions": []
+}

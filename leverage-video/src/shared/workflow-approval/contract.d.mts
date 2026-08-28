@@ -1,4 +1,5 @@
 export const WHITE_CAT_VISUAL_STYLE_SELECTION_VERSION: 'white-cat-visual-style-selection-v1';
+export const WHITE_CAT_VISUAL_STYLE_SELECTION_VERSION_V2: 'white-cat-visual-style-selection-v2';
 export const WHITE_CAT_VISUAL_STYLE_OPTIONS: Readonly<Record<string, Readonly<Record<string, string>>>>;
 export const VISUAL_DENSITY_SELECTION_VERSION: 'visual-density-selection-v1';
 export const WORKFLOW_APPROVAL_MODE_VERSION: 'workflow-approval-mode-v1';

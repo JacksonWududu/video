@@ -136,17 +136,12 @@ const baseInput = {
     episode_completed: true,
     modified_shot_ids: [],
   },
-  opening: {
-    coverAsset: 'example/assets/image/cover-1920x1080.png',
-    coverSource: '/Users/jackson/Desktop/video-edit/video-resource/cover.png',
-    sourceIsRegularFile: true,
-    sourceIsSymlink: false,
-    sourceFormat: 'png',
-    sourceDecodeResult: 'pass',
-    sourceAspectRatioRelativeError: 0.000532,
-    normalizedWidth: 1920,
-    normalizedHeight: 1080,
+  timeline: {
+    contractVersion: 'direct-first-shot-v1',
+    narrationStartFrame: 0,
+    firstShotId: 'S01',
     firstSentenceEndFrame: 60,
+    legacyFirstShotLeadInFrames: 60,
   },
   shots: [
     {
@@ -547,6 +542,33 @@ const passingIanLayeredSceneVerifier = (input) => ({
     }),
 });
 
+const passingSoundDesignVerifier = (input, {shots, expectedBindings}) => ({
+  path: input.soundDesign.path,
+  checksum_sha256: input.soundDesign.checksum_sha256,
+  validation: {
+    contract_version: 'knowledge-video-sound-design-validation-v1',
+    result: 'pass',
+    resume_mode: input.resumeMode === 'revoice_variant' ? 'revoice_variant' : 'standard',
+    bindings: structuredClone(expectedBindings),
+    event_map_sha256: 'c'.repeat(64),
+    bus_gain_multiplier: 1,
+    events: [],
+    audible_cues: shots.flatMap((shot) => (
+      shot.ian_layered_scene?.entry_effects?.layers ?? []
+    ).flatMap((entry) => entry.sound_effect === null ? [] : [{
+      event_id: `${shot.shot_id}:ian-layer:${entry.layer_id}`,
+      shot_id: shot.shot_id,
+      cue_frame: shot.start_frame + entry.sound_effect.cue_frame,
+      semantic_role: entry.sound_effect.role,
+      intensity: 'micro',
+      render_owner: 'ian_layered_scene',
+      source: structuredClone(entry.sound_effect.source),
+      derived_asset: structuredClone(entry.sound_effect.derived_asset),
+      gain_multiplier: entry.sound_effect.gain_multiplier,
+    }])),
+  },
+});
+
 const passingV2StoryboardVisualRhythmVerifier = (input) => {
   const result = passingStoryboardVisualRhythmVerifier(input);
   result.artifact.contract_version = 'storyboard-visual-rhythm-v2';
@@ -561,6 +583,7 @@ const buildKnowledgeVideoAssemblyPlan = (input, options = {}) => buildPlanWithVe
   verifyVisualDirectionReviewEvidence: passingVisualDirectionVerifier,
   verifyStoryboardVisualRhythmEvidence: passingStoryboardVisualRhythmVerifier,
   verifyIanLayeredScenePackageEvidence: passingIanLayeredSceneVerifier,
+  verifySoundDesignEvidence: passingSoundDesignVerifier,
   ...options,
 });
 
@@ -609,6 +632,22 @@ const buildV3Input = ({characterSchedule = false} = {}) => {
     })),
   });
   input.visualDirectionReview.contract_version = 'per-shot-visual-direction-review-v3';
+  input.narrationMaster = {
+    path: `${input.episodeWorkspace}/assets/audio/narration.mp3`,
+    checksum_sha256: '1'.repeat(64),
+  };
+  input.visualManifest = {
+    path: `${input.episodeWorkspace}/schema/visual-assets-manifest-v3.json`,
+    checksum_sha256: '2'.repeat(64),
+  };
+  input.soundEffectLibrary = {
+    path: 'leverage-video/src/shared/sound-effects/manifest-v3.json',
+    checksum_sha256: '3'.repeat(64),
+  };
+  input.soundDesign = {
+    path: `${input.episodeWorkspace}/schema/knowledge-video-sound-design-v1.json`,
+    checksum_sha256: '4'.repeat(64),
+  };
   input.visualDirectionArtifactPolicy = {
     artifact_mode: 'current_v3',
     episode_completed: false,
@@ -998,7 +1037,7 @@ const routeSecondShotToLocalVideo = (input) => {
 
 test('routes explicit imagegen visuals to narrative and exact Ian markers to graphic', () => {
   const plan = buildKnowledgeVideoAssemblyPlan(baseInput, {verifySharedReuseEvidence: passingVerifier});
-  assert.equal(plan.schema_version, 'knowledge-video-assembly-plan-v1');
+  assert.equal(plan.schema_version, 'knowledge-video-assembly-plan-v2');
   assert.equal(plan.scenes[0].scene_type, 'narrative');
   assert.equal(plan.scenes[0].visual_generation_route, 'imagegen');
   assert.equal(plan.scenes[1].scene_type, 'graphic');
@@ -1012,10 +1051,12 @@ test('routes explicit imagegen visuals to narrative and exact Ian markers to gra
   assert.equal(plan.scenes[0].transition.user_selection.status, 'approved');
   assert.equal(plan.scenes[0].transition.next_shot_id, 'S02');
   assert.equal(plan.scenes[1].transition, null);
-  assert.equal(plan.opening.shot_id, 'OPEN-00');
-  assert.equal(plan.opening.cover_source, '/Users/jackson/Desktop/video-edit/video-resource/cover.png');
-  assert.equal(plan.opening.episode_opening_frames, 60);
-  assert.equal(plan.opening.final_master_frames, 300);
+  assert.equal(plan.timeline.contract_version, 'direct-first-shot-v1');
+  assert.equal(plan.timeline.fixed_opening_cover, false);
+  assert.equal(plan.timeline.first_sentence_end_frame, 60);
+  assert.equal(plan.timeline.final_master_frames, 300);
+  assert.equal(plan.scenes[0].start_frame, 0);
+  assert.equal(plan.scenes[0].duration_frames, 180);
   assert.equal(plan.qa_contract.ordinary_boundaries_with_animated_transitions, 1);
   assert.equal(plan.qa_contract.scene_transition_contract, 'scene-transition-v2');
   assert.deepEqual(plan.qa_contract.transition_selection_review, {
@@ -1032,6 +1073,11 @@ test('routes explicit imagegen visuals to narrative and exact Ian markers to gra
 
 test('v3 continuity cut adds no transition duration and records semantic boundary counts', () => {
   const plan = buildKnowledgeVideoAssemblyPlan(buildV3Input(), {verifySharedReuseEvidence: passingVerifier});
+  assert.equal(plan.schema_version, 'knowledge-video-assembly-plan-v3');
+  assert.equal(plan.sound_effects.contract_version, 'knowledge-video-sound-effect-track-v1');
+  assert.equal(plan.sound_effects.bus_gain_multiplier, 1);
+  assert.deepEqual(plan.sound_effects.cues, []);
+  assert.equal(plan.qa_contract.sound_design.result, 'pass');
   assert.equal(plan.scenes[0].transition.kind, 'cut');
   assert.equal(plan.scenes[0].transition.duration_in_frames, 0);
   assert.equal(plan.qa_contract.scene_transition_contract, 'scene-transition-v3');
@@ -1056,6 +1102,22 @@ test('v3 continuity cut adds no transition duration and records semantic boundar
     'ian-layered-scene-consumption-evidence-v1',
   );
   assert.deepEqual(plan.qa_contract.ian_layered_scene_packages.shot_ids, ['S02']);
+});
+
+test('current assembly fails closed on missing or stale sound-design evidence', () => {
+  const input = buildV3Input();
+  assert.throws(() => buildKnowledgeVideoAssemblyPlan(input, {
+    verifySharedReuseEvidence: passingVerifier,
+    verifySoundDesignEvidence: () => null,
+  }), /sound-design evidence/i);
+  assert.throws(() => buildKnowledgeVideoAssemblyPlan(input, {
+    verifySharedReuseEvidence: passingVerifier,
+    verifySoundDesignEvidence: (value, context) => {
+      const evidence = passingSoundDesignVerifier(value, context);
+      evidence.validation.bindings.storyboard.checksum_sha256 = '0'.repeat(64);
+      return evidence;
+    },
+  }), /stale storyboard binding/i);
 });
 
 test('v3 Ian assembly consumes policy-bound entry motion and louder exact-frame SFX', () => {

@@ -1,0 +1,153 @@
+{
+  "contract_version": "shared-sound-effect-library-index-v1",
+  "active_manifest": {
+    "path": "leverage-video/src/shared/sound-effects/manifest-v24.json",
+    "checksum_sha256": "d4d3942c9356c9e11ff5d46265670fc4548d488351de433f1af50269b210b86d"
+  },
+  "manifests": [
+    {
+      "path": "leverage-video/src/shared/sound-effects/manifest.json",
+      "checksum_sha256": "b3fca6c32bf1455000a100cab527e6fc75198084ae874d98ab3bed0045358abf",
+      "catalog_revision": 1,
+      "status": "legacy_read_only"
+    },
+    {
+      "path": "leverage-video/src/shared/sound-effects/manifest-v2.json",
+      "checksum_sha256": "5ab79576448a7329b53dac7a2fd84ce4407a3d1e70933dd96079aeec6f5497e1",
+      "catalog_revision": 2,
+      "status": "legacy_read_only"
+    },
+    {
+      "path": "leverage-video/src/shared/sound-effects/manifest-v3.json",
+      "checksum_sha256": "f3ad47ac039682c9482c9984c3e02c158b629c25b21915f325ecc0e20bfa60d4",
+      "catalog_revision": 3,
+      "status": "legacy_read_only"
+    },
+    {
+      "path": "leverage-video/src/shared/sound-effects/manifest-v4.json",
+      "checksum_sha256": "e34895f7c31c18bfc2d57739fbe7987c63f72caa727413bed4dc70fefee991c4",
+      "catalog_revision": 4,
+      "status": "legacy_read_only"
+    },
+    {
+      "path": "leverage-video/src/shared/sound-effects/manifest-v5.json",
+      "checksum_sha256": "7d618656c9f2362c45599b5b724a5c74897bb3c560b9155b31724777b4f308f1",
+      "catalog_revision": 5,
+      "status": "legacy_read_only"
+    },
+    {
+      "path": "leverage-video/src/shared/sound-effects/manifest-v6.json",
+      "checksum_sha256": "15e80daaa9528487c08999a64e327b9564912dc3bf7b6194d9ca1fd15ec6d307",
+      "catalog_revision": 6,
+      "status": "legacy_read_only"
+    },
+    {
+      "path": "leverage-video/src/shared/sound-effects/manifest-v7.json",
+      "checksum_sha256": "7d2931a931665827ed45ddc4f2139f3a67968a5fc9c6434a48c41a4376eb104d",
+      "catalog_revision": 7,
+      "status": "legacy_read_only"
+    },
+    {
+      "path": "leverage-video/src/shared/sound-effects/manifest-v8.json",
+      "checksum_sha256": "9c653955ecd31150c2d1dfbce6599614f355b76a21062f8832f949fbe753fde7",
+      "catalog_revision": 8,
+      "status": "legacy_read_only"
+    },
+    {
+      "path": "leverage-video/src/shared/sound-effects/manifest-v9.json",
+      "checksum_sha256": "d9776e114e8a26f720ca0873799e3cc5f64cfc90bb57037915cd13a176ac6523",
+      "catalog_revision": 9,
+      "status": "legacy_read_only"
+    },
+    {
+      "path": "leverage-video/src/shared/sound-effects/manifest-v10.json",
+      "checksum_sha256": "84d18bb44074b626df13af13360ac8ef62da6015d27f01f707416d0bcaee8ec7",
+      "catalog_revision": 10,
+      "status": "legacy_read_only"
+    },
+    {
+      "path": "leverage-video/src/shared/sound-effects/manifest-v11.json",
+      "checksum_sha256": "31f4d89904b04f6dd048db91cba2556e729a26f9179883b4d1fd79f496798048",
+      "catalog_revision": 11,
+      "status": "legacy_read_only"
+    },
+    {
+      "path": "leverage-video/src/shared/sound-effects/manifest-v12.json",
+      "checksum_sha256": "15465b3af71e045d804b9a3f21ab5e47731b89e88099f63820c7a606767c7889",
+      "catalog_revision": 12,
+      "status": "legacy_read_only"
+    },
+    {
+      "path": "leverage-video/src/shared/sound-effects/manifest-v13.json",
+      "checksum_sha256": "7fcd6c553c2f847efd5b12e1ef1c41a968c203aa258b32d084a026530267a394",
+      "catalog_revision": 13,
+      "status": "legacy_read_only"
+    },
+    {
+      "path": "leverage-video/src/shared/sound-effects/manifest-v14.json",
+      "checksum_sha256": "6e3f30027fffd74092cf5d1caccf148d0ea36d268499a266ec1f9ff5ac096f97",
+      "catalog_revision": 14,
+      "status": "legacy_read_only"
+    },
+    {
+      "path": "leverage-video/src/shared/sound-effects/manifest-v15.json",
+      "checksum_sha256": "42cc23efa519d08d6c8e2b490ef80a8e63cc5d58cdf86438910e23a4d9f661c7",
+      "catalog_revision": 15,
+      "status": "legacy_read_only"
+    },
+    {
+      "path": "leverage-video/src/shared/sound-effects/manifest-v16.json",
+      "checksum_sha256": "d377c01d2580792b0c2bbaa6943e89d9bf5640dfd2ef666f05d7a50bc6c6cbea",
+      "catalog_revision": 16,
+      "status": "legacy_read_only"
+    },
+    {
+      "path": "leverage-video/src/shared/sound-effects/manifest-v17.json",
+      "checksum_sha256": "d06ecd19c1af31f3f1ad4898b6f675736e74e608b7e568d548e0d4f349d391d1",
+      "catalog_revision": 17,
+      "status": "legacy_read_only"
+    },
+    {
+      "path": "leverage-video/src/shared/sound-effects/manifest-v18.json",
+      "checksum_sha256": "01cebd2d21ec73797239f292d46b53d36b945769972312e4e5c4fd77ea3b5860",
+      "catalog_revision": 18,
+      "status": "legacy_read_only"
+    },
+    {
+      "path": "leverage-video/src/shared/sound-effects/manifest-v19.json",
+      "checksum_sha256": "6f32ebcf62af88ad6405a94449d93958cb0c95038e6e22e4ce39f1c3d201b96b",
+      "catalog_revision": 19,
+      "status": "legacy_read_only"
+    },
+    {
+      "path": "leverage-video/src/shared/sound-effects/manifest-v20.json",
+      "checksum_sha256": "4e3d4db7376fb9a1a33ec35d77a502a12e80714dbea0bed64ce9b154517b4870",
+      "catalog_revision": 20,
+      "status": "legacy_read_only"
+    },
+    {
+      "path": "leverage-video/src/shared/sound-effects/manifest-v21.json",
+      "checksum_sha256": "2e7f5a2551fd11db1c7b90a68d574825e0dfe1e6fb05097537dca94576563132",
+      "catalog_revision": 21,
+      "status": "legacy_read_only"
+    },
+    {
+      "path": "leverage-video/src/shared/sound-effects/manifest-v22.json",
+      "checksum_sha256": "9db441f09c6268a9e60e14b543eeee6b2db8a4eb2880a3a27744dab03bb3a126",
+      "catalog_revision": 22,
+      "status": "legacy_read_only"
+    },
+    {
+      "path": "leverage-video/src/shared/sound-effects/manifest-v23.json",
+      "checksum_sha256": "fc9514c041bc31898da6ce9829fef9aaac4fcfb2ec13ea1bb3398b32518a2eae",
+      "catalog_revision": 23,
+      "status": "legacy_read_only"
+    },
+    {
+      "path": "leverage-video/src/shared/sound-effects/manifest-v24.json",
+      "checksum_sha256": "d4d3942c9356c9e11ff5d46265670fc4548d488351de433f1af50269b210b86d",
+      "catalog_revision": 24,
+      "status": "active"
+    }
+  ]
+}

@@ -184,9 +184,14 @@ export const IanLayeredScene: React.FC<{
   readonly scene: IanLayeredSceneBinding;
   readonly durationInFrames: number;
   readonly visualGenerationRoute: string | null;
-}> = ({scene, durationInFrames, visualGenerationRoute}) => {
+  readonly soundEffectBusGain: number;
+}> = ({scene, durationInFrames, visualGenerationRoute, soundEffectBusGain}) => {
   if (visualGenerationRoute !== 'ian-handdrawn-ppt') {
     throw new Error('IanLayeredScene only accepts ian-handdrawn-ppt');
+  }
+  if (typeof soundEffectBusGain !== 'number'
+      || soundEffectBusGain <= 0 || soundEffectBusGain > 1) {
+    throw new Error('IanLayeredScene requires the unified SFX bus multiplier');
   }
   const frame = useCurrentFrame();
   const validated = validateBinding(scene, durationInFrames);
@@ -224,7 +229,7 @@ export const IanLayeredScene: React.FC<{
               >
                 <Audio
                   src={staticFile(entry.sound_effect.derived_asset.asset)}
-                  volume={entry.sound_effect.gain_multiplier}
+                  volume={entry.sound_effect.gain_multiplier * soundEffectBusGain}
                 />
               </Sequence>
             ))

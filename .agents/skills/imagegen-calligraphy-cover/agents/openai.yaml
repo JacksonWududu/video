@@ -1,0 +1,4 @@
+interface:
+  display_name: "ImageGen 白猫知识视频封面"
+  short_description: "结合主题词、口播稿与白猫角色生成并验收三画幅视频封面"
+  default_prompt: "使用 $imagegen-calligraphy-cover 根据主题词、口播稿与白猫角色生成 16:9、9:16、4:3 三画幅封面，并逐字验收题字。"

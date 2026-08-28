@@ -1,0 +1,46 @@
+{
+  "contract_version": "shared-sound-effect-library-v2",
+  "catalog_revision": 12,
+  "status": "active",
+  "created_at": "2026-08-28T05:17:34.356Z",
+  "parent_manifest": {
+    "path": "leverage-video/src/shared/sound-effects/manifest-v11.json",
+    "checksum_sha256": "31f4d89904b04f6dd048db91cba2556e729a26f9179883b4d1fd79f496798048"
+  },
+  "semantic_profiles": [],
+  "additions": [
+    {
+      "asset_id": "twig-breaking-mixkit-2945",
+      "source_item_id": "2945",
+      "title": "Twig breaking",
+      "semantic_roles": [
+        "twig_break"
+      ],
+      "timbre_family": "wood",
+      "path": "leverage-video/src/shared/sound-effects/assets/twig-breaking-mixkit-2945.wav",
+      "checksum_sha256": "b86115b681e2e3d2186bad8461651449ddd3f60ba7d65259796c1ef5ab3b09aa",
+      "provider": "Mixkit",
+      "source_item_url": "https://mixkit.co/free-sound-effects/download/2945/?context=item+grid",
+      "source_download_url": "https://assets.mixkit.co/active_storage/sfx/2945/2945.wav",
+      "license_observation": {
+        "verified_at": "2026-08-28T05:14:09.153Z",
+        "license_url": "https://mixkit.co/free-sound-effects/",
+        "commercial_use": true,
+        "cross_platform": true,
+        "attribution_required": false,
+        "observation": "Mixkit official Sound Effects page states that clips are royalty-free, usable without attribution, and usable in commercial and personal projects; upstream terms remain authoritative and standalone redistribution is prohibited.",
+        "verified_phrases": [
+          "royalty-free and can be used without attribution",
+          "both commercial and personal projects"
+        ]
+      },
+      "format": "wav",
+      "codec": "pcm_s16le",
+      "sample_rate_hz": 44100,
+      "channels": 2,
+      "duration_seconds": 1.180249,
+      "byte_size": 208240,
+      "downloaded_at": "2026-08-28T05:17:34.356Z"
+    }
+  ]
+}

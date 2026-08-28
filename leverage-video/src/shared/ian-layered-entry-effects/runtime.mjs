@@ -1,4 +1,4 @@
-import {SHARED_SOUND_EFFECT_LIBRARY_PATHS} from '../sound-effects/paths.mjs';
+import {isSharedSoundEffectLibraryManifestPath} from '../sound-effects/paths.mjs';
 
 export const IAN_LAYERED_ENTRY_EFFECTS_VERSION = 'ian-layered-entry-effects-v2';
 export const IAN_LAYERED_ENTRY_RENDERER_VERSION = 'ian-layered-entry-effects-renderer-v2';
@@ -169,7 +169,7 @@ export const validateIanLayeredEntryEffectsRenderPlan = (plan, {
     || plan.policy_authorization?.status !== 'policy_authorized'
     || plan.policy_authorization?.policy_sha256 !== IAN_LAYERED_ENTRY_EFFECTS_POLICY_SHA256
     || plan.policy_authorization?.user_has_reviewed_specific_map !== false
-    || !SHARED_SOUND_EFFECT_LIBRARY_PATHS.includes(plan.sound_effect_library?.path)
+    || !isSharedSoundEffectLibraryManifestPath(plan.sound_effect_library?.path)
     || plan.sound_effect_library?.checksum_sha256 !== libraryManifestSha256
     || plan.mix_policy?.narration_gain !== 1
     || plan.mix_policy?.normalize !== false

@@ -37,6 +37,7 @@ WHITE_CAT_MASTER_QA_VERSION = "ordinary-imagegen-white-cat-master-qa-v2"
 WHITE_CAT_ACTION_QA_VERSION = "ordinary-imagegen-white-cat-action-qa-v2"
 WHITE_CAT_LIMB_IDS = {"F1", "F2", "H1", "H2"}
 WHITE_CAT_STYLE_SELECTION_VERSION = "white-cat-visual-style-selection-v1"
+WHITE_CAT_STYLE_SELECTION_VERSION_V2 = "white-cat-visual-style-selection-v2"
 WHITE_CAT_STYLE_OPTIONS = {
     "loose-line-vivid-watercolor": {
         "treatment_profile_id": "imagegen-watercolor-narrative",
@@ -46,6 +47,15 @@ WHITE_CAT_STYLE_OPTIONS = {
         "treatment_profile_id": "imagegen-twilight-neon-narrative",
         "visual_cohesion_profile_id": "twilight-luminous-cohesion-v1",
     },
+    "gilded-mythic-storybook": {
+        "treatment_profile_id": "imagegen-gilded-mythic-narrative",
+        "visual_cohesion_profile_id": "gilded-mythic-cohesion-v1",
+    },
+}
+DYNAMIC_WHITE_CAT_STYLE_OPTION = {
+    "style_id": "cover-derived-episode-style",
+    "treatment_profile_id": "imagegen-cover-derived-narrative",
+    "visual_cohesion_profile_id": "cover-derived-cohesion-v1",
 }
 
 
@@ -69,18 +79,17 @@ def resolve_white_cat_visual_style_binding(
         return "loose-line-vivid-watercolor", "warm-paper-watercolor-cohesion-v1", False
     if style_id is None or not SHA256_RE.fullmatch(selection_sha256 or "") or cohesion_id is None:
         raise ValueError("white-cat visual style binding is incomplete")
-    option = WHITE_CAT_STYLE_OPTIONS.get(style_id)
     selection = state.get("white_cat_visual_style_selection")
-    if option is None or not isinstance(selection, dict):
+    if not isinstance(selection, dict):
         raise ValueError("white-cat visual style selection is missing or unsupported")
-    projection = {
-        "contract_version": WHITE_CAT_STYLE_SELECTION_VERSION,
+    contract_version = selection.get("contract_version")
+    option = WHITE_CAT_STYLE_OPTIONS.get(style_id)
+    projection: dict[str, Any] = {
+        "contract_version": contract_version,
         "gate2_script_sha256": selection.get("gate2_script_sha256"),
         "style_id": selection.get("style_id"),
         "treatment_profile_id": selection.get("treatment_profile_id"),
         "visual_cohesion_profile_id": selection.get("visual_cohesion_profile_id"),
-        "style_skill_path": selection.get("style_skill_path"),
-        "style_skill_checksum_sha256": selection.get("style_skill_checksum_sha256"),
         "style_profile_path": selection.get("style_profile_path"),
         "style_profile_checksum_sha256": selection.get("style_profile_checksum_sha256"),
         "decision": {
@@ -89,8 +98,55 @@ def resolve_white_cat_visual_style_binding(
             "decided_at": selection.get("decision", {}).get("decided_at"),
         },
     }
+    if contract_version == WHITE_CAT_STYLE_SELECTION_VERSION:
+        projection.update(
+            {
+                "style_skill_path": selection.get("style_skill_path"),
+                "style_skill_checksum_sha256": selection.get("style_skill_checksum_sha256"),
+            }
+        )
+    elif contract_version == WHITE_CAT_STYLE_SELECTION_VERSION_V2:
+        option = DYNAMIC_WHITE_CAT_STYLE_OPTION
+        projection.update(
+            {
+                "style_source": selection.get("style_source"),
+                "source_style_id": selection.get("source_style_id"),
+                "style_label": selection.get("style_label"),
+                "publishing_cover_package_path": selection.get("publishing_cover_package_path"),
+                "publishing_cover_package_sha256": selection.get("publishing_cover_package_sha256"),
+            }
+        )
+        if (
+            selection.get("style_source") not in {"episode_cover", "registered_custom"}
+            or not isinstance(selection.get("style_label"), str)
+            or not selection["style_label"].strip()
+            or not isinstance(selection.get("style_profile_path"), str)
+            or not selection["style_profile_path"].strip()
+            or not SHA256_RE.fullmatch(selection.get("style_profile_checksum_sha256") or "")
+            or (
+                selection.get("style_source") == "episode_cover"
+                and (
+                    selection.get("source_style_id") is not None
+                    or not isinstance(selection.get("publishing_cover_package_path"), str)
+                    or not SHA256_RE.fullmatch(
+                        selection.get("publishing_cover_package_sha256") or ""
+                    )
+                )
+            )
+            or (
+                selection.get("style_source") == "registered_custom"
+                and (
+                    not isinstance(selection.get("source_style_id"), str)
+                    or selection.get("publishing_cover_package_path") is not None
+                    or selection.get("publishing_cover_package_sha256") is not None
+                )
+            )
+        ):
+            raise ValueError("white-cat visual style v2 profile binding is invalid")
+    else:
+        option = None
     if (
-        selection.get("contract_version") != WHITE_CAT_STYLE_SELECTION_VERSION
+        option is None
         or selection.get("selection_sha256") != _canonical_sha256(projection)
         or selection.get("selection_sha256") != selection_sha256
         or selection.get("style_id") != style_id
@@ -111,6 +167,7 @@ def validate_white_cat_style_prompt_and_qa(
     cohesion_id: str,
     selection_sha256: str | None,
     current_binding: bool,
+    style_profile_checksum_sha256: str | None = None,
 ) -> None:
     if not current_binding:
         return
@@ -118,11 +175,16 @@ def validate_white_cat_style_prompt_and_qa(
         raise ValueError("production prompt lacks the Gate-2 white-cat visual style marker")
     if f"EPISODE VISUAL COHESION: {cohesion_id}." not in prompt_text:
         raise ValueError("production prompt lacks the episode visual cohesion marker")
-    if qa.get("white_cat_visual_style_binding") != {
+    expected_qa_binding = {
         "style_id": style_id,
         "selection_sha256": selection_sha256,
         "visual_cohesion_profile_id": cohesion_id,
-    }:
+    }
+    if style_profile_checksum_sha256 is not None:
+        if f"EPISODE STYLE PROFILE SHA256: {style_profile_checksum_sha256}." not in prompt_text:
+            raise ValueError("production prompt lacks the episode style-profile checksum marker")
+        expected_qa_binding["style_profile_checksum_sha256"] = style_profile_checksum_sha256
+    if qa.get("white_cat_visual_style_binding") != expected_qa_binding:
         raise ValueError("white-cat generation QA lacks the exact style/cohesion binding")
 
 
@@ -569,6 +631,13 @@ def record(args: argparse.Namespace) -> dict[str, Any]:
         if is_white_cat_master
         else ("loose-line-vivid-watercolor", "warm-paper-watercolor-cohesion-v1", False)
     )
+    active_style_selection = state.get("white_cat_visual_style_selection", {})
+    expected_style_profile_sha256 = (
+        active_style_selection.get("style_profile_checksum_sha256")
+        if current_style_binding
+        and active_style_selection.get("contract_version") == WHITE_CAT_STYLE_SELECTION_VERSION_V2
+        else None
+    )
     if (
         item.get("visual_generation_route") != "imagegen"
         or item.get("strict_review") is not True
@@ -617,6 +686,7 @@ def record(args: argparse.Namespace) -> dict[str, Any]:
                 style_id=expected_style_id,
                 cohesion_id=expected_cohesion_id,
                 selection_sha256=item.get("white_cat_visual_style_selection_sha256"),
+                style_profile_checksum_sha256=expected_style_profile_sha256,
                 current_binding=current_style_binding,
             )
 

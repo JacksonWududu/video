@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import path from 'node:path';
 
-import {SHARED_SOUND_EFFECT_LIBRARY_PATHS} from '../sound-effects/paths.mjs';
+import {isSharedSoundEffectLibraryManifestPath} from '../sound-effects/paths.mjs';
 
 import {
   IAN_ENTRY_CLASS_PROFILES,
@@ -290,7 +290,7 @@ export const validateIanLayeredEntryEffectsPlan = (plan, {
     fail('Ian entry policy authorization is missing or stale');
   }
   const library = validatePackageBinding(plan.sound_effect_library, 'Ian sound_effect_library');
-  if (!SHARED_SOUND_EFFECT_LIBRARY_PATHS.includes(library.path)
+  if (!isSharedSoundEffectLibraryManifestPath(library.path)
       || library.checksum_sha256 !== libraryManifestSha256) {
     fail('Ian sound-effect library checksum is stale');
   }

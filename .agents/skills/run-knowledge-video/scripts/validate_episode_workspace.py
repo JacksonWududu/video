@@ -1086,6 +1086,76 @@ def _validate_post_delivery_bgm_recommendation(
     return errors
 
 
+def _validate_sound_effect_design_state(
+    repo: Path,
+    workspace: Path,
+) -> list[str]:
+    state_file = workspace / "schema" / "episode-state.json"
+    if not state_file.exists() or state_file.is_symlink() or not state_file.is_file():
+        return []
+    try:
+        state = json.loads(state_file.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return []
+    if not isinstance(state, dict):
+        return []
+    binding = state.get("sound_effect_design")
+    required_phases = {
+        "composition_locked",
+        "final_rendering",
+        "revoice_assembly",
+        "revoice_variant_rendering",
+    }
+    if binding is None:
+        if state.get("current_phase") in required_phases:
+            return ["current composition phase requires a passing sound-effect design binding"]
+        return []
+    if not isinstance(binding, dict):
+        return ["sound_effect_design state binding must be a JSON object"]
+    errors: list[str] = []
+    artifact_file, artifact_errors = _resolve_bound_regular_file(
+        repo,
+        binding.get("path"),
+        binding.get("checksum_sha256"),
+        "Sound-effect design",
+    )
+    errors.extend(artifact_errors)
+    if artifact_file is None:
+        return errors
+    try:
+        artifact = json.loads(artifact_file.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return errors + ["Sound-effect design is not valid UTF-8 JSON"]
+    workspace_schema = workspace / "schema"
+    try:
+        artifact_file.relative_to(workspace_schema)
+    except ValueError:
+        errors.append("Sound-effect design must be stored under the active episode schema")
+    if (
+        binding.get("contract_version") != "knowledge-video-sound-design-v1"
+        or binding.get("status") != "qa_passed"
+        or artifact.get("contract_version") != "knowledge-video-sound-design-v1"
+        or artifact.get("status") != "qa_passed"
+        or artifact.get("result") != "pass"
+        or artifact.get("episode_workspace") != workspace.relative_to(repo).as_posix()
+        or artifact.get("fps") != 30
+        or not isinstance(artifact.get("events"), list)
+        or not isinstance(artifact.get("shot_analysis"), list)
+        or binding.get("event_map_sha256") != artifact.get("event_map_sha256")
+        or binding.get("bus_gain_multiplier") != artifact.get("bus_gain_multiplier")
+        or binding.get("sound_effect_library")
+        != artifact.get("bindings", {}).get("sound_effect_library")
+    ):
+        errors.append("sound_effect_design state binding is incomplete or stale")
+        return errors
+    projection = dict(artifact)
+    projection.pop("event_map_sha256", None)
+    projection.pop("result", None)
+    if artifact.get("event_map_sha256") != _canonical_sha256(projection):
+        errors.append("Sound-effect design canonical event-map checksum is stale")
+    return errors
+
+
 def validate_episode_workspace(repo_root: Path, workspace_arg: Path) -> list[str]:
     errors: list[str] = []
     repo = repo_root.resolve(strict=True)
@@ -1161,6 +1231,7 @@ def validate_episode_workspace(repo_root: Path, workspace_arg: Path) -> list[str
     errors.extend(_validate_white_cat_pending_qa(repo, workspace))
     errors.extend(_validate_active_ian_layered_scene_queue(repo, workspace))
     errors.extend(_validate_visible_text_batch_review(repo, workspace))
+    errors.extend(_validate_sound_effect_design_state(repo, workspace))
     errors.extend(_validate_post_delivery_bgm_recommendation(repo, workspace))
 
     return sorted(set(errors))

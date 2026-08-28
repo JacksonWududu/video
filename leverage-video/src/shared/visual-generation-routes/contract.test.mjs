@@ -16,6 +16,7 @@ import {
 import {
   VISUAL_LANGUAGE_CATALOG_CHECKSUM_SHA256,
 } from '../visual-language/contract.mjs';
+import {buildWhiteCatVisualStyleSelectionSha256} from '../workflow-approval/contract.mjs';
 
 const approvedAt = '2026-08-15T10:00:00+08:00';
 
@@ -723,6 +724,72 @@ test('v3 binds twilight white-cat treatment and cohesion across the whole direct
     () => validateVisualDirectionReview(review, {shots: matchingV3Shots(review)}),
     /white-cat treatment does not match/i,
   );
+});
+
+test('v3 binds gilded storybook treatment and cohesion across the whole direction map', () => {
+  const review = buildV3Review({whiteCatPresent: true});
+  Object.assign(review.white_cat_visual_style_binding, {
+    style_id: 'gilded-mythic-storybook',
+    treatment_profile_id: 'imagegen-gilded-mythic-narrative',
+    visual_cohesion_profile_id: 'gilded-mythic-cohesion-v1',
+  });
+  const row = review.rows[0];
+  row.white_cat_visual_style_id = 'gilded-mythic-storybook';
+  row.visual_cohesion_profile_id = 'gilded-mythic-cohesion-v1';
+  row.visual_language_recommendation.treatment_profile_id = 'imagegen-gilded-mythic-narrative';
+  Object.assign(row.user_selection, {
+    white_cat_visual_style_id: 'gilded-mythic-storybook',
+    visual_cohesion_profile_id: 'gilded-mythic-cohesion-v1',
+    treatment_profile_id: 'imagegen-gilded-mythic-narrative',
+  });
+  review.presented_map_sha256 = buildPresentedMapSha256(review);
+  row.user_selection.presented_map_sha256 = review.presented_map_sha256;
+  assert.equal(validateVisualDirectionReview(review, {shots: matchingV3Shots(review)}).result, 'pass');
+
+  row.user_selection.treatment_profile_id = 'imagegen-twilight-neon-narrative';
+  review.presented_map_sha256 = buildPresentedMapSha256(review);
+  row.user_selection.presented_map_sha256 = review.presented_map_sha256;
+  assert.throws(
+    () => validateVisualDirectionReview(review, {shots: matchingV3Shots(review)}),
+    /white-cat treatment does not match/i,
+  );
+});
+
+test('v3 binds a cover-derived v2 episode style snapshot across the whole direction map', () => {
+  const review = buildV3Review({whiteCatPresent: true});
+  const styleBinding = {
+    contract_version: 'white-cat-visual-style-selection-v2',
+    gate2_script_sha256: 'a'.repeat(64),
+    style_source: 'episode_cover',
+    style_id: 'cover-derived-episode-style',
+    source_style_id: null,
+    style_label: '当前封面风格',
+    treatment_profile_id: 'imagegen-cover-derived-narrative',
+    visual_cohesion_profile_id: 'cover-derived-cohesion-v1',
+    style_profile_path: 'topic/schema/cover-derived-style-profile-v1.json',
+    style_profile_checksum_sha256: 'b'.repeat(64),
+    publishing_cover_package_path: 'topic/schema/publishing-cover-generation-v1.json',
+    publishing_cover_package_sha256: 'c'.repeat(64),
+    decision: {
+      status: 'selected', exact_message: '使用当前封面风格', decided_at: approvedAt,
+    },
+  };
+  styleBinding.selection_sha256 = buildWhiteCatVisualStyleSelectionSha256(styleBinding);
+  review.white_cat_visual_style_binding = styleBinding;
+  const row = review.rows[0];
+  row.white_cat_visual_style_id = styleBinding.style_id;
+  row.white_cat_visual_style_selection_sha256 = styleBinding.selection_sha256;
+  row.visual_cohesion_profile_id = styleBinding.visual_cohesion_profile_id;
+  row.visual_language_recommendation.treatment_profile_id = styleBinding.treatment_profile_id;
+  Object.assign(row.user_selection, {
+    white_cat_visual_style_id: styleBinding.style_id,
+    white_cat_visual_style_selection_sha256: styleBinding.selection_sha256,
+    visual_cohesion_profile_id: styleBinding.visual_cohesion_profile_id,
+    treatment_profile_id: styleBinding.treatment_profile_id,
+  });
+  review.presented_map_sha256 = buildPresentedMapSha256(review);
+  row.user_selection.presented_map_sha256 = review.presented_map_sha256;
+  assert.equal(validateVisualDirectionReview(review, {shots: matchingV3Shots(review)}).result, 'pass');
 });
 
 test('v3 no-cat ordinary imagegen may keep route-approved exact raster text', () => {

@@ -199,6 +199,35 @@ assert.deepEqual(resolveTransitionRecommendation({
     matched_boundary_roles: ['next'],
   },
 });
+assert.deepEqual(resolveTransitionRecommendation({
+  boundaryChangeClass: 'route_change',
+  sourceVisualGenerationRoute: 'ian-handdrawn-ppt',
+  nextVisualGenerationRoute: 'imagegen',
+  sourceWhiteCatPresent: false,
+  nextWhiteCatPresent: true,
+  whiteCatVisualStyleId: 'gilded-mythic-storybook',
+}), {
+  recommended_transition: {kind: 'dissolve', options: {}},
+  recommendation_source: {
+    authority: 'white-cat-transition-policy',
+    rule_id: 'imagegen-white-cat-gilded-dissolve-priority-v1',
+    matched_boundary_roles: ['next'],
+  },
+});
+assert.deepEqual(resolveTransitionRecommendation({
+  boundaryChangeClass: 'route_change',
+  sourceVisualGenerationRoute: 'ian-handdrawn-ppt',
+  nextVisualGenerationRoute: 'imagegen',
+  sourceWhiteCatPresent: false,
+  nextWhiteCatPresent: true,
+  whiteCatVisualStyleId: 'cover-derived-episode-style',
+}), {
+  recommended_transition: {kind: 'paper-wipe', options: {}},
+  recommendation_source: {
+    authority: 'shared-fallback',
+    rule_id: 'scene-transition-semantic-fallback-v1',
+  },
+});
 assert.equal(resolveTransitionRecommendation({
   boundaryChangeClass: 'route_change',
   sourceVisualGenerationRoute: 'imagegen',

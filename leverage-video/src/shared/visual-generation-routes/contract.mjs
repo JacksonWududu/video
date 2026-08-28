@@ -10,7 +10,11 @@ import {
   validateVisualLanguageSelection,
 } from '../visual-language/contract.mjs';
 import {validateConciseSummaryVisibleText} from '../visible-text-review/contract.mjs';
-import {resolveWhiteCatVisualStyleOption} from '../workflow-approval/contract.mjs';
+import {
+  WHITE_CAT_VISUAL_STYLE_OPTIONS,
+  resolveWhiteCatVisualStyleOption,
+  validateWhiteCatVisualStyleSelection,
+} from '../workflow-approval/contract.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const CATALOG_BYTES = fs.readFileSync(path.join(HERE, 'catalog.json'));
@@ -83,6 +87,14 @@ const sameCanonical = (left, right) => sha256Canonical(left) === sha256Canonical
 const arrayEquals = (left, right) => Array.isArray(left)
   && left.length === right.length
   && left.every((value, index) => value === right[index]);
+
+const IMAGEGEN_WHITE_CAT_STYLE_IDS = ROUTES_BY_ID.get('imagegen')?.white_cat_style_ids;
+if (!arrayEquals(IMAGEGEN_WHITE_CAT_STYLE_IDS, [
+  ...Object.keys(WHITE_CAT_VISUAL_STYLE_OPTIONS),
+  'cover-derived-episode-style',
+])) {
+  throw new Error('imagegen route white-cat style IDs must equal workflow approval authority');
+}
 
 const isV2 = (review) => [
   'per-shot-visual-direction-review-v2',
@@ -355,11 +367,14 @@ const validateV3VisibleText = (row) => {
 
 const validateV3WhiteCatVisualStyleBinding = (row, selection, binding) => {
   if (binding === null) return;
-  if (binding?.contract_version !== 'white-cat-visual-style-selection-v1'
-    || !SHA256.test(binding.selection_sha256 ?? '')) {
+  if (!SHA256.test(binding?.selection_sha256 ?? '')) {
     throw new Error('visual direction white-cat style binding is invalid');
   }
-  const option = resolveWhiteCatVisualStyleOption(binding.style_id);
+  const option = binding.contract_version === 'white-cat-visual-style-selection-v1'
+    ? resolveWhiteCatVisualStyleOption(binding.style_id)
+    : validateWhiteCatVisualStyleSelection(binding, {
+      gate2ScriptSha256: binding.gate2_script_sha256,
+    });
   if (binding.treatment_profile_id !== option.treatment_profile_id
     || binding.visual_cohesion_profile_id !== option.visual_cohesion_profile_id) {
     throw new Error('visual direction white-cat style binding is stale or substituted');

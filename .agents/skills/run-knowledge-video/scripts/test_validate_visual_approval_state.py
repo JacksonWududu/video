@@ -709,24 +709,84 @@ class VisualApprovalGateTests(unittest.TestCase):
         self.state["visual_asset_review"]["queue"] = [item]
         self.state["white_cat_visual_style_selection"] = {
             "contract_version": "white-cat-visual-style-selection-v1",
-            "style_id": "twilight-neon-animation",
-            "treatment_profile_id": "imagegen-twilight-neon-narrative",
-            "visual_cohesion_profile_id": "twilight-luminous-cohesion-v1",
+            "style_id": "gilded-mythic-storybook",
+            "treatment_profile_id": "imagegen-gilded-mythic-narrative",
+            "visual_cohesion_profile_id": "gilded-mythic-cohesion-v1",
             "selection_sha256": "f" * 64,
         }
         item.update(
             white_cat_present=True,
             visual_generation_route="xuan-paper-diorama",
-            white_cat_visual_style_id="twilight-neon-animation",
+            white_cat_visual_style_id="gilded-mythic-storybook",
             white_cat_visual_style_selection_sha256="f" * 64,
-            visual_cohesion_profile_id="twilight-luminous-cohesion-v1",
-            treatment_profile_id="imagegen-twilight-neon-narrative",
+            visual_cohesion_profile_id="gilded-mythic-cohesion-v1",
+            treatment_profile_id="imagegen-gilded-mythic-narrative",
         )
         with self.assertRaisesRegex(ValueError, "Gate-2 ImageGen style binding"):
             self.gate._queue(self.state)
 
         item["visual_generation_route"] = "imagegen"
         self.assertEqual(self.gate._queue(self.state)[0]["asset_id"], item["asset_id"])
+
+    def test_cover_derived_v2_style_binds_queue_and_cohesion_to_episode_profile(self):
+        item = self.state["visual_asset_review"]["queue"][0]
+        self.state["visual_asset_review"]["queue"] = [item]
+        selection = {
+            "contract_version": "white-cat-visual-style-selection-v2",
+            "gate2_script_sha256": "a" * 64,
+            "style_source": "episode_cover",
+            "style_id": "cover-derived-episode-style",
+            "source_style_id": None,
+            "style_label": "当前封面风格",
+            "treatment_profile_id": "imagegen-cover-derived-narrative",
+            "visual_cohesion_profile_id": "cover-derived-cohesion-v1",
+            "style_profile_path": "topic/schema/cover-derived-style-profile-v1.json",
+            "style_profile_checksum_sha256": "b" * 64,
+            "publishing_cover_package_path": "topic/schema/publishing-cover-generation-v1.json",
+            "publishing_cover_package_sha256": "c" * 64,
+            "decision": {
+                "status": "selected",
+                "exact_message": "使用当前封面风格",
+                "decided_at": "2026-08-27T10:00:00+08:00",
+            },
+        }
+        selection["selection_sha256"] = self.gate._canonical_sha256(selection)
+        self.state["white_cat_visual_style_selection"] = selection
+        item.update(
+            white_cat_present=True,
+            visual_generation_route="imagegen",
+            white_cat_visual_style_id="cover-derived-episode-style",
+            white_cat_visual_style_selection_sha256=selection["selection_sha256"],
+            visual_cohesion_profile_id="cover-derived-cohesion-v1",
+            treatment_profile_id="imagegen-cover-derived-narrative",
+        )
+        self.assertEqual(self.gate._queue(self.state)[0]["asset_id"], item["asset_id"])
+
+        overview = self._write_png("assets/image/review/cover-cohesion.png")
+        self.state["visual_cohesion_qa"] = {
+            "contract_version": "episode-visual-cohesion-qa-v1",
+            "result": "pass",
+            "white_cat_visual_style_selection_sha256": selection["selection_sha256"],
+            "visual_cohesion_profile_id": "cover-derived-cohesion-v1",
+            "style_profile_checksum_sha256": selection["style_profile_checksum_sha256"],
+            "covered_asset_ids": [item["asset_id"]],
+            "anomalies": [],
+            "overview": {
+                "path": "assets/image/review/cover-cohesion.png",
+                "checksum_sha256": self._sha256(overview),
+            },
+        }
+        self.assertEqual(
+            self.gate._validate_visual_cohesion_qa(
+                self.state, [item], self.repository_root
+            )["result"],
+            "pass",
+        )
+        self.state["visual_cohesion_qa"]["style_profile_checksum_sha256"] = "d" * 64
+        with self.assertRaisesRegex(ValueError, "cohesion QA"):
+            self.gate._validate_visual_cohesion_qa(
+                self.state, [item], self.repository_root
+            )
 
     def test_current_style_lock_requires_complete_passing_cohesion_qa(self):
         overview = self._write_png("assets/image/review/cohesion.png")

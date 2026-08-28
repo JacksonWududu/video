@@ -26,23 +26,18 @@ const transition = (kind = 'slide') => ({
 });
 
 const goodPlan = {
+  schema_version: 'knowledge-video-assembly-plan-v2',
+  full_master_frames: 300,
+  narration_frames: 300,
   canvas: {fps: 30},
-  opening: {
-    contract_version: 'cover-only-v1',
-    shot_id: 'OPEN-00',
-    cover_source: '/Users/jackson/Desktop/video-edit/video-resource/cover.png',
-    source_is_regular_file: true,
-    source_is_symlink: false,
-    source_format: 'png',
-    source_decode_result: 'pass',
-    source_aspect_ratio_relative_error: 0.000532,
-    normalized_width: 1920,
-    normalized_height: 1080,
-    text_overlay: false,
-    start_frame: 0,
+  timeline: {
+    contract_version: 'direct-first-shot-v1',
+    fixed_opening_cover: false,
+    publishing_cover_timeline_consumed: false,
+    first_shot_id: 'S01',
+    first_shot_start_frame: 0,
     narration_start_frame: 0,
     first_sentence_end_frame: 100,
-    episode_opening_frames: 100,
     narration_master_frames: 300,
     final_master_frames: 300,
   },
@@ -75,17 +70,16 @@ const goodPlan = {
       modified_shot_ids: [],
     },
     ordinary_boundaries_with_animated_transitions: 1,
-    opening_hard_cut_exceptions: ['OPEN-00→S01'],
+    opening_hard_cut_exceptions: [],
   },
   scenes: [
-    {shot_id: 'S01', scene_type: 'narrative', white_cat_present: false, visual_generation_route: 'imagegen', start_frame: 100, end_frame: 200, transition_intent: '0.4s slide', transition: transition()},
+    {shot_id: 'S01', scene_type: 'narrative', white_cat_present: false, visual_generation_route: 'imagegen', start_frame: 0, end_frame: 200, transition_intent: '0.4s slide', transition: transition()},
     {shot_id: 'S02', scene_type: 'narrative', white_cat_present: false, visual_generation_route: 'imagegen', start_frame: 200, end_frame: 300, transition_intent: 'clean hold to end', transition: null},
   ],
 };
 const goodSource = `
 import {TransitionedScene} from '../../../shared/scene-transitions';
-const openingContractVersion = 'cover-only-v1';
-<EpisodeOpening coverSource={opening.cover_source} durationInFrames={opening.first_sentence_end_frame} narrationStartFrame={0} />;
+<NarrationTrack asset={plan.narration_asset} durationInFrames={plan.narration_frames} from={0} />;
 <TransitionedScene transition={scene.transition} durationInFrames={scene.duration_frames} isTerminal={sceneIndex === scenes.length - 1}></TransitionedScene>;
 <GraphicScene visualGenerationRoute={scene.visual_generation_route ?? ''} />;
 <IanLayeredScene scene={scene.ian_layered_scene!} visualGenerationRoute={scene.visual_generation_route} />;
@@ -109,8 +103,8 @@ assert.deepEqual(validateSceneTransitions({plan: goodPlan, source: goodSource}),
   whiteboard_scene_count: 0,
   comic_scene_count: 0,
   ian_layered_scene_contract: null,
-  opening_contract_version: 'cover-only-v1',
-  opening_hard_cut_exceptions: ['OPEN-00→S01'],
+  opening_contract_version: 'direct-first-shot-v1',
+  opening_hard_cut_exceptions: [],
 });
 assert.equal(
   validateSceneTransitions({plan: goodPlan, source: sharedWrapperSource}).source_binding,
@@ -136,6 +130,7 @@ assert.throws(
 );
 
 const v3Plan = structuredClone(goodPlan);
+v3Plan.schema_version = 'knowledge-video-assembly-plan-v3';
 v3Plan.qa_contract.scene_transition_contract = 'scene-transition-v3';
 v3Plan.qa_contract.transition_selection_review.catalog_version = 'scene-transition-catalog-v3';
 v3Plan.qa_contract.scene_routing_contract = 'explicit-visual-generation-route-v3';
@@ -219,8 +214,8 @@ assert.deepEqual(validateSceneTransitions({plan: v3Plan, source: goodSource}), {
   whiteboard_scene_count: 0,
   comic_scene_count: 0,
   ian_layered_scene_contract: 'ian-static-layered-scene-v1',
-  opening_contract_version: 'cover-only-v1',
-  opening_hard_cut_exceptions: ['OPEN-00→S01'],
+  opening_contract_version: 'direct-first-shot-v1',
+  opening_hard_cut_exceptions: [],
 });
 
 const ianPlan = structuredClone(v3Plan);
@@ -623,8 +618,7 @@ assert.throws(
   () => validateSceneTransitions({
     plan: goodPlan,
     source: `
-const openingContractVersion = 'cover-only-v1';
-<EpisodeOpening coverSource={opening.cover_source} durationInFrames={opening.first_sentence_end_frame} narrationStartFrame={0} />;
+<NarrationTrack asset={plan.narration_asset} durationInFrames={plan.narration_frames} from={0} />;
 <Sequence />;
 `,
   }),
@@ -643,32 +637,32 @@ assert.throws(
       ...goodPlan,
       qa_contract: {
         ...goodPlan.qa_contract,
-        opening_hard_cut_exceptions: ['OPEN-00→OPEN-01', 'OPEN-01→S01'],
+        opening_hard_cut_exceptions: ['OPEN-00→S01'],
       },
     },
     source: goodSource,
   }),
-  /opening hard-cut exceptions are missing or overbroad/,
+  /retired opening data or hard-cut exceptions remain active/,
 );
 assert.throws(
   () => validateSceneTransitions({
-    plan: {...goodPlan, opening: {...goodPlan.opening, narration_start_frame: 30}},
+    plan: {...goodPlan, timeline: {...goodPlan.timeline, narration_start_frame: 30}},
     source: goodSource,
   }),
-  /must start at frame zero/,
+  /must begin at frame zero/,
 );
 assert.throws(
   () => validateSceneTransitions({
     plan: goodPlan,
-    source: goodSource.replace('coverSource={opening.cover_source}', 'coverSource={legacyCover}'),
+    source: `${goodSource}\n<EpisodeOpening />`,
   }),
-  /does not bind opening.cover_source/,
+  /retired fixed opening cover/,
 );
 assert.throws(
   () => validateSceneTransitions({
     plan: {
       ...goodPlan,
-      qa_contract: {...goodPlan.qa_contract, opening_hard_cut_exceptions: ['OPEN-00→S02']},
+      timeline: {...goodPlan.timeline, first_shot_id: 'S02'},
       scenes: [
         {...goodPlan.scenes[0], shot_id: 'S02'},
         {...goodPlan.scenes[1], shot_id: 'S03'},
@@ -676,7 +670,7 @@ assert.throws(
     },
     source: goodSource,
   }),
-  /first content shot must be S01/,
+  /S01 and narration must begin at frame zero/,
 );
 
 console.log('validate_scene_transitions_contract=pass');

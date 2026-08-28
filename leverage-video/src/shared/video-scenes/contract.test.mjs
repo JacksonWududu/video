@@ -79,9 +79,22 @@ test('shared video consumes the inter-shot transition renderer', () => {
   assert.match(source, /scene\.scene_type === 'ian-layered'/);
   assert.match(source, /<IanLayeredScene/);
   assert.match(source, /scene=\{scene\.ian_layered_scene!\}/);
+  assert.match(source, /<SoundEffectTrack/);
+  assert.match(source, /soundEffectBusGain=\{soundEffectBusGain\}/);
   assert.doesNotMatch(source, /internalMotionContract|internalMotion/);
   assert.match(source, /comic-imagegen is historical read-only/);
   assert.doesNotMatch(source, /<ComicScene/);
+});
+
+test('current generic and Ian sound renderers share one bus and one owner each', () => {
+  const track = read('SoundEffectTrack.tsx');
+  const ian = read('IanLayeredScene.tsx');
+  assert.match(track, /global_sound_effect_track_v1/);
+  assert.match(track, /gain_multiplier \* soundEffects\.bus_gain_multiplier/);
+  assert.match(track, /durationInFrames=\{cue\.derived_asset\.duration_in_frames\}/);
+  assert.doesNotMatch(track, /playbackRate|trimBefore|trimAfter|normalize\s*\(/);
+  assert.match(ian, /gain_multiplier \* soundEffectBusGain/);
+  assert.match(ian, /requires the unified SFX bus multiplier/);
 });
 
 test('versioned burned-in caption component consumes only active display text', () => {
@@ -125,5 +138,7 @@ test('renderer keeps legacy null-route narrative plans readable without weakenin
   assert.match(source, /'comic-imagegen'/);
   assert.match(source, /intra_shot_transition_contract/);
   assert.match(source, /hero_pose_background/);
+  assert.match(source, /knowledge-video-assembly-plan-v3/);
+  assert.match(source, /KnowledgeVideoSoundEffectCue/);
   assert.match(source, /IntraShotTransitionV1/);
 });

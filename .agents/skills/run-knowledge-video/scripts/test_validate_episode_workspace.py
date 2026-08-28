@@ -890,6 +890,69 @@ class EpisodeWorkspaceValidatorTests(unittest.TestCase):
             "must preserve delivered media" in error for error in self.errors()
         ))
 
+    def test_current_composition_requires_sound_design_binding(self) -> None:
+        self.write_state(
+            self.item(
+                status="approved",
+                qa_contract="ordinary-imagegen-white-cat-master-qa-v1",
+                include_anatomy=False,
+            ),
+            current_phase="composition_locked",
+        )
+        self.assertTrue(any(
+            "requires a passing sound-effect design" in error for error in self.errors()
+        ))
+
+    def test_current_composition_accepts_checksum_current_sound_design(self) -> None:
+        library = {
+            "path": "leverage-video/src/shared/sound-effects/manifest-v3.json",
+            "checksum_sha256": "e" * 64,
+        }
+        artifact = {
+            "contract_version": "knowledge-video-sound-design-v1",
+            "status": "qa_passed",
+            "resume_mode": "standard",
+            "revoice": None,
+            "episode_workspace": self.workspace.relative_to(self.repo).as_posix(),
+            "fps": 30,
+            "duration_frames": 90,
+            "policy": {},
+            "bindings": {"sound_effect_library": library},
+            "bus_gain_multiplier": 1,
+            "shot_analysis": [],
+            "events": [],
+            "event_map_sha256": "",
+            "result": "pass",
+        }
+        projection = dict(artifact)
+        projection.pop("event_map_sha256")
+        projection.pop("result")
+        artifact["event_map_sha256"] = MODULE._canonical_sha256(projection)
+        artifact_file = self.workspace / "schema/knowledge-video-sound-design-v1.json"
+        artifact_file.write_text(
+            json.dumps(artifact, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        binding = {
+            "contract_version": "knowledge-video-sound-design-v1",
+            "status": "qa_passed",
+            "path": artifact_file.relative_to(self.repo).as_posix(),
+            "checksum_sha256": sha256(artifact_file),
+            "event_map_sha256": artifact["event_map_sha256"],
+            "bus_gain_multiplier": 1,
+            "sound_effect_library": library,
+        }
+        self.write_state(
+            self.item(
+                status="approved",
+                qa_contract="ordinary-imagegen-white-cat-master-qa-v1",
+                include_anatomy=False,
+            ),
+            current_phase="composition_locked",
+            extra_state={"sound_effect_design": binding},
+        )
+        self.assertEqual(self.errors(), [])
+
     def test_malformed_episode_state_fails_closed(self) -> None:
         (self.workspace / "schema/episode-state.json").write_text(
             "{not-json",

@@ -91,11 +91,12 @@ new visual-language structure.
 
 ## Episode visual cohesion
 
-Apply `episode-visual-cohesion-v2` to every newly planned or generated shot. Gate 2
-selects exactly one white-cat style and its matching episode cohesion profile; the
-selection SHA-256, style ID, and cohesion ID are copied into every current v3
+Apply `episode-visual-cohesion-v2` to every newly planned or generated shot. After
+Gate 2, delegated cover generation and the explicit style gate select exactly one
+episode style and its matching cohesion profile; the selection SHA-256, style ID,
+immutable episode profile SHA-256, and cohesion ID are copied into every current v3
 direction row, selected row, generation request, QA record, and visual manifest.
-No shot may silently select, mix, or substitute the other style. This layer never
+No shot may silently select, mix, or substitute another style. This layer never
 overrides route, visible text, composition, identity, approved bytes, or revoice
 locks.
 
@@ -121,8 +122,35 @@ For `twilight-neon-animation`, use `twilight-luminous-cohesion-v1`:
   periwinkle, and restrained peach/coral accent family. Fixed profile bytes and
   checksums never change.
 
-`local-video-file` and the fixed opening cover remain pixel-preserving exceptions.
-Never recolor their bytes. Ian and white-cat ImageGen may retain normal medium
+For `gilded-mythic-storybook`, use `gilded-mythic-cohesion-v1`:
+
+- White-cat `imagegen` uses the full selected ornate storybook profile and the sole
+  canonical cat reference: ivory-gold radiance, cobalt structure, mulberry-plum
+  depth, sparse jewel accents, painterly faceting, and controlled ornament.
+- Ian remains Ian: use warm-ivory paper, fine cobalt/charcoal structure, restrained
+  gold and plum grouping, and clear gutters. Forbid storybook character modeling,
+  dense decorative filigree inside data regions, glow, mosaic texture, or a second
+  Style Anchor.
+- No-cat ImageGen may use the full profile. Xuan, Ink, and Whiteboard preserve their
+  route mechanics and style authority while adapting only the ivory/gold/cobalt/
+  plum palette hierarchy, luminance, and negative-space envelope. Fixed profile
+  bytes and checksums never change.
+
+For `cover-derived-episode-style`, use `cover-derived-cohesion-v1`:
+
+- Ordinary ImageGen uses the full ten-axis episode profile snapshot and the sole
+  canonical cat reference when present. Each prompt and QA record binds the
+  episode profile SHA-256.
+- Ian and every other fixed route preserve their own sole medium/Style Anchor and
+  inherit only palette, luminance, and negative-space envelope.
+- Cover typography, theme words, subject matter, symbols, pose, architecture, and
+  layout are content, not transferable style, and must never leak into storyboard
+  visuals. The 16:9, 9:16, and 4:3 publishing-cover bytes remain outside visual rows and
+  production manifests.
+
+`local-video-file` remains a pixel-preserving exception. Publishing covers are
+outside the episode timeline and cohesion contract. Never recolor local-video
+bytes. Ian and white-cat ImageGen may retain normal medium
 differences, but unexplained jumps in palette family, luminance, saturation,
 negative-space density, or adjacent-shot visual weight are cohesion failures.
 Generation QA must name and reject every affected shot before visual lock; a
@@ -193,7 +221,8 @@ exists. The retained legacy Comic → Whiteboard rule therefore resolves to
 After route-first resolution, a boundary touching white-cat `imagegen` uses the
 episode style: loose watercolor resolves through
 `imagegen-white-cat-watercolor-bloom-priority-v1`; twilight animation resolves
-through `imagegen-white-cat-twilight-dissolve-priority-v1`. Only then use the
+through `imagegen-white-cat-twilight-dissolve-priority-v1`; gilded storybook resolves
+through `imagegen-white-cat-gilded-dissolve-priority-v1`. Only then use the
 shared semantic fallback. `scene-transition-recommendation-diversity-v2`
 may diversify this white-cat preference and shared-fallback recommendations,
 allowing one visible kind to run at most three times and to occupy at most five

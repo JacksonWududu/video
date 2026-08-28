@@ -1,0 +1,46 @@
+{
+  "contract_version": "shared-sound-effect-library-v2",
+  "catalog_revision": 14,
+  "status": "active",
+  "created_at": "2026-08-28T05:17:39.968Z",
+  "parent_manifest": {
+    "path": "leverage-video/src/shared/sound-effects/manifest-v13.json",
+    "checksum_sha256": "7fcd6c553c2f847efd5b12e1ef1c41a968c203aa258b32d084a026530267a394"
+  },
+  "semantic_profiles": [],
+  "additions": [
+    {
+      "asset_id": "metal-tool-falling-mixkit-820",
+      "source_item_id": "820",
+      "title": "Metal tool falling",
+      "semantic_roles": [
+        "metal_tool_fall"
+      ],
+      "timbre_family": "metal",
+      "path": "leverage-video/src/shared/sound-effects/assets/metal-tool-falling-mixkit-820.wav",
+      "checksum_sha256": "234c5bd326676e58194c37b646957e6a379a627e2858d7e6192cf56d34da08a9",
+      "provider": "Mixkit",
+      "source_item_url": "https://mixkit.co/free-sound-effects/download/820/?context=item+grid",
+      "source_download_url": "https://assets.mixkit.co/active_storage/sfx/820/820.wav",
+      "license_observation": {
+        "verified_at": "2026-08-28T05:14:09.153Z",
+        "license_url": "https://mixkit.co/free-sound-effects/",
+        "commercial_use": true,
+        "cross_platform": true,
+        "attribution_required": false,
+        "observation": "Mixkit official Sound Effects page states that clips are royalty-free, usable without attribution, and usable in commercial and personal projects; upstream terms remain authoritative and standalone redistribution is prohibited.",
+        "verified_phrases": [
+          "royalty-free and can be used without attribution",
+          "both commercial and personal projects"
+        ]
+      },
+      "format": "wav",
+      "codec": "pcm_s24le",
+      "sample_rate_hz": 44100,
+      "channels": 2,
+      "duration_seconds": 0.752971,
+      "byte_size": 199316,
+      "downloaded_at": "2026-08-28T05:17:39.968Z"
+    }
+  ]
+}

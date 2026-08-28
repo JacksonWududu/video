@@ -1,0 +1,46 @@
+{
+  "contract_version": "shared-sound-effect-library-v2",
+  "catalog_revision": 6,
+  "status": "active",
+  "created_at": "2026-08-28T05:15:28.070Z",
+  "parent_manifest": {
+    "path": "leverage-video/src/shared/sound-effects/manifest-v5.json",
+    "checksum_sha256": "7d618656c9f2362c45599b5b724a5c74897bb3c560b9155b31724777b4f308f1"
+  },
+  "semantic_profiles": [],
+  "additions": [
+    {
+      "asset_id": "wind-blowing-ambience-mixkit-2658",
+      "source_item_id": "2658",
+      "title": "Wind blowing ambience",
+      "semantic_roles": [
+        "wind_ambience"
+      ],
+      "timbre_family": "wind",
+      "path": "leverage-video/src/shared/sound-effects/assets/wind-blowing-ambience-mixkit-2658.wav",
+      "checksum_sha256": "63e6d732995dfe4cc646ea1edc7d6352559e337b75106c72266a97edf0412d3f",
+      "provider": "Mixkit",
+      "source_item_url": "https://mixkit.co/free-sound-effects/download/2658/?context=item+grid",
+      "source_download_url": "https://assets.mixkit.co/active_storage/sfx/2658/2658.wav",
+      "license_observation": {
+        "verified_at": "2026-08-28T05:14:09.153Z",
+        "license_url": "https://mixkit.co/free-sound-effects/",
+        "commercial_use": true,
+        "cross_platform": true,
+        "attribution_required": false,
+        "observation": "Mixkit official Sound Effects page states that clips are royalty-free, usable without attribution, and usable in commercial and personal projects; upstream terms remain authoritative and standalone redistribution is prohibited.",
+        "verified_phrases": [
+          "royalty-free and can be used without attribution",
+          "both commercial and personal projects"
+        ]
+      },
+      "format": "wav",
+      "codec": "pcm_s16le",
+      "sample_rate_hz": 44100,
+      "channels": 2,
+      "duration_seconds": 61.84263,
+      "byte_size": 10909084,
+      "downloaded_at": "2026-08-28T05:15:28.070Z"
+    }
+  ]
+}

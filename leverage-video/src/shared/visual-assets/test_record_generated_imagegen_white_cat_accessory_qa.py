@@ -166,35 +166,35 @@ class WhiteCatAccessoryQaTests(unittest.TestCase):
         self.assertIn("selected_source_file=source", strict_text)
         self.assertIn("helper.validate_white_cat_identity_qa_v2(", action_text)
 
-    def test_gate2_twilight_style_binding_drives_prompt_and_qa(self) -> None:
+    def test_gate2_gilded_style_binding_drives_prompt_and_qa(self) -> None:
         selection = {
             "contract_version": "white-cat-visual-style-selection-v1",
             "gate2_script_sha256": "a" * 64,
-            "style_id": "twilight-neon-animation",
-            "treatment_profile_id": "imagegen-twilight-neon-narrative",
-            "visual_cohesion_profile_id": "twilight-luminous-cohesion-v1",
+            "style_id": "gilded-mythic-storybook",
+            "treatment_profile_id": "imagegen-gilded-mythic-narrative",
+            "visual_cohesion_profile_id": "gilded-mythic-cohesion-v1",
             "style_skill_path": "/tmp/style-skill",
             "style_skill_checksum_sha256": "b" * 64,
-            "style_profile_path": "/tmp/twilight-profile",
+            "style_profile_path": "/tmp/gilded-profile",
             "style_profile_checksum_sha256": "c" * 64,
             "decision": {
                 "status": "selected",
-                "exact_message": "选择暮紫霓影动画",
+                "exact_message": "选择鎏金秘境绘本",
                 "decided_at": "2026-08-26T10:00:00+08:00",
             },
         }
         selection["selection_sha256"] = self.recorder._canonical_sha256(selection)
         item = {
-            "white_cat_visual_style_id": "twilight-neon-animation",
+            "white_cat_visual_style_id": "gilded-mythic-storybook",
             "white_cat_visual_style_selection_sha256": selection["selection_sha256"],
-            "visual_cohesion_profile_id": "twilight-luminous-cohesion-v1",
-            "treatment_profile_id": "imagegen-twilight-neon-narrative",
+            "visual_cohesion_profile_id": "gilded-mythic-cohesion-v1",
+            "treatment_profile_id": "imagegen-gilded-mythic-narrative",
         }
         style_id, cohesion_id, current = self.recorder.resolve_white_cat_visual_style_binding(
             {"white_cat_visual_style_selection": selection}, item
         )
         self.assertEqual((style_id, cohesion_id, current), (
-            "twilight-neon-animation", "twilight-luminous-cohesion-v1", True
+            "gilded-mythic-storybook", "gilded-mythic-cohesion-v1", True
         ))
         qa = {"white_cat_visual_style_binding": {
             "style_id": style_id,
@@ -203,8 +203,8 @@ class WhiteCatAccessoryQaTests(unittest.TestCase):
         }}
         self.recorder.validate_white_cat_style_prompt_and_qa(
             prompt_text=(
-                "WHITE-CAT VISUAL STYLE: twilight-neon-animation. "
-                "EPISODE VISUAL COHESION: twilight-luminous-cohesion-v1."
+                "WHITE-CAT VISUAL STYLE: gilded-mythic-storybook. "
+                "EPISODE VISUAL COHESION: gilded-mythic-cohesion-v1."
             ),
             qa=qa,
             style_id=style_id,
@@ -216,6 +216,67 @@ class WhiteCatAccessoryQaTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "stale, mixed, or substituted"):
             self.recorder.resolve_white_cat_visual_style_binding(
                 {"white_cat_visual_style_selection": selection}, item
+            )
+
+    def test_cover_derived_v2_binding_requires_episode_profile_marker(self) -> None:
+        selection = {
+            "contract_version": "white-cat-visual-style-selection-v2",
+            "gate2_script_sha256": "a" * 64,
+            "style_source": "episode_cover",
+            "style_id": "cover-derived-episode-style",
+            "source_style_id": None,
+            "style_label": "当前封面风格",
+            "treatment_profile_id": "imagegen-cover-derived-narrative",
+            "visual_cohesion_profile_id": "cover-derived-cohesion-v1",
+            "style_profile_path": "topic/schema/cover-derived-style-profile-v1.json",
+            "style_profile_checksum_sha256": "b" * 64,
+            "publishing_cover_package_path": "topic/schema/publishing-cover-generation-v1.json",
+            "publishing_cover_package_sha256": "c" * 64,
+            "decision": {
+                "status": "selected",
+                "exact_message": "使用当前封面风格",
+                "decided_at": "2026-08-27T10:00:00+08:00",
+            },
+        }
+        selection["selection_sha256"] = self.recorder._canonical_sha256(selection)
+        item = {
+            "white_cat_visual_style_id": "cover-derived-episode-style",
+            "white_cat_visual_style_selection_sha256": selection["selection_sha256"],
+            "visual_cohesion_profile_id": "cover-derived-cohesion-v1",
+            "treatment_profile_id": "imagegen-cover-derived-narrative",
+        }
+        style_id, cohesion_id, current = self.recorder.resolve_white_cat_visual_style_binding(
+            {"white_cat_visual_style_selection": selection}, item
+        )
+        qa = {"white_cat_visual_style_binding": {
+            "style_id": style_id,
+            "selection_sha256": selection["selection_sha256"],
+            "visual_cohesion_profile_id": cohesion_id,
+            "style_profile_checksum_sha256": selection["style_profile_checksum_sha256"],
+        }}
+        prompt = (
+            "WHITE-CAT VISUAL STYLE: cover-derived-episode-style. "
+            "EPISODE VISUAL COHESION: cover-derived-cohesion-v1. "
+            f"EPISODE STYLE PROFILE SHA256: {selection['style_profile_checksum_sha256']}."
+        )
+        self.recorder.validate_white_cat_style_prompt_and_qa(
+            prompt_text=prompt,
+            qa=qa,
+            style_id=style_id,
+            cohesion_id=cohesion_id,
+            selection_sha256=selection["selection_sha256"],
+            current_binding=current,
+            style_profile_checksum_sha256=selection["style_profile_checksum_sha256"],
+        )
+        with self.assertRaisesRegex(ValueError, "style-profile checksum marker"):
+            self.recorder.validate_white_cat_style_prompt_and_qa(
+                prompt_text=prompt.split("EPISODE STYLE PROFILE")[0],
+                qa=qa,
+                style_id=style_id,
+                cohesion_id=cohesion_id,
+                selection_sha256=selection["selection_sha256"],
+                current_binding=current,
+                style_profile_checksum_sha256=selection["style_profile_checksum_sha256"],
             )
 
 

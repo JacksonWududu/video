@@ -38,11 +38,11 @@ Map every substantive script claim to its evidence, the strongest wording the ev
 
 ## Content structure audit
 
-Before the general structure audit, record the episode-opening sentence:
+Before the general structure audit, record the first complete sentence:
 
-- Run `python3 .agents/skills/validate-video-narration/scripts/record_first_sentence.py <candidate-path> --expected-sha256 <candidate-sha256>`. Preserve its passing `opening-first-sentence-record-v1` output, which binds the exact first complete sentence and UTF-8 byte range to the current versioned `script_resource` candidate checksum.
+- Run `python3 .agents/skills/validate-video-narration/scripts/record_first_sentence.py <candidate-path> --expected-sha256 <candidate-sha256>`. Preserve its passing `opening-first-sentence-record-v1` output, which binds the exact first complete sentence and UTF-8 byte range to the current versioned `script_resource` candidate checksum. This is narration and frame-0 prefix-QA evidence only; it creates no opening shot or cover hold.
 - Do not require a fixed brand prefix or extract the topic from this sentence. Punctuation, added introductory wording, or another natural first sentence cannot by itself block Gate 2.
-- `.agents/skills/validate-video-narration/scripts/validate_opening_topic.py` and `opening-topic-extraction-v1` are retired historical evidence only. Do not invoke or emit them for a new or revised active audit. A missing or ambiguous complete first sentence still blocks because `OPEN-00` needs one exact narration span; show that content problem without silently rewriting it.
+- `.agents/skills/validate-video-narration/scripts/validate_opening_topic.py` and `opening-topic-extraction-v1` are retired historical evidence only. Do not invoke or emit them for a new or revised active audit. A missing or ambiguous complete first sentence still blocks narration QA; show that content problem without silently rewriting it.
 
 Check that the script contains one recognizable situation, one central question, one primary knowledge point, no more than two necessary supporting points, an important limit or counterexample, and one useful closing judgment question.
 

@@ -64,9 +64,13 @@ export const WHITE_CAT_TRANSITION_RECOMMENDATION_RULE_ID =
   'imagegen-white-cat-watercolor-bloom-priority-v1';
 export const TWILIGHT_WHITE_CAT_TRANSITION_RECOMMENDATION_RULE_ID =
   'imagegen-white-cat-twilight-dissolve-priority-v1';
+export const GILDED_WHITE_CAT_TRANSITION_RECOMMENDATION_RULE_ID =
+  'imagegen-white-cat-gilded-dissolve-priority-v1';
 const WHITE_CAT_VISUAL_STYLE_IDS = new Set([
   'loose-line-vivid-watercolor',
   'twilight-neon-animation',
+  'gilded-mythic-storybook',
+  'cover-derived-episode-style',
 ]);
 
 const DIVERSITY_CANDIDATES = Object.freeze({
@@ -202,14 +206,32 @@ export const resolveTransitionRecommendation = ({
     matchedBoundaryRoles.push('next');
   }
   if (matchedBoundaryRoles.length > 0) {
-    const twilight = whiteCatVisualStyleId === 'twilight-neon-animation';
+    if (whiteCatVisualStyleId === 'cover-derived-episode-style') {
+      return Object.freeze({
+        recommended_transition: getRecommendedTransition({
+          boundaryChangeClass,
+          nextVisualGenerationRoute,
+        }),
+        recommendation_source: {
+          authority: 'shared-fallback',
+          rule_id: SHARED_FALLBACK_RULE_ID,
+        },
+      });
+    }
+    const usesDissolve = [
+      'twilight-neon-animation',
+      'gilded-mythic-storybook',
+    ].includes(whiteCatVisualStyleId);
+    const ruleId = whiteCatVisualStyleId === 'twilight-neon-animation'
+      ? TWILIGHT_WHITE_CAT_TRANSITION_RECOMMENDATION_RULE_ID
+      : whiteCatVisualStyleId === 'gilded-mythic-storybook'
+        ? GILDED_WHITE_CAT_TRANSITION_RECOMMENDATION_RULE_ID
+        : WHITE_CAT_TRANSITION_RECOMMENDATION_RULE_ID;
     return Object.freeze({
-      recommended_transition: {kind: twilight ? 'dissolve' : 'watercolor-bloom', options: {}},
+      recommended_transition: {kind: usesDissolve ? 'dissolve' : 'watercolor-bloom', options: {}},
       recommendation_source: {
         authority: 'white-cat-transition-policy',
-        rule_id: twilight
-          ? TWILIGHT_WHITE_CAT_TRANSITION_RECOMMENDATION_RULE_ID
-          : WHITE_CAT_TRANSITION_RECOMMENDATION_RULE_ID,
+        rule_id: ruleId,
         matched_boundary_roles: matchedBoundaryRoles,
       },
     });

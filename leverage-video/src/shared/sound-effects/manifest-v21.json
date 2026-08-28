@@ -1,0 +1,46 @@
+{
+  "contract_version": "shared-sound-effect-library-v2",
+  "catalog_revision": 21,
+  "status": "active",
+  "created_at": "2026-08-28T05:18:39.227Z",
+  "parent_manifest": {
+    "path": "leverage-video/src/shared/sound-effects/manifest-v20.json",
+    "checksum_sha256": "4e3d4db7376fb9a1a33ec35d77a502a12e80714dbea0bed64ce9b154517b4870"
+  },
+  "semantic_profiles": [],
+  "additions": [
+    {
+      "asset_id": "glitch-static-mixkit-1457",
+      "source_item_id": "1457",
+      "title": "Glitch static",
+      "semantic_roles": [
+        "glitch_static"
+      ],
+      "timbre_family": "glitch",
+      "path": "leverage-video/src/shared/sound-effects/assets/glitch-static-mixkit-1457.wav",
+      "checksum_sha256": "cc9f5435e533b0b40574227f0eca027c5eda444ec82725b5d9566e103c581f86",
+      "provider": "Mixkit",
+      "source_item_url": "https://mixkit.co/free-sound-effects/download/1457/?context=item+grid",
+      "source_download_url": "https://assets.mixkit.co/active_storage/sfx/1457/1457.wav",
+      "license_observation": {
+        "verified_at": "2026-08-28T05:14:09.153Z",
+        "license_url": "https://mixkit.co/free-sound-effects/",
+        "commercial_use": true,
+        "cross_platform": true,
+        "attribution_required": false,
+        "observation": "Mixkit official Sound Effects page states that clips are royalty-free, usable without attribution, and usable in commercial and personal projects; upstream terms remain authoritative and standalone redistribution is prohibited.",
+        "verified_phrases": [
+          "royalty-free and can be used without attribution",
+          "both commercial and personal projects"
+        ]
+      },
+      "format": "wav",
+      "codec": "pcm_s16le",
+      "sample_rate_hz": 44100,
+      "channels": 2,
+      "duration_seconds": 1.395692,
+      "byte_size": 246244,
+      "downloaded_at": "2026-08-28T05:18:39.227Z"
+    }
+  ]
+}

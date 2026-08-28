@@ -1,0 +1,46 @@
+{
+  "contract_version": "shared-sound-effect-library-v2",
+  "catalog_revision": 24,
+  "status": "active",
+  "created_at": "2026-08-28T05:19:10.051Z",
+  "parent_manifest": {
+    "path": "leverage-video/src/shared/sound-effects/manifest-v23.json",
+    "checksum_sha256": "fc9514c041bc31898da6ce9829fef9aaac4fcfb2ec13ea1bb3398b32518a2eae"
+  },
+  "semantic_profiles": [],
+  "additions": [
+    {
+      "asset_id": "tick-tock-clock-mixkit-1059",
+      "source_item_id": "1059",
+      "title": "Tick tock clock close up",
+      "semantic_roles": [
+        "clock_tick"
+      ],
+      "timbre_family": "clock",
+      "path": "leverage-video/src/shared/sound-effects/assets/tick-tock-clock-mixkit-1059.wav",
+      "checksum_sha256": "bbcda2007cd8c695acaea103a656ffccd9e8b6484232c9c00e4d1ada0c22c756",
+      "provider": "Mixkit",
+      "source_item_url": "https://mixkit.co/free-sound-effects/download/1059/?context=item+grid",
+      "source_download_url": "https://assets.mixkit.co/active_storage/sfx/1059/1059.wav",
+      "license_observation": {
+        "verified_at": "2026-08-28T05:14:09.153Z",
+        "license_url": "https://mixkit.co/free-sound-effects/",
+        "commercial_use": true,
+        "cross_platform": true,
+        "attribution_required": false,
+        "observation": "Mixkit official Sound Effects page states that clips are royalty-free, usable without attribution, and usable in commercial and personal projects; upstream terms remain authoritative and standalone redistribution is prohibited.",
+        "verified_phrases": [
+          "royalty-free and can be used without attribution",
+          "both commercial and personal projects"
+        ]
+      },
+      "format": "wav",
+      "codec": "pcm_s24le",
+      "sample_rate_hz": 44100,
+      "channels": 2,
+      "duration_seconds": 11.696984,
+      "byte_size": 3095102,
+      "downloaded_at": "2026-08-28T05:19:10.051Z"
+    }
+  ]
+}

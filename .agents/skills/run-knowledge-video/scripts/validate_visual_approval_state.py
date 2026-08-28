@@ -36,7 +36,13 @@ WHITE_CAT_STYLE_OPTIONS = {
     "twilight-neon-animation": (
         "imagegen-twilight-neon-narrative", "twilight-luminous-cohesion-v1"
     ),
+    "gilded-mythic-storybook": (
+        "imagegen-gilded-mythic-narrative", "gilded-mythic-cohesion-v1"
+    ),
 }
+DYNAMIC_WHITE_CAT_STYLE_OPTION = (
+    "imagegen-cover-derived-narrative", "cover-derived-cohesion-v1"
+)
 WHITE_CAT_LIMB_IDS = {"F1", "F2", "H1", "H2"}
 WHITE_CAT_MASTER_ROLES = {
     "base/master", "white-cat-master", "recurring-character-master",
@@ -47,6 +53,13 @@ WHITE_CAT_XUAN_MASTER_QA = "xuan-paper-diorama-asset-qa-v1"
 WHITE_CAT_XUAN_ACTION_QA = "xuan-paper-diorama-action-qa-v1"
 FINAL_REVIEW_PACKAGE_CONTRACT = "final-production-asset-review-package-v1"
 FINAL_REVIEW_ASSETS_PER_PAGE = 12
+
+
+def _canonical_sha256(value: Any) -> str:
+    encoded = json.dumps(
+        value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def _repository_root(value: str | Path | None) -> Path:
@@ -198,11 +211,50 @@ def _queue(state: dict[str, Any]) -> list[dict[str, Any]]:
     current_style = isinstance(style_selection, dict)
     if current_style:
         style_id = style_selection.get("style_id")
+        contract_version = style_selection.get("contract_version")
         option = WHITE_CAT_STYLE_OPTIONS.get(style_id)
         selection_sha256 = style_selection.get("selection_sha256")
+        if contract_version == "white-cat-visual-style-selection-v2":
+            option = DYNAMIC_WHITE_CAT_STYLE_OPTION
+            projection = {
+                "contract_version": contract_version,
+                "gate2_script_sha256": style_selection.get("gate2_script_sha256"),
+                "style_id": style_id,
+                "treatment_profile_id": style_selection.get("treatment_profile_id"),
+                "visual_cohesion_profile_id": style_selection.get("visual_cohesion_profile_id"),
+                "style_profile_path": style_selection.get("style_profile_path"),
+                "style_profile_checksum_sha256": style_selection.get("style_profile_checksum_sha256"),
+                "decision": {
+                    "status": style_selection.get("decision", {}).get("status"),
+                    "exact_message": style_selection.get("decision", {}).get("exact_message"),
+                    "decided_at": style_selection.get("decision", {}).get("decided_at"),
+                },
+                "style_source": style_selection.get("style_source"),
+                "source_style_id": style_selection.get("source_style_id"),
+                "style_label": style_selection.get("style_label"),
+                "publishing_cover_package_path": style_selection.get("publishing_cover_package_path"),
+                "publishing_cover_package_sha256": style_selection.get("publishing_cover_package_sha256"),
+            }
+            valid_source = style_selection.get("style_source") in {
+                "episode_cover", "registered_custom"
+            }
+            valid_profile = (
+                style_id == "cover-derived-episode-style"
+                and isinstance(style_selection.get("style_label"), str)
+                and bool(style_selection["style_label"].strip())
+                and isinstance(style_selection.get("style_profile_path"), str)
+                and bool(style_selection["style_profile_path"].strip())
+                and SHA256_RE.fullmatch(
+                    style_selection.get("style_profile_checksum_sha256") or ""
+                )
+                and selection_sha256 == _canonical_sha256(projection)
+            )
+        else:
+            valid_source = contract_version == "white-cat-visual-style-selection-v1"
+            valid_profile = True
         if (
-            style_selection.get("contract_version")
-            != "white-cat-visual-style-selection-v1"
+            not valid_source
+            or not valid_profile
             or option is None
             or not SHA256_RE.fullmatch(selection_sha256 or "")
             or style_selection.get("treatment_profile_id") != option[0]
@@ -254,6 +306,11 @@ def _validate_visual_cohesion_qa(
         != selection.get("selection_sha256")
         or qa.get("visual_cohesion_profile_id")
         != selection.get("visual_cohesion_profile_id")
+        or (
+            selection.get("contract_version") == "white-cat-visual-style-selection-v2"
+            and qa.get("style_profile_checksum_sha256")
+            != selection.get("style_profile_checksum_sha256")
+        )
         or qa.get("covered_asset_ids") != expected_asset_ids
         or qa.get("anomalies") != []
     ):

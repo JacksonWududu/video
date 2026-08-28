@@ -1,0 +1,46 @@
+{
+  "contract_version": "shared-sound-effect-library-v2",
+  "catalog_revision": 23,
+  "status": "active",
+  "created_at": "2026-08-28T05:18:51.423Z",
+  "parent_manifest": {
+    "path": "leverage-video/src/shared/sound-effects/manifest-v22.json",
+    "checksum_sha256": "9db441f09c6268a9e60e14b543eeee6b2db8a4eb2880a3a27744dab03bb3a126"
+  },
+  "semantic_profiles": [],
+  "additions": [
+    {
+      "asset_id": "movie-trailer-epic-impact-mixkit-2908",
+      "source_item_id": "2908",
+      "title": "Movie trailer epic impact",
+      "semantic_roles": [
+        "trailer_impact"
+      ],
+      "timbre_family": "impact",
+      "path": "leverage-video/src/shared/sound-effects/assets/movie-trailer-epic-impact-mixkit-2908.wav",
+      "checksum_sha256": "dd0afbaffa7837c2eb0ec50191e9dcceb09da51e07b8bc565a87afe616d36ad6",
+      "provider": "Mixkit",
+      "source_item_url": "https://mixkit.co/free-sound-effects/download/2908/?context=item+grid",
+      "source_download_url": "https://assets.mixkit.co/active_storage/sfx/2908/2908.wav",
+      "license_observation": {
+        "verified_at": "2026-08-28T05:14:09.153Z",
+        "license_url": "https://mixkit.co/free-sound-effects/",
+        "commercial_use": true,
+        "cross_platform": true,
+        "attribution_required": false,
+        "observation": "Mixkit official Sound Effects page states that clips are royalty-free, usable without attribution, and usable in commercial and personal projects; upstream terms remain authoritative and standalone redistribution is prohibited.",
+        "verified_phrases": [
+          "royalty-free and can be used without attribution",
+          "both commercial and personal projects"
+        ]
+      },
+      "format": "wav",
+      "codec": "pcm_s16le",
+      "sample_rate_hz": 44100,
+      "channels": 2,
+      "duration_seconds": 4.865941,
+      "byte_size": 858396,
+      "downloaded_at": "2026-08-28T05:18:51.423Z"
+    }
+  ]
+}

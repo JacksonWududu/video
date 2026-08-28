@@ -71,7 +71,7 @@ export type SceneTransitionContractV3 = Omit<SceneTransitionContractV2, 'contrac
   next_visual_generation_route: string;
   source_white_cat_present: boolean;
   next_white_cat_present: boolean;
-  white_cat_visual_style_id?: 'loose-line-vivid-watercolor' | 'twilight-neon-animation';
+  white_cat_visual_style_id?: 'loose-line-vivid-watercolor' | 'twilight-neon-animation' | 'gilded-mythic-storybook' | 'cover-derived-episode-style';
   recommended_transition: TransitionRecommendation;
   recommendation_source:
     | {authority: 'visual-generation-route'; route_id: string; rule_id: string}
@@ -79,7 +79,8 @@ export type SceneTransitionContractV3 = Omit<SceneTransitionContractV2, 'contrac
       authority: 'white-cat-transition-policy';
       rule_id:
         | 'imagegen-white-cat-watercolor-bloom-priority-v1'
-        | 'imagegen-white-cat-twilight-dissolve-priority-v1';
+        | 'imagegen-white-cat-twilight-dissolve-priority-v1'
+        | 'imagegen-white-cat-gilded-dissolve-priority-v1';
       matched_boundary_roles: readonly ('source' | 'next')[];
     }
     | {authority: 'shared-fallback'; rule_id: string};
@@ -119,6 +120,8 @@ export const WHITE_CAT_TRANSITION_RECOMMENDATION_RULE_ID:
   'imagegen-white-cat-watercolor-bloom-priority-v1';
 export const TWILIGHT_WHITE_CAT_TRANSITION_RECOMMENDATION_RULE_ID:
   'imagegen-white-cat-twilight-dissolve-priority-v1';
+export const GILDED_WHITE_CAT_TRANSITION_RECOMMENDATION_RULE_ID:
+  'imagegen-white-cat-gilded-dissolve-priority-v1';
 
 export function getRecommendedTransition(input: {
   boundaryChangeClass: BoundaryChangeClass;
@@ -131,7 +134,7 @@ export function resolveTransitionRecommendation(input: {
   nextVisualGenerationRoute: string;
   sourceWhiteCatPresent?: boolean;
   nextWhiteCatPresent?: boolean;
-  whiteCatVisualStyleId?: 'loose-line-vivid-watercolor' | 'twilight-neon-animation';
+  whiteCatVisualStyleId?: 'loose-line-vivid-watercolor' | 'twilight-neon-animation' | 'gilded-mythic-storybook' | 'cover-derived-episode-style';
 }): Pick<SceneTransitionContractV3, 'recommended_transition' | 'recommendation_source'>;
 
 export function applyTransitionRecommendationDiversity(rows: readonly {
