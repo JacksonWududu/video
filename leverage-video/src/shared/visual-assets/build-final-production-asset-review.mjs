@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 
 import crypto from 'node:crypto';
+import {isFlipbookRow} from '../flipbook-video/profile.mjs';
+import {inspectStaticSpreadAsset} from './static-spread-contract.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath, pathToFileURL} from 'node:url';
@@ -16,6 +18,7 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPOSITORY_ROOT = path.resolve(HERE, '../../../..');
 const REVIEW_PHASE = 'awaiting_precomposition_visual_review';
 const REVIEW_CONTRACT = 'final-production-asset-review-package-v1';
+const DIRECT_FIRST_SHOT_CONTRACT = 'direct-first-shot-v1';
 const CANVAS_WIDTH = 1920;
 const CANVAS_HEIGHT = 1080;
 const ASSETS_PER_PAGE = 12;
@@ -165,6 +168,8 @@ const completeFinalReviewProjection = (review) => ({
     path: asset.path,
     checksum_sha256: asset.checksum_sha256,
     qa_status: asset.qa_status,
+    ...(asset.static_spread_review === undefined
+      ? {} : {static_spread_review: asset.static_spread_review}),
     ...(asset.ian_layered_scene_package === undefined
       ? {} : {ian_layered_scene_package: asset.ian_layered_scene_package}),
     ...(asset.white_cat_anatomy_review === undefined
@@ -283,6 +288,27 @@ const validateCover = async (state) => {
     checksum_sha256: cover.source_checksum_sha256,
     dimensions: image,
     absolute: file.absolute,
+  };
+};
+
+export const resolveFinalReviewTimelineOpening = ({activeQueue, state}) => {
+  if (!Array.isArray(activeQueue)) fail('active final-review queue is missing');
+  const flipbookCount = activeQueue.filter(isFlipbookRow).length;
+  if (flipbookCount !== 0 && flipbookCount !== activeQueue.length) {
+    fail('final review cannot mix flipbook and non-flipbook assets');
+  }
+  if (flipbookCount === 0) return null;
+  if (activeQueue[0]?.shot_id !== 'S01'
+      || activeQueue[0]?.shot_start_frame !== 0
+      || state?.storyboard_draft?.direct_first_shot_contract !== DIRECT_FIRST_SHOT_CONTRACT) {
+    fail('flipbook final review must bind direct-first S01 at frame zero');
+  }
+  return {
+    contract_version: DIRECT_FIRST_SHOT_CONTRACT,
+    first_shot_id: 'S01',
+    start_frame: 0,
+    fixed_opening_cover: false,
+    publishing_cover_included: false,
   };
 };
 
@@ -405,12 +431,15 @@ const renderHtml = ({workspace, digest, phase, createdAt, assets, cover, pages, 
           <p><span class="badge">${escapeHtml(asset.role)}</span><span class="badge">${escapeHtml(asset.route)}</span><span class="badge ok">${escapeHtml(asset.qa_status)}</span></p>
           <p><strong>原始路径</strong><br><a href="${escapeHtml(htmlFileLink(asset.absolute))}">${escapeHtml(asset.path)}</a></p>
           <p class="hash"><strong>SHA-256</strong><br>${escapeHtml(asset.checksum_sha256)}</p>
-          <p>${asset.ian === null ? '批准后由此精确源图派生 1920×1080 合成栅格。' : '此图为 final-composite；批准对象是下方完整 Ian 分层包。'}</p>
+          <p>${asset.static_spread_review !== null ? '完整静态图片等比置入书页；已按半页尺寸检查可读性。' : asset.ian === null ? '批准后由此精确源图派生 1920×1080 合成栅格。' : '此图为 final-composite；批准对象是下方完整 Ian 分层包。'}</p>
         </div>
       </article>`).join('');
     const ian = shotAssets.find((asset) => asset.ian !== null);
     return `<section class="shot"><h2>${escapeHtml(shotId)}</h2><div class="asset-grid">${cards}</div>${ian ? renderIanDetails(ian, stageOutputs.get(ian.asset_id)) : ''}</section>`;
   }).join('');
+  const openingMarkup = cover === null
+    ? '<section class="notice"><strong>时间线开场：</strong><code>direct-first-shot-v1</code>；S01 从第 0 帧开始。发布封面只可由已批准的图文翻书 opening adapter 另行引入。</section>'
+    : `<section class="cover"><h2>固定开场封面</h2><img src="${escapeHtml(htmlFileLink(cover.absolute))}" alt="固定开场封面"><p>此图会进入成片，但依据 <code>cover-only-v1</code> 不属于视觉终审队列。</p><p class="hash">${escapeHtml(cover.path)}<br>${escapeHtml(cover.checksum_sha256)}</p></section>`;
   return Buffer.from(`<!doctype html>
 <html lang="zh-CN">
 <head>
@@ -434,7 +463,7 @@ const renderHtml = ({workspace, digest, phase, createdAt, assets, cover, pages, 
   <section class="lead"><p><strong>当前阶段：</strong>${escapeHtml(phase)}<br><strong>完整清单摘要：</strong><span class="hash">${escapeHtml(digest)}</span><br><strong>候选素材：</strong>${assets.length} 项；<strong>镜头：</strong>${byShot.size} 个；<strong>生成时间：</strong>${escapeHtml(createdAt)}</p></section>
   <section class="notice"><strong>审核边界：</strong>本页只展示当前 <code>final_review.assets</code>。QA 图、提示词、旧版与废弃图均未纳入。生成本页不代表批准，也不改变审批状态。</section>
   <h2>分页总览</h2><div class="overview-grid">${pageMarkup}</div>
-  <section class="cover"><h2>固定开场封面</h2><img src="${escapeHtml(htmlFileLink(cover.absolute))}" alt="固定开场封面"><p>此图会进入成片，但依据 <code>cover-only-v1</code> 不属于视觉终审队列。</p><p class="hash">${escapeHtml(cover.path)}<br>${escapeHtml(cover.checksum_sha256)}</p></section>
+  ${openingMarkup}
   ${shotMarkup}
   <section class="notice"><strong>批准含义：</strong>批准须绑定本页顶部完整摘要。Ian 批准的是完整分层包，不只是 final-composite。</section>
 </main></body></html>`, 'utf8');
@@ -524,10 +553,12 @@ export const buildFinalProductionAssetReview = async ({
   }
   const shortDigest = digest.slice(0, 8);
   const source = validateNarrationSource(state);
-  const cover = await validateCover(state);
   const queue = state.visual_asset_review.queue;
   if (!Array.isArray(queue)) fail('visual_asset_review.queue is missing');
   const activeQueue = queue.filter((item) => item?.active_for_current_storyboard !== false && item?.status !== 'superseded');
+  const timelineOpening = resolveFinalReviewTimelineOpening({activeQueue, state});
+  const directFirst = timelineOpening !== null;
+  const cover = directFirst ? null : await validateCover(state);
   if (activeQueue.length !== finalReview.assets.length) fail('final review does not match active queue length');
 
   const assets = [];
@@ -554,7 +585,13 @@ export const buildFinalProductionAssetReview = async ({
       dimensions,
       absolute: file.absolute,
       ian: null,
+      static_spread_review: null,
     };
+    if (isFlipbookRow(queueItem)) {
+      const staticReview = await inspectStaticSpreadAsset({repositoryRoot, state, item: queueItem});
+      if (!sameJson(reviewAsset.static_spread_review, staticReview)) fail(`${reviewAsset.asset_id} static spread review is stale`);
+      record.static_spread_review = staticReview;
+    }
     const anatomyReview = reviewAsset.white_cat_anatomy_review;
     if (queueItem.white_cat_present === true || anatomyReview !== undefined) {
       if (anatomyReview?.numbered_limb_map_source_checksum_sha256 !== reviewAsset.checksum_sha256
@@ -572,7 +609,7 @@ export const buildFinalProductionAssetReview = async ({
         fail(`${reviewAsset.asset_id} white-cat numbered limb map dimensions are stale`);
       }
     }
-    if (queueItem.visual_generation_route === 'ian-handdrawn-ppt') {
+    if (!isFlipbookRow(queueItem) && queueItem.visual_generation_route === 'ian-handdrawn-ppt') {
       const packageReview = reviewAsset.ian_layered_scene_package;
       if (packageReview?.contract_version !== 'ian-knowledge-video-layered-scene-v2'
           || !SHA256.test(packageReview.package_review_sha256 ?? '')) {
@@ -728,13 +765,15 @@ export const buildFinalProductionAssetReview = async ({
       page_count: pageOutputs.length,
       ian_package_count: ianStages.length,
     },
-    cover: {
-      contract_version: cover.contract_version,
-      review_scope: cover.review_scope,
-      path: cover.path,
-      checksum_sha256: cover.checksum_sha256,
-      dimensions: cover.dimensions,
-    },
+    ...(directFirst ? {timeline_opening: timelineOpening} : {
+      cover: {
+        contract_version: cover.contract_version,
+        review_scope: cover.review_scope,
+        path: cover.path,
+        checksum_sha256: cover.checksum_sha256,
+        dimensions: cover.dimensions,
+      },
+    }),
     assets: assets.map((asset) => ({
       asset_id: asset.asset_id,
       shot_id: asset.shot_id,
@@ -744,7 +783,11 @@ export const buildFinalProductionAssetReview = async ({
       path: asset.path,
       checksum_sha256: asset.checksum_sha256,
       dimensions: asset.dimensions,
-      production_behavior: asset.ian === null
+      ...(asset.static_spread_review === null
+        ? {} : {static_spread_review: asset.static_spread_review}),
+      production_behavior: asset.static_spread_review !== null
+        ? 'approved-complete-source-contained-in-one-book-page'
+        : asset.ian === null
         ? 'approved-source-derives-1920x1080-composition-raster-after-lock'
         : 'remotion-consumes-approved-background-plus-ordered-final-semantic-layers',
       ...(asset.ian === null ? {} : {ian_layered_scene_package: asset.ian}),

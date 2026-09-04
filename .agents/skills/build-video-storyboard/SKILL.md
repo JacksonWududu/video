@@ -8,6 +8,10 @@ description: "Use when building or validating an audio-timed knowledge-video sto
 Read [references/storyboard-contract.md](references/storyboard-contract.md) completely before drafting or validating the storyboard.
 Read [../run-knowledge-video/references/visual-language-and-comic-routing.md](../run-knowledge-video/references/visual-language-and-comic-routing.md) completely before classifying visual structure/treatment/route or inspecting legacy Comic evidence.
 
+## Illustrated flipbook selection
+
+When the locked episode style is `illustrated-flipbook`, read [references/illustrated-flipbook-storyboard.md](references/illustrated-flipbook-storyboard.md). Its explicit conditional contract overrides the ordinary route/count/Ian-layer/subtitle-reserve clauses below for that branch only. Preserve all existing phase and approval gates.
+
 ## Preconditions
 
 - Gate 2 passed and the exact user-approved script is locked.

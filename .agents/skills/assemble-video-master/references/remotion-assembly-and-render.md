@@ -1,5 +1,7 @@
 # Remotion assembly and render contract
 
+The selected `illustrated-flipbook` branch applies [its explicit conditional contract](../../run-knowledge-video/references/illustrated-flipbook-v1.md): static spreads and actual browser page turns replace only the layered/Remotion visual path; exact-body text is separate from bottom captions, and all shared audio, approval and delivery gates remain required.
+
 ## Shared-code reuse gate
 
 Before creating or copying any episode-local script, inspect every registered shared module listed by `leverage-video/src/shared/reuse-registry/registry.json`. Do not limit the check to modules already named by this reference. Run `node leverage-video/src/shared/reuse-registry/create-reuse-decision.mjs <episode-workspace>` while the episode script directory is absent or empty; the command must fail rather than inventory pre-existing scripts. Record one `reuse`, `extend_shared`, or `not_applicable` decision and a concrete reason per module in the generated `<episode-workspace>/schema/shared-reuse-decision-v1.json`, then require this command to pass:

@@ -1,4 +1,6 @@
 import crypto from 'node:crypto';
+import {isFlipbookRow, FLIPBOOK_STYLE_ID} from '../flipbook-video/profile.mjs';
+import {FLIPBOOK_BODY_TEXT_CONTRACT, validateStaticSpread} from '../storyboard/static-spread.mjs';
 
 export const VISIBLE_TEXT_BATCH_REVIEW_VERSION = 'visible-text-batch-review-v1';
 export const CONCISE_VISIBLE_TEXT_STYLE_VERSION = 'concise-summary-visible-text-v1';
@@ -111,7 +113,7 @@ const validateBinding = (binding, label) => {
 };
 
 const buildExpectedRows = ({summaryRows, visualDirectionReview}) => {
-  if (!Array.isArray(summaryRows) || summaryRows.length < 2) {
+  if (!Array.isArray(summaryRows) || summaryRows.length < (isFlipbookRow(visualDirectionReview) ? 1 : 2)) {
     throw new Error('visible-text batch review requires the complete storyboard Summary');
   }
   if (!Array.isArray(visualDirectionReview?.rows) || visualDirectionReview.rows.length === 0) {
@@ -124,6 +126,16 @@ const buildExpectedRows = ({summaryRows, visualDirectionReview}) => {
   }
   return visualDirectionReview.rows.map((row, index) => {
     const summaryRow = generatedSummaryRows[index];
+    if (isFlipbookRow(row) !== isFlipbookRow(visualDirectionReview)) {
+      throw new Error(`${row.shot_id} static spread body lacks episode presentation binding`);
+    }
+    if (isFlipbookRow(row)) {
+      validateStaticSpread(row.static_spread, {sourceText: summaryRow.locked_narration, shotId: row.shot_id});
+      if (!sameCanonical(row.static_spread, row.user_selection?.static_spread)
+        || !isFlipbookRow(row.user_selection)) {
+        throw new Error(`${row.shot_id} static spread body differs from its approved selection`);
+      }
+    }
     const selection = requireObject(row.user_selection, `${row.shot_id} visual-direction selection`);
     const mode = selection.visible_text_mode;
     if (!['none', 'required'].includes(mode)) {
@@ -144,6 +156,11 @@ const buildExpectedRows = ({summaryRows, visualDirectionReview}) => {
     }
     return {
       shot_id: row.shot_id,
+      ...(isFlipbookRow(row) ? {
+        presentation_mode: FLIPBOOK_STYLE_ID,
+        body_text_contract: FLIPBOOK_BODY_TEXT_CONTRACT,
+        static_spread: structuredClone(row.static_spread),
+      } : {}),
       visible_text_mode: mode,
       exact_visible_text: exactVisibleText,
       visible_text_placement: placement,
@@ -177,6 +194,7 @@ const visibleTextMapProjection = (review) => ({
   row_approval_mode: review?.row_approval_mode,
   text_style_contract: review?.text_style_contract,
   rows: review?.rows,
+  ...(review?.presentation_mode !== undefined ? {presentation_mode: review.presentation_mode, body_text_contract: review.body_text_contract} : {}),
 });
 
 export const buildVisibleTextBatchMapSha256 = (review) => sha256Canonical(
@@ -219,6 +237,7 @@ export const buildPendingVisibleTextBatchReview = ({
     batch_scope: 'complete_active_generated_shot_visible_text_map',
     row_approval_mode: 'forbidden_batch_only',
     text_style_contract: CONCISE_VISIBLE_TEXT_STYLE_VERSION,
+    ...(isFlipbookRow(visualDirectionReview) ? {presentation_mode: FLIPBOOK_STYLE_ID, body_text_contract: FLIPBOOK_BODY_TEXT_CONTRACT} : {}),
     rows: buildExpectedRows({summaryRows, visualDirectionReview}),
     presented_map_sha256: null,
     presentation: {
@@ -280,6 +299,10 @@ export const validateVisibleTextBatchReview = (review, {
     || review.row_approval_mode !== 'forbidden_batch_only'
     || review.text_style_contract !== CONCISE_VISIBLE_TEXT_STYLE_VERSION) {
     throw new Error('visible-text batch review scope or authority is invalid');
+  }
+  if (isFlipbookRow(review) !== isFlipbookRow(visualDirectionReview)
+    || (isFlipbookRow(review) && review.body_text_contract !== FLIPBOOK_BODY_TEXT_CONTRACT)) {
+    throw new Error('visible-text batch static spread body authority is stale');
   }
   validateBinding(storyboard, 'storyboard binding');
   validateBinding(visualDirectionReviewBinding, 'visual-direction review binding');

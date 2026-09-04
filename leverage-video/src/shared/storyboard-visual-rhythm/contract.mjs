@@ -1,4 +1,6 @@
 import crypto from 'node:crypto';
+import {isFlipbookRow} from '../flipbook-video/profile.mjs';
+import {validateStaticSpread} from '../storyboard/static-spread.mjs';
 
 export const STORYBOARD_VISUAL_RHYTHM_VERSION = 'storyboard-visual-rhythm-v1';
 export const STORYBOARD_VISUAL_RHYTHM_V2_VERSION = 'storyboard-visual-rhythm-v2';
@@ -52,6 +54,7 @@ const requireStringArray = (value, label, {minimum = 1} = {}) => {
 
 const canonicalRows = (artifact) => artifact.shots.map((shot) => ({
   shot_id: shot.shot_id,
+  ...(shot.presentation_mode !== undefined ? {presentation_mode: shot.presentation_mode, static_spread: shot.static_spread} : {}),
   start_frame: shot.start_frame,
   end_frame: shot.end_frame,
   motion_tier: shot.motion_tier,
@@ -82,6 +85,7 @@ export const buildStoryboardVisualRhythmMapSha256 = (artifact) => crypto
   .createHash('sha256')
   .update(JSON.stringify({
     contract_version: artifact.contract_version,
+    ...(artifact.presentation_mode !== undefined ? {presentation_mode: artifact.presentation_mode} : {}),
     ...(artifact.contract_version === STORYBOARD_VISUAL_RHYTHM_V2_VERSION
       ? {
         density_mode: artifact.density_mode ?? null,
@@ -128,7 +132,14 @@ const validateAssetPlan = (shot, {contractVersion, densityMode}) => {
   const mainImages = requireInteger(plan.main_image_count, `${shot.shot_id}.asset_plan.main_image_count`);
   const layers = requireInteger(plan.layer_count, `${shot.shot_id}.asset_plan.layer_count`);
   const poses = requireInteger(plan.pose_count, `${shot.shot_id}.asset_plan.pose_count`);
-  if (shot.motion_tier === 'layered') {
+  if (isFlipbookRow(shot)) {
+    if (shot.motion_tier !== 'static_spread' || mainImages !== 1 || layers !== 0 || poses !== 0) {
+      throw new Error(`${shot.shot_id} static spread requires one full image and zero layers or poses`);
+    }
+    if (plan.information_density !== densityMode || typeof plan.diagram_detail !== 'string' || plan.diagram_detail.trim() === '') {
+      throw new Error(`${shot.shot_id} static spread density must describe information and diagram detail`);
+    }
+  } else if (shot.motion_tier === 'layered') {
     if (mainImages !== 1 || layers < 3 || layers > 10 || poses !== 0) {
       throw new Error(`${shot.shot_id} layered requires one master image, 3–10 layers, and no pose family`);
     }
@@ -216,7 +227,11 @@ const validateShot = (shot, index, artifact) => {
   const startFrame = requireInteger(shot.start_frame, `${shot.shot_id}.start_frame`);
   const endFrame = requireInteger(shot.end_frame, `${shot.shot_id}.end_frame`, 1);
   if (endFrame <= startFrame) throw new Error(`${shot.shot_id} must have positive duration`);
-  if (!MOTION_TIERS.includes(shot.motion_tier)) {
+  if (isFlipbookRow(shot) !== isFlipbookRow(artifact)) {
+    throw new Error(`${shot.shot_id} static spread rhythm must match the selected presentation`);
+  }
+  if (isFlipbookRow(shot)) validateStaticSpread(shot.static_spread, {shotId: shot.shot_id});
+  if (!(isFlipbookRow(shot) ? shot.motion_tier === 'static_spread' : MOTION_TIERS.includes(shot.motion_tier))) {
     throw new Error(`${shot.shot_id} motion_tier is unsupported`);
   }
   if (!ATTENTION_FUNCTIONS.has(shot.attention_function)) {
@@ -247,7 +262,7 @@ const validateShot = (shot, index, artifact) => {
     contractVersion: artifact.contract_version,
     densityMode: artifact.density_mode ?? 'standard',
   });
-  const expectedTransitions = shot.motion_tier === 'layered'
+  const expectedTransitions = isFlipbookRow(shot) || shot.motion_tier === 'layered'
     ? 0
     : (shot.motion_tier === 'stateful'
         ? shot.asset_plan.main_image_count - 1
@@ -269,7 +284,9 @@ const validateShot = (shot, index, artifact) => {
       throw new Error(`${shot.shot_id} intra-shot transition plan kind is unsupported`);
     }
   });
-  validatePerformancePlan(shot);
+  if (isFlipbookRow(shot)) {
+    if (shot.performance_plan !== null) throw new Error(`${shot.shot_id} static spread must not fabricate character performance`);
+  } else validatePerformancePlan(shot);
   validateContinuity(shot);
 };
 
@@ -319,7 +336,7 @@ export const analyzeStoryboardVisualRhythm = (artifact) => {
   }
   const heroCount = shots.filter((shot) => shot.motion_tier === 'hero_pose').length;
   const heroRatio = heroCount / shots.length;
-  if (heroRatio < 0.1 || heroRatio > 0.25) {
+  if (!isFlipbookRow(artifact) && (heroRatio < 0.1 || heroRatio > 0.25)) {
     warnings.push({code: 'hero-pose-ratio-outside-10-25-percent', ratio: heroRatio});
   }
   return {
@@ -335,6 +352,9 @@ export const validateStoryboardVisualRhythm = (artifact, {shotIds = null} = {}) 
     || ![STORYBOARD_VISUAL_RHYTHM_VERSION, STORYBOARD_VISUAL_RHYTHM_V2_VERSION].includes(artifact.contract_version)
     || artifact.profile !== MEDIUM_HIGH_VISUAL_RHYTHM_PROFILE) {
     throw new Error('storyboard visual rhythm authority mismatch');
+  }
+  if (isFlipbookRow(artifact) && artifact.contract_version !== STORYBOARD_VISUAL_RHYTHM_V2_VERSION) {
+    throw new Error('static spread rhythm requires the current v2 density contract');
   }
   if (artifact.contract_version === STORYBOARD_VISUAL_RHYTHM_V2_VERSION) {
     if (!['standard', 'rich'].includes(artifact.density_mode)) {

@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 
+REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 APPROVAL_WORDS = ("批准", "通过", "符合预期", "approve", "approved")
 REVIEW_MODES = {
@@ -199,6 +200,35 @@ def _review(state: dict[str, Any]) -> dict[str, Any]:
     return review
 
 
+STATIC_SPREAD_VALIDATOR_PATH = REPOSITORY_ROOT / "leverage-video/src/shared/visual-assets/static-spread-contract.mjs"
+
+
+def _is_static_spread(item: dict[str, Any]) -> bool:
+    return item.get("presentation_mode") == "illustrated-flipbook"
+
+
+def _require_static_spread(
+    state: dict[str, Any], item: dict[str, Any],
+    repository_root: str | Path | None = None, *, authority_only: bool = False,
+) -> dict[str, Any] | None:
+    selected = state.get("white_cat_visual_style_selection", {}).get("style_id") == "illustrated-flipbook"
+    if not selected and not _is_static_spread(item):
+        return None
+    payload = {"repositoryRoot": str(repository_root or REPOSITORY_ROOT), "state": state,
+               "item": item, "operation": "authority" if authority_only else "asset"}
+    result = subprocess.run(["node", str(STATIC_SPREAD_VALIDATOR_PATH)], input=json.dumps(payload, ensure_ascii=False),
+                            text=True, capture_output=True, check=False)
+    if result.returncode:
+        raise ValueError(result.stderr.strip() or "static spread validation failed")
+    evidence = json.loads(result.stdout)
+    if not authority_only and item.get("static_spread_review") != evidence:
+        raise ValueError("static spread review evidence is stale")
+    if not authority_only and item.get("status") == "approved" \
+            and item.get("approved_static_spread_review") != evidence:
+        raise ValueError("approved static spread review is stale")
+    return evidence
+
+
 def _queue(state: dict[str, Any]) -> list[dict[str, Any]]:
     queue = [
         item
@@ -235,11 +265,14 @@ def _queue(state: dict[str, Any]) -> list[dict[str, Any]]:
                 "publishing_cover_package_path": style_selection.get("publishing_cover_package_path"),
                 "publishing_cover_package_sha256": style_selection.get("publishing_cover_package_sha256"),
             }
+            flipbook_style = style_id == "illustrated-flipbook" and style_selection.get("style_source") == "builtin_flipbook"
+            if flipbook_style:
+                option = ("imagegen-watercolor-narrative", "illustrated-flipbook-cohesion-v1")
             valid_source = style_selection.get("style_source") in {
-                "episode_cover", "registered_custom"
+                "episode_cover", "registered_custom", "builtin_flipbook"
             }
             valid_profile = (
-                style_id == "cover-derived-episode-style"
+                (style_id == "cover-derived-episode-style" or flipbook_style)
                 and isinstance(style_selection.get("style_label"), str)
                 and bool(style_selection["style_label"].strip())
                 and isinstance(style_selection.get("style_profile_path"), str)
@@ -262,6 +295,7 @@ def _queue(state: dict[str, Any]) -> list[dict[str, Any]]:
         ):
             raise ValueError("white-cat visual style selection is invalid")
     for item in queue:
+        _require_static_spread(state, item, authority_only=True)
         if current_style and item.get("white_cat_present") is True:
             if (
                 item.get("visual_generation_route") != "imagegen"
@@ -674,6 +708,12 @@ def record_approval(
     if _is_whiteboard(item):
         raise ValueError("whiteboard assets require source, annotation, and clip approvals")
     _require_white_cat_qa_v2_state(item, repository_root)
+    static_review = _require_static_spread(state, item, repository_root)
+    if (
+        static_review is not None
+        and item.get("presented_static_spread_review") != static_review
+    ):
+        raise ValueError("presented static spread review is stale")
     ian_package = _require_ian_layered_scene_package(item, repository_root)
     if ian_package is not None \
             and item.get("presented_ian_layered_scene_package") != ian_package:
@@ -692,6 +732,8 @@ def record_approval(
     item["approved_checksum_sha256"] = item["checksum_sha256"]
     item["decision_message"] = decision_message
     item["decision_time"] = decision_time
+    if static_review is not None:
+        item["approved_static_spread_review"] = static_review
     if ian_package is not None:
         item["approved_ian_layered_scene_package"] = ian_package
     if evidence is not None:
@@ -1004,6 +1046,7 @@ def record_batch_qa_pass(
     if not isinstance(current_checksum, str) or not SHA256_RE.fullmatch(current_checksum):
         raise ValueError("batch QA checksum is invalid")
     _require_white_cat_qa_v2_state(item)
+    _require_static_spread(state, item)
     _require_generation_aspect_ratio(state, item)
     item["status"] = "qa_passed_pending_batch_review"
     item["batch_qa_checksum_sha256"] = current_checksum
@@ -1052,7 +1095,7 @@ def record_batch_approval(
 def _require_ian_layered_scene_package(
     item: dict[str, Any], repository_root: str | Path | None = None,
 ) -> dict[str, Any] | None:
-    if item.get("visual_generation_route") != IAN_ROUTE:
+    if item.get("visual_generation_route") != IAN_ROUTE or _is_static_spread(item):
         return None
     manifest_path = item.get("scene_package_manifest_path")
     manifest_checksum = item.get("scene_package_manifest_checksum_sha256")
@@ -1254,6 +1297,10 @@ def _hybrid_manifest(items: list[dict[str, Any]]) -> dict[str, Any]:
         if item.get("technical_qa", {}).get("result") != "pass":
             raise ValueError(f"hybrid batch technical QA is not passing: {item.get('asset_id')}")
         asset = {"asset_id": item.get("asset_id"), "checksum_sha256": checksum}
+        if _is_static_spread(item):
+            if not isinstance(item.get("static_spread_review"), dict):
+                raise ValueError("static spread review is missing")
+            asset["static_spread_review"] = item["static_spread_review"]
         ian_package = _require_ian_layered_scene_package(item)
         if ian_package is not None:
             asset["ian_layered_scene_package"] = ian_package
@@ -1295,6 +1342,7 @@ def record_hybrid_qa_pass(
     if not isinstance(checksum, str) or not SHA256_RE.fullmatch(checksum):
         raise ValueError("hybrid QA checksum is invalid")
     _require_white_cat_qa_v2_state(item)
+    _require_static_spread(state, item)
     _require_generation_aspect_ratio(state, item)
     if item.get("technical_qa", {}).get("result") != "pass":
         raise ValueError("hybrid technical QA must pass before review batching")
@@ -1360,6 +1408,7 @@ def record_hybrid_batch_approval(
         item = _find(queue, asset_id)
         if item is not None and item.get("status") != "approved":
             _require_white_cat_qa_v2_state(item, repository_root)
+            _require_static_spread(state, item, repository_root)
             _require_ian_layered_scene_package(item, repository_root)
     approved = []
     for asset_id in requested:
@@ -1386,6 +1435,8 @@ def record_hybrid_batch_approval(
             approval_disk_measured_dimensions=evidence["measured_dimensions"],
             approval_disk_verified_at=decision_time,
         )
+        if _is_static_spread(item):
+            item["approved_static_spread_review"] = copy.deepcopy(item["static_spread_review"])
         approved.append(item)
     if all((_find(queue, asset_id) or {}).get("status") == "approved"
            for asset_id in manifest["asset_ids"]):
@@ -1425,6 +1476,7 @@ def validate_visual_assets_locked(
             WHITE_CAT_XUAN_ACTION_QA,
         }:
             _require_white_cat_qa_v2_state(item, repository_root)
+        _require_static_spread(state, item, repository_root)
         _require_ian_layered_scene_package(item, repository_root)
         if _is_whiteboard(item):
             whiteboard = _whiteboard_review(item)
@@ -1504,6 +1556,9 @@ def _one_click_final_review_payload(state: dict[str, Any]) -> dict[str, Any]:
             "checksum_sha256": item["checksum_sha256"],
             "qa_status": item["status"],
         }
+        static_review = _require_static_spread(state, item)
+        if static_review is not None:
+            asset["static_spread_review"] = static_review
         ian_package = _require_ian_layered_scene_package(item)
         if ian_package is not None:
             asset["ian_layered_scene_package"] = ian_package
@@ -1592,13 +1647,16 @@ def _validate_one_click_final_review_package(
         raise ValueError("image-rich unified final review counts are stale")
     expected_ian_count = sum(
         1 for item in _queue(state)
-        if item.get("visual_generation_route") == IAN_ROUTE
+        if item.get("visual_generation_route") == IAN_ROUTE and not _is_static_spread(item)
     )
     if counts.get("ian_package_count") != expected_ian_count \
             or len(ian_sheets) != expected_ian_count:
         raise ValueError("image-rich unified final review Ian package count is stale")
     for expected, actual in zip(assets, manifest_assets, strict=True):
-        for field in ("asset_id", "path", "checksum_sha256", "qa_status"):
+        fields = ["asset_id", "path", "checksum_sha256", "qa_status"]
+        if expected.get("static_spread_review") is not None:
+            fields.append("static_spread_review")
+        for field in fields:
             expected_value = expected.get(field)
             if field == "qa_status" and final_review.get("status") == "approved":
                 expected_value = "qa_passed_pending_final_review"
@@ -1714,6 +1772,7 @@ def approve_one_click_final_visual_review(
         raise ValueError("one-click final visual approval is stale or not bound to the complete list")
     for item in _queue(state):
         _require_white_cat_qa_v2_state(item, repository_root)
+        _require_static_spread(state, item, repository_root)
         _require_ian_layered_scene_package(item, repository_root)
         evidence = _disk_evidence(repository_root, item["path"], item)
         if evidence["checksum_sha256"] != item["checksum_sha256"]:
@@ -1760,6 +1819,8 @@ def approve_one_click_final_visual_review(
             decision_message=decision_message,
             decision_time=decision_time,
         )
+        if _is_static_spread(item):
+            item["approved_static_spread_review"] = copy.deepcopy(item["static_spread_review"])
     final_review = {
         **expected,
         "assets": [
@@ -1853,7 +1914,8 @@ def record_one_click_changes_requested(
         "actual_reference_inputs", "state_visible_text",
         "technical_qa", "semantic_qa", "visible_text_qa", "style_qa", "visual_qa",
         "qa_contract_version", "revision_source", "ian_scene_plan_sha256",
-        "ian_scene_package_members", "generation_lineage",
+        "ian_scene_package_members", "generation_lineage", "static_spread_review",
+        "presented_static_spread_review", "approved_static_spread_review",
     }
     stale_prefixes = (
         "approved_", "presented_", "batch_", "generated_source_",

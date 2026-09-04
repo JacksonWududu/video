@@ -1,4 +1,6 @@
 import crypto from 'node:crypto';
+import {FLIPBOOK_STYLE_ID, isFlipbookRow, isFlipbookStyle} from '../flipbook-video/profile.mjs';
+import {validateStaticSpread} from '../storyboard/static-spread.mjs';
 
 import {
   ACTIVE_ROUTE_IDS,
@@ -237,6 +239,14 @@ const validatePendingReviewAuthority = (review, storyboardMarkdown) => {
     || review.storyboard.checksum_sha256 !== sha256Text(storyboardMarkdown)) {
     throw new Error('visual direction form storyboard checksum is stale');
   }
+  const flipbook = isFlipbookStyle(review.white_cat_visual_style_binding);
+  if (flipbook !== isFlipbookRow(review) || review.rows.some((row) => isFlipbookRow(row) !== flipbook)) {
+    throw new Error('illustrated-flipbook form rows must match the episode style');
+  }
+  if (flipbook) for (const row of review.rows) {
+    if (row.white_cat_recommendation?.recommended !== false) throw new Error(`${row.shot_id} flipbook forbids white cat`);
+    validateStaticSpread(row.static_spread, {shotId: row.shot_id});
+  }
   const ids = review.rows.map((row) => row.shot_id);
   if (ids.includes('OPEN-00') || new Set(ids).size !== ids.length) {
     throw new Error('visual direction review shot IDs are invalid');
@@ -245,6 +255,7 @@ const validatePendingReviewAuthority = (review, storyboardMarkdown) => {
 
 export const compatibleRoutesForSelection = (row, whiteCatPresent) => {
   if (typeof whiteCatPresent !== 'boolean') throw new Error('white_cat_present must be boolean');
+  if (isFlipbookRow(row)) return whiteCatPresent ? [] : ACTIVE_ROUTE_IDS.filter((routeId) => ['ian-handdrawn-ppt', 'imagegen'].includes(routeId));
   if (row.scene_class === 'structured_graphic') {
     if (whiteCatPresent) return [];
     return ACTIVE_ROUTE_IDS.filter((routeId) => [
@@ -342,6 +353,7 @@ export const resolveTreatmentProfile = ({
       throw new Error(`${row.shot_id} white-cat visual style binding is stale`);
     }
     validateVisualLanguageSelection({
+      presentation_mode: row.presentation_mode,
       scene_class: row.scene_class,
       visual_structure_id: visualStructureId,
       treatment_profile_id: option.treatment_profile_id,
@@ -356,6 +368,7 @@ export const resolveTreatmentProfile = ({
     && currentTreatmentProfileId !== '') {
     try {
       validateVisualLanguageSelection({
+        presentation_mode: row.presentation_mode,
         scene_class: row.scene_class,
         visual_structure_id: visualStructureId,
         treatment_profile_id: currentTreatmentProfileId,
@@ -371,6 +384,7 @@ export const resolveTreatmentProfile = ({
   if (routeId === 'imagegen') treatmentProfileId = DEFAULT_IMAGEGEN_TREATMENT;
   if (!treatmentProfileId) throw new Error(`no treatment binding for route: ${routeId}`);
   validateVisualLanguageSelection({
+    presentation_mode: row.presentation_mode,
     scene_class: row.scene_class,
     visual_structure_id: visualStructureId,
     treatment_profile_id: treatmentProfileId,
@@ -404,7 +418,7 @@ export const buildVisualDirectionFormModel = ({review, storyboardMarkdown, episo
   }
   validatePendingReviewAuthority(review, storyboardMarkdown);
   const summaryRows = parseStoryboardSummary(storyboardMarkdown);
-  const expectedIds = ['OPEN-00', ...review.rows.map((row) => row.shot_id)];
+  const expectedIds = [...(isFlipbookRow(review) ? [] : ['OPEN-00']), ...review.rows.map((row) => row.shot_id)];
   if (!sameArray(summaryRows.map((row) => row.shot_id), expectedIds)) {
     throw new Error('storyboard Summary row order does not match the visual direction review');
   }
@@ -420,6 +434,7 @@ export const buildVisualDirectionFormModel = ({review, storyboardMarkdown, episo
     }
     const reviewRow = reviewById.get(summary.shot_id);
     const base = presentedSelection(reviewRow);
+    if (isFlipbookRow(reviewRow)) validateStaticSpread(reviewRow.static_spread, {sourceText: summary.locked_narration, shotId: summary.shot_id});
     const routeOptionsByWhiteCat = Object.fromEntries([false, true].map((whiteCatPresent) => [
       String(whiteCatPresent),
       compatibleRoutesForSelection(reviewRow, whiteCatPresent).map((routeId) => ({
@@ -430,6 +445,7 @@ export const buildVisualDirectionFormModel = ({review, storyboardMarkdown, episo
     return {
       ...summary,
       row_kind: 'generated_shot',
+      ...(isFlipbookRow(reviewRow) ? {presentation_mode: FLIPBOOK_STYLE_ID, static_spread: structuredClone(reviewRow.static_spread), white_cat_locked: true} : {}),
       read_only: false,
       selected: false,
       scene_class: reviewRow.scene_class,
@@ -455,6 +471,7 @@ export const buildVisualDirectionFormModel = ({review, storyboardMarkdown, episo
   });
   return {
     contract_version: FORM_MODEL_CONTRACT_VERSION,
+    ...(isFlipbookRow(review) ? {presentation_mode: FLIPBOOK_STYLE_ID} : {}),
     submission_contract_version: SUBMISSION_CONTRACT_VERSION,
     merge_request_contract_version: MERGE_REQUEST_CONTRACT_VERSION,
     merge_renumber_strategy: MERGE_RENUMBER_STRATEGY,
@@ -695,6 +712,7 @@ export const validateVisualDirectionFormSubmission = ({
             : 'selection_ready')));
     return {
       shot_id: row.shot_id,
+      ...(isFlipbookRow(row) ? {presentation_mode: FLIPBOOK_STYLE_ID, static_spread: structuredClone(row.static_spread)} : {}),
       visual_description: visualDescription,
       white_cat_present: submittedRow.white_cat_present,
       visual_generation_route: submittedRow.visual_generation_route,

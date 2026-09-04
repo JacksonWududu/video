@@ -1,3 +1,4 @@
+import {FLIPBOOK_STYLE_ID} from '../flipbook-video/profile.mjs';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -169,12 +170,17 @@ export const validateComicShotPlan = (plan, {
 
 export const validateVisualLanguageSelection = ({
   scene_class: sceneClass,
+  presentation_mode: presentationMode,
   visual_structure_id: visualStructureId,
   treatment_profile_id: treatmentProfileId,
   visual_generation_route: route,
   white_cat_present: whiteCatPresent = false,
   comic_plan: comicPlan = null,
 } = {}, {requireApprovedCharacterReference = true} = {}) => {
+  if (presentationMode === FLIPBOOK_STYLE_ID
+    && (whiteCatPresent !== false || !['ian-handdrawn-ppt', 'imagegen'].includes(route))) {
+    throw new Error('illustrated-flipbook requires no-cat Ian or imagegen');
+  }
   const structure = structures.get(visualStructureId);
   if (!structure) throw new Error(`unknown visual_structure_id: ${visualStructureId}`);
   if (structure.scene_class !== sceneClass) {

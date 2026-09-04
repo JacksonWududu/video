@@ -490,6 +490,10 @@ class EpisodeWorkspaceValidatorTests(unittest.TestCase):
         )
         return item
 
+    def test_web_artifacts_use_source_and_document_categories(self) -> None:
+        self.assertEqual(MODULE._expected_category(Path("book.css")), ("script",))
+        self.assertEqual(MODULE._expected_category(Path("book.html")), ("docs",))
+
     def test_category_classification_is_unchanged(self) -> None:
         self.assertEqual(
             MODULE._expected_category(Path("storyboard-v2.md")),

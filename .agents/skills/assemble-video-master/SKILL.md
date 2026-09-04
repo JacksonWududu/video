@@ -5,6 +5,8 @@ description: "Use when assembling, previewing, or rendering approved knowledge-v
 
 # Assemble Video Master
 
+For checksum-approved `illustrated-flipbook` only, use [the conditional branch contract](../run-knowledge-video/references/illustrated-flipbook-v1.md) and `leverage-video/src/shared/assembly-plan/flipbook-gates.mjs` before its browser build/serve/capture. Static Ian spreads do not enter the layered or Remotion visual renderer below. An explicitly bound `opening_cover` adds only the 54-frame closed-book/open-and-zoom presentation adapter from the current publishing cover; keep the approved body assembly plan unchanged. Reuse the same audio preflight, captions, QA and delivery gates; incomplete cover sound integration blocks final production acceptance.
+
 Read both references completely before implementing or rendering:
 
 - [references/remotion-assembly-and-render.md](references/remotion-assembly-and-render.md)

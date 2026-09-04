@@ -1,5 +1,8 @@
 # Storyboard output contract
 
+
+For the explicitly selected `illustrated-flipbook` style, [illustrated-flipbook-storyboard.md](illustrated-flipbook-storyboard.md) owns the conditional static-spread and full-body-text requirements; all other clauses remain unchanged.
+
 Active new or modified episodes use `direct-first-shot-v1`: `S01` and narration start at frame 0, and publishing covers are forbidden from this contract. Every `OPEN-00`/`cover-only-v1` instruction or example retained below is completed-history parsing evidence only and must not be emitted, migrated into, or used to block current v3 work.
 
 ## Global canvas

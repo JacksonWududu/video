@@ -150,6 +150,12 @@
       "path": "leverage-video/src/shared/watercolor-bloom",
       "use_when": "Rendering legacy v2 adjacent image changes or an explicitly user-approved watercolor-bloom entry inside a v3 intra-shot transition map.",
       "required_for_new_episode_script": false
+    },
+    {
+      "module_id": "flipbook-video",
+      "path": "leverage-video/src/shared/flipbook-video",
+      "use_when": "Building and recording the explicitly selected illustrated-flipbook style: one static image and exact audio-timed narration per spread, seeded layout, actual book-page-turn evidence and current-tab browser capture. Production gates remain mandatory.",
+      "required_for_new_episode_script": false
     }
   ]
 }

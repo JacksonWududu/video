@@ -1,3 +1,5 @@
+import {FLIPBOOK_PROFILE_SHA256} from '../flipbook-video/profile.mjs';
+import {buildStaticSpread} from '../storyboard/static-spread.mjs';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -899,4 +901,90 @@ test('route catalog keeps non-white-cat routes on their independent visible-text
     CATALOG.routes.find((route) => route.route_id === 'local-video-file').processing_order,
     'deferred-after-generated-visuals-v1',
   );
+});
+
+// Synthetic direction fixtures; no production workspace is opened.
+const buildFlipbookReview = (route = 'imagegen', sceneClass = 'narrative_illustration') => {
+  const review = buildV3Review({whiteCatPresent: false});
+  const selection = {
+    contract_version: 'white-cat-visual-style-selection-v2',
+    style_source: 'builtin_flipbook', style_id: 'illustrated-flipbook',
+    source_style_id: 'illustrated-flipbook', style_label: '图文翻书',
+    treatment_profile_id: 'imagegen-watercolor-narrative',
+    visual_cohesion_profile_id: 'illustrated-flipbook-cohesion-v1',
+    gate2_script_sha256: 'a'.repeat(64),
+    style_profile_path: 'leverage-video/src/topic99999/schema/flipbook-profile.json',
+    style_profile_checksum_sha256: FLIPBOOK_PROFILE_SHA256,
+    publishing_cover_package_path: null, publishing_cover_package_sha256: null,
+    decision: {status: 'selected', exact_message: '选择图文翻书', decided_at: approvedAt},
+  };
+  selection.selection_sha256 = buildWhiteCatVisualStyleSelectionSha256(selection);
+  review.white_cat_visual_style_binding = selection;
+  review.presentation_mode = 'illustrated-flipbook';
+  const item = review.rows[0];
+  item.presentation_mode = 'illustrated-flipbook';
+  item.static_spread = buildStaticSpread('你看，这段完整口播保留原来的顺序和标点，不得改写成二十八字以内的图中短标签。');
+  item.scene_class = sceneClass;
+  item.structured_visual_kind = sceneClass === 'structured_graphic' ? 'cause_effect' : null;
+  item.compatible_routes = ACTIVE_ROUTE_IDS.filter((id) => ['imagegen', 'ian-handdrawn-ppt'].includes(id));
+  item.incompatible_routes = ACTIVE_ROUTE_IDS.filter((id) => !item.compatible_routes.includes(id));
+  item.incompatible_route_reasons = Object.fromEntries(item.incompatible_routes.map((id) => [id, '图文翻书只使用两条整图路线。']));
+  item.recommended_route = sceneClass === 'structured_graphic' ? 'ian-handdrawn-ppt' : 'imagegen';
+  item.visual_language_recommendation.visual_structure_id = sceneClass === 'structured_graphic' ? 'linear-progression' : 'single-scene';
+  item.visual_language_recommendation.treatment_profile_id = route === 'ian-handdrawn-ppt' ? 'ian-handdrawn-technical' : 'imagegen-watercolor-narrative';
+  for (const target of [item, item.user_selection]) {
+    target.white_cat_visual_style_id = selection.style_id;
+    target.white_cat_visual_style_selection_sha256 = selection.selection_sha256;
+    target.visual_cohesion_profile_id = selection.visual_cohesion_profile_id;
+  }
+  Object.assign(item.user_selection, {
+    presentation_mode: item.presentation_mode, static_spread: structuredClone(item.static_spread),
+    visual_generation_route: route,
+    visual_structure_id: item.visual_language_recommendation.visual_structure_id,
+    treatment_profile_id: item.visual_language_recommendation.treatment_profile_id,
+  });
+  review.presented_map_sha256 = buildPresentedMapSha256(review);
+  item.user_selection.presented_map_sha256 = review.presented_map_sha256;
+  return review;
+};
+
+const flipbookShots = (review) => matchingV3Shots(review).map((shot, index) => ({
+  ...shot, presentation_mode: 'illustrated-flipbook', static_spread: structuredClone(review.rows[index].static_spread),
+  source_text: review.rows[index].static_spread.source_text,
+}));
+
+test('flipbook permits both static routes while preserving each real scene class', () => {
+  for (const sceneClass of ['narrative_illustration', 'structured_graphic']) {
+    for (const route of ['ian-handdrawn-ppt', 'imagegen']) {
+      const review = buildFlipbookReview(route, sceneClass);
+      assert.equal(validateVisualDirectionReview(review, {shots: flipbookShots(review)}).result, 'pass');
+    }
+  }
+});
+
+test('flipbook fails closed on cats, style downgrade, changed body and unbound shots', () => {
+  const check = (mutate, error) => {
+    const review = buildFlipbookReview();
+    mutate(review);
+    review.presented_map_sha256 = buildPresentedMapSha256(review);
+    review.rows[0].user_selection.presented_map_sha256 = review.presented_map_sha256;
+    assert.throws(() => validateVisualDirectionReview(review, {shots: flipbookShots(review)}), error);
+  };
+  check((review) => { review.rows[0].user_selection.white_cat_present = true; }, /no-cat/);
+  check((review) => { delete review.presentation_mode; }, /selected episode style/);
+  check((review) => { review.rows[0].static_spread.source_text += '改'; }, /stale/);
+  const review = buildFlipbookReview();
+  assert.throws(() => validateVisualDirectionReview(review, {shots: matchingV3Shots(review)}), /static spread shot binding/);
+  const before = review.presented_map_sha256;
+  review.rows[0].static_spread = buildStaticSpread('改动后的正文。');
+  assert.notEqual(buildPresentedMapSha256(review), before);
+});
+
+test('flipbook one-click preserves static body binding without fabricating text approval', () => {
+  const review = buildFlipbookReview();
+  const authorized = authorizeVisualDirectionRecommendationsOneClick(review, {policySha256: 'e'.repeat(64), authorizedAt: approvedAt});
+  assert.deepEqual(authorized.rows[0].user_selection.static_spread, review.rows[0].static_spread);
+  assert.equal(authorized.rows[0].user_selection.presentation_mode, 'illustrated-flipbook');
+  assert.equal(validateVisualDirectionReview(authorized, {shots: flipbookShots(authorized)}).status, 'policy_authorized');
+  assert.equal(authorized.rows[0].user_selection.user_has_reviewed_specific_map, false);
 });

@@ -1,3 +1,4 @@
+import {isFlipbookRow} from '../flipbook-video/profile.mjs';
 import {spawnSync} from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -163,6 +164,16 @@ export const deriveSoundDesignCandidateEvents = (shots) => {
           transition_duration_in_frames: durationInFrames,
         },
       );
+    }
+    if (isFlipbookRow(shot)) {
+      if (shot.ian_layered_scene != null || shot.action_state_schedule != null
+        || (shot.intra_shot_transitions ?? []).length !== 0) {
+        fail(`${shot.shot_id} static spreads cannot invent layer/state sound events`);
+      }
+      for (const reveal of shot.text_reveals ?? []) {
+        add(`text-reveal:${reveal.id}`, 'flipbook-text-reveal', reveal.start_frame,
+          reveal.start_frame, false);
+      }
     }
     for (const occurrence of shot.action_state_schedule?.occurrences ?? []) {
       add(

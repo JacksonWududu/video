@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import {FLIPBOOK_STYLE_ID, FLIPBOOK_RENDERER} from '../flipbook-video/profile.mjs';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -389,6 +390,8 @@ const buildArtifacts = ({episodeWorkspace, classificationPath, presentedAt, over
   }
 
   const reviewById = new Map(review.rows.map((row) => [row.shot_id, row]));
+  const episodeVisualStyleId = review.white_cat_visual_style_binding?.style_id
+    ?? 'loose-line-vivid-watercolor';
   const baseRows = classification.rows.map((input, index) => {
     requireExactKeys(input, ['source_shot_id', 'next_shot_id', 'boundary_change_class', 'reason'], `boundary ${index + 1}`);
     const [expectedSource, expectedNext] = expectedPairs[index];
@@ -407,8 +410,7 @@ const buildArtifacts = ({episodeWorkspace, classificationPath, presentedAt, over
     const nextRoute = nextSelection.visual_generation_route;
     const sourceWhiteCatPresent = sourceSelection.white_cat_present;
     const nextWhiteCatPresent = nextSelection.white_cat_present;
-    const whiteCatVisualStyleId = review.white_cat_visual_style_binding?.style_id
-      ?? 'loose-line-vivid-watercolor';
+    const whiteCatVisualStyleId = episodeVisualStyleId;
     const resolved = resolveTransitionRecommendation({
       boundaryChangeClass: input.boundary_change_class,
       sourceVisualGenerationRoute: sourceRoute,
@@ -435,7 +437,7 @@ const buildArtifacts = ({episodeWorkspace, classificationPath, presentedAt, over
       recommendation_source: resolved.recommendation_source,
       ...(userRequestedTransition ? {user_requested_transition: userRequestedTransition} : {}),
       source_intent: input.reason,
-      renderer: RENDERER,
+      renderer: whiteCatVisualStyleId === FLIPBOOK_STYLE_ID ? FLIPBOOK_RENDERER : RENDERER,
     };
   });
   const diversified = applyTransitionRecommendationDiversity(baseRows);
@@ -499,7 +501,7 @@ const buildArtifacts = ({episodeWorkspace, classificationPath, presentedAt, over
     } : {}),
     ...(overrideBinding ? {user_requested_transition_overrides: overrideBinding} : {}),
     fixed_exemptions: {
-      opening: {
+      ...(episodeVisualStyleId === FLIPBOOK_STYLE_ID ? {} : {opening: {
         source_shot_id: 'OPEN-00',
         next_shot_id: review.rows[0].shot_id,
         kind: 'cut',
@@ -507,7 +509,7 @@ const buildArtifacts = ({episodeWorkspace, classificationPath, presentedAt, over
         duration_seconds: 0,
         duration_in_frames: 0,
         selectable: false,
-      },
+      }}),
       terminal: {
         source_shot_id: review.rows.at(-1).shot_id,
         next_shot_id: null,

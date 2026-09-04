@@ -7,6 +7,8 @@ description: "Use when creating or resuming the complete knowledge-video workflo
 
 Treat the production as one resumable workflow, not as unrelated tasks.
 
+For the explicitly selected `illustrated-flipbook` style, read [illustrated-flipbook-v1.md](references/illustrated-flipbook-v1.md). It defines the conditional static-spread/body-text/browser branch while retaining the existing workflow gates. Present 图文翻书 in the existing style selection after cover generation.
+
 For a concise Chinese overview or workflow-maintenance map, read [references/whole-workflow-summary.md](references/whole-workflow-summary.md). Treat the state-machine reference as the authoritative execution contract. Read [references/visual-language-and-comic-routing.md](references/visual-language-and-comic-routing.md) whenever constructing, producing, assembling, or retiming a v2/v3 visual contract. For a completed-episode voice-only derivative, also read [references/revoice-variant.md](references/revoice-variant.md) completely.
 
 ## Start or resume

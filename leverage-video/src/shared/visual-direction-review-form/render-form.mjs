@@ -102,7 +102,7 @@ const editableRowMarkup = (row) => {
     </td>
     <td>
       <label class="visually-hidden" for="cat-${escapeHtml(row.shot_id)}">${escapeHtml(row.shot_id)} 白猫</label>
-      <select class="form-select form-select-sm vdr-cat" id="cat-${escapeHtml(row.shot_id)}">
+      <select class="form-select form-select-sm vdr-cat" id="cat-${escapeHtml(row.shot_id)}"${row.white_cat_locked ? ' disabled aria-label="图文翻书正文禁用白猫"' : ''}>
         <option value="false"${catFalseSelected}>无</option>
         <option value="true"${catTrueSelected}>有</option>
       </select>

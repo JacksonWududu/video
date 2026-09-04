@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 import crypto from 'node:crypto';
+import {FLIPBOOK_STYLE_ID, isFlipbookRow} from '../flipbook-video/profile.mjs';
+import {inspectStaticSpreadAsset} from './static-spread-contract.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -43,6 +45,7 @@ const ISO_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2
 const NORMALIZATION_METHOD = 'sharp-lanczos3-scale-to-cover-centered-minimal-crop-png9-v1';
 const SUPPORTED_ROUTES = new Set(['imagegen', 'ian-handdrawn-ppt']);
 const VISUAL_MANIFEST_CONTRACT = 'visual-assets-manifest-v1';
+const DIRECT_FIRST_SHOT_CONTRACT = 'direct-first-shot-v1';
 const VISUAL_LOCK_FILE = '.visual-assets-finalizer.lock';
 const VISUAL_BUILD_PHASES = ['visual_production', 'visual_assets_locked'];
 const VISUAL_VALIDATION_PHASES = [
@@ -283,7 +286,7 @@ const inspectAuthority = (
   };
 };
 
-const parseStoryboardSourceTexts = (markdown) => {
+export const parseStoryboardSourceTexts = (markdown, {flipbookPresentation = false} = {}) => {
   const matches = [...markdown.matchAll(/^## (OPEN-00|S\d+)\n([\s\S]*?)(?=^## |(?![\s\S]))/gm)];
   const sections = new Map();
   for (const match of matches) {
@@ -292,8 +295,32 @@ const parseStoryboardSourceTexts = (markdown) => {
     if (!source) fail(`storyboard section ${match[1]} lacks exact source_text`);
     sections.set(match[1], source[1]);
   }
-  if (!sections.has('OPEN-00')) fail('storyboard lacks OPEN-00 source_text');
+  const shotIds = [...sections.keys()];
+  if (flipbookPresentation) {
+    if (sections.has('OPEN-00') || shotIds[0] !== 'S01') {
+      fail('flipbook storyboard must begin with S01 and contain no OPEN-00');
+    }
+  } else if (!sections.has('OPEN-00')) {
+    fail('storyboard lacks OPEN-00 source_text');
+  }
   return sections;
+};
+
+export const resolveVisualManifestTimelineOpening = (state) => {
+  const styleSelection = state?.white_cat_visual_style_selection;
+  const flipbookPresentation = styleSelection?.style_id === FLIPBOOK_STYLE_ID
+    && styleSelection?.style_source === 'builtin_flipbook';
+  if (!flipbookPresentation) return null;
+  if (state.storyboard_draft?.direct_first_shot_contract !== DIRECT_FIRST_SHOT_CONTRACT) {
+    fail('flipbook visual manifest requires direct-first-shot-v1');
+  }
+  return {
+    contract_version: DIRECT_FIRST_SHOT_CONTRACT,
+    first_shot_id: 'S01',
+    start_frame: 0,
+    fixed_opening_cover: false,
+    publishing_cover_included: false,
+  };
 };
 
 const inspectRootOrExternalReference = ({repositoryRoot, pathValue, checksum, label}) => {
@@ -828,7 +855,9 @@ const inspectQueueEvidence = async ({
       fail(`asset ${item.asset_id} violates white-cat imagegen text-free policy`);
     }
   }
-  const ian = item.visual_generation_route === 'ian-handdrawn-ppt'
+  const staticSpread = isFlipbookRow(item)
+    ? await inspectStaticSpreadAsset({repositoryRoot, state, item}) : null;
+  const ian = !isFlipbookRow(item) && item.visual_generation_route === 'ian-handdrawn-ppt'
     ? await inspectIanEvidence({
         repositoryRoot,
         episodeWorkspace,
@@ -844,6 +873,13 @@ const inspectQueueEvidence = async ({
     : null;
   if (reviewMode === 'one_click_final_review_v1' && !finalReviewAsset) {
     fail(`asset ${item.asset_id} is absent from one-click final exact-list approval`);
+  }
+  if (staticSpread !== null) {
+    const approvedSpread = reviewMode === 'one_click_final_review_v1'
+      ? finalReviewAsset.static_spread_review
+      : batchManifest.artifact === null ? item.approved_static_spread_review
+        : batchManifest.artifact.record.assets.find((asset) => asset.asset_id === item.asset_id)?.static_spread_review;
+    if (!sameJson(approvedSpread, staticSpread)) fail(`asset ${item.asset_id} static spread approval is stale`);
   }
   if (ian !== null) {
     if (reviewMode === 'one_click_final_review_v1') {
@@ -909,6 +945,7 @@ const inspectQueueEvidence = async ({
       },
     }),
     ian,
+    static_spread: staticSpread,
     generation_lineage: generationLineage,
     generation_lineage_file_bindings: inspectEmbeddedFileBindings({
       repositoryRoot,
@@ -974,7 +1011,7 @@ const inspectApprovedSource = async (repositoryRoot, episodeWorkspace, item, {on
     fail(`${label} source dimensions differ from approval evidence`);
   }
   let aspect;
-  if (item.visual_generation_route === 'ian-handdrawn-ppt') {
+  if (!isFlipbookRow(item) && item.visual_generation_route === 'ian-handdrawn-ppt') {
     assertExactCompositionRaster(metadata.width, metadata.height);
     aspect = {width: metadata.width, height: metadata.height, relativeAspectError: 0};
   } else {
@@ -1069,6 +1106,22 @@ const inspectProductionAsset = async ({
     },
     review_evidence: reviewEvidence,
   };
+
+  if (isFlipbookRow(item)) {
+    return {
+      ...common,
+      presentation_mode: item.presentation_mode,
+      static_spread: structuredClone(item.static_spread),
+      static_spread_review: reviewEvidence.static_spread,
+      production: {
+        path: source.source.relative,
+        checksum_sha256: source.approved,
+        dimensions: source.measuredDimensions,
+        fit: 'contain',
+      },
+      normalization_evidence: null,
+    };
+  }
 
   if (item.visual_generation_route === 'ian-handdrawn-ppt') {
     return {
@@ -1289,7 +1342,7 @@ const inspectCover = async ({repositoryRoot, episodeWorkspace, coverEvidenceRela
   };
 };
 
-const buildScenes = ({
+export const buildScenes = ({
   queue,
   assets,
   directionAuthority,
@@ -1346,6 +1399,10 @@ const buildScenes = ({
     const stateIndexes = shotQueue.map((item) => item.state_index ?? 0);
     requireSameJson(stateIndexes, stateIndexes.map((_, index) => index), `shot ${shotId} state indexes`);
     for (const item of shotQueue) {
+      if (isFlipbookRow(row) !== isFlipbookRow(item)
+          || (isFlipbookRow(row) && !sameJson(item.static_spread, row.static_spread))) {
+        fail(`shot ${shotId} static spread queue binding is stale`);
+      }
       if (item.scene_class !== row.scene_class
           || item.visual_generation_route !== selected.visual_generation_route
           || item.visual_structure_id !== selected.visual_structure_id
@@ -1463,13 +1520,13 @@ const buildScenes = ({
         occurrence_asset_bindings: occurrences,
       };
     } else if (imageSequence.length !== 1
-        || rhythmShot.motion_tier !== 'layered'
+        || rhythmShot.motion_tier !== (isFlipbookRow(row) ? 'static_spread' : 'layered')
         || rhythmShot.intra_shot_transition_plan.length !== 0) {
       fail(`shot ${shotId} has multiple assets without a validated v3 action-state schedule`);
     }
 
     let ianLayeredScene = null;
-    if (selected.visual_generation_route === 'ian-handdrawn-ppt') {
+    if (!isFlipbookRow(row) && selected.visual_generation_route === 'ian-handdrawn-ppt') {
       const productionAsset = assetById.get(shotQueue[0].asset_id);
       if (imageSequence.length !== 1
           || productionAsset?.ian_layered_scene?.contract_version
@@ -1485,6 +1542,7 @@ const buildScenes = ({
       shot_id: shotId,
       scene_class: row.scene_class,
       narration_source_text: storyboardSourceTexts.get(shotId),
+      ...(isFlipbookRow(row) ? {presentation_mode: row.presentation_mode, static_spread: structuredClone(row.static_spread)} : {}),
       visual_direction: {
         review_path: directionAuthority.path,
         review_checksum_sha256: directionAuthority.checksum_sha256,
@@ -1597,6 +1655,8 @@ const loadBuildContext = async ({
   assertRegularFile(stateTarget.resolved, {nonEmpty: true});
   const stateChecksum = sha256File(stateTarget.resolved);
   const state = readJson(stateTarget.resolved);
+  const timelineOpening = resolveVisualManifestTimelineOpening(state);
+  const flipbookPresentation = timelineOpening !== null;
   if (state.workspace_path && state.workspace_path !== workspace) fail('episode state workspace_path mismatch');
   const oneClickCaptionBuild = state.current_phase === 'awaiting_caption_delivery_choice'
     && (state.phase ?? state.current_phase) === 'awaiting_caption_delivery_choice'
@@ -1617,7 +1677,7 @@ const loadBuildContext = async ({
     'visual manifest path',
     {allowMissingFinal: true},
   );
-  const coverEvidence = normalizeRootRelative(
+  const coverEvidence = flipbookPresentation ? null : normalizeRootRelative(
     coverEvidenceRelative ?? defaults.coverEvidence,
     'cover evidence path',
   );
@@ -1625,12 +1685,14 @@ const loadBuildContext = async ({
     normalizationDirectory ?? defaults.normalizationDirectory,
     'normalization directory',
   );
-  resolveEpisodeRelative(
-    repositoryRoot,
-    workspace,
-    coverEvidence,
-    'cover evidence path',
-  );
+  if (!flipbookPresentation) {
+    resolveEpisodeRelative(
+      repositoryRoot,
+      workspace,
+      coverEvidence,
+      'cover evidence path',
+    );
+  }
   resolveEpisodeRelative(
     repositoryRoot,
     workspace,
@@ -1679,7 +1741,10 @@ const loadBuildContext = async ({
     'source storyboard draft',
     {episodeWorkspace: workspace},
   );
-  const storyboardSourceTexts = parseStoryboardSourceTexts(fs.readFileSync(storyboard.resolved, 'utf8'));
+  const storyboardSourceTexts = parseStoryboardSourceTexts(
+    fs.readFileSync(storyboard.resolved, 'utf8'),
+    {flipbookPresentation},
+  );
   const direction = inspectAuthority(
     repositoryRoot,
     workspace,
@@ -1692,6 +1757,10 @@ const loadBuildContext = async ({
       || direction.value.status !== expectedMappingStatus
       || state.visual_direction_review.presented_map_sha256 !== direction.value.presented_map_sha256) {
     fail('visual direction review is not authorized');
+  }
+  if (isFlipbookRow(direction.value) !== flipbookPresentation
+      || direction.value.rows.some((row) => isFlipbookRow(row) !== flipbookPresentation)) {
+    fail('visual direction flipbook presentation binding is stale');
   }
   const styleBinding = direction.value.white_cat_visual_style_binding ?? null;
   if (styleBinding !== null) {
@@ -1882,7 +1951,7 @@ const loadBuildContext = async ({
       lockedAt,
     }));
   }
-  const cover = await inspectCover({
+  const cover = flipbookPresentation ? null : await inspectCover({
     repositoryRoot,
     episodeWorkspace: workspace,
     coverEvidenceRelative: coverEvidence,
@@ -1897,6 +1966,12 @@ const loadBuildContext = async ({
     storyboardSourceTexts,
     expectedDirectionStatus: expectedMappingStatus,
   });
+  if (flipbookPresentation && (
+    scenes[0]?.shot_id !== 'S01'
+    || scenes[0]?.visual_rhythm?.row?.start_frame !== 0
+  )) {
+    fail('flipbook visual manifest must begin with S01 at frame zero');
+  }
   const sceneTransitions = inspectSceneTransitions(
     transitions.value,
     scenes,
@@ -1982,7 +2057,7 @@ const loadBuildContext = async ({
       },
     },
     approval_lock: approvalLock,
-    cover,
+    ...(flipbookPresentation ? {timeline_opening: timelineOpening} : {cover}),
     counts: {
       scene_count: scenes.length,
       active_asset_count: assets.length,
@@ -2100,7 +2175,12 @@ export const validateVisualAssetsManifest = async ({
     scene_count: manifest.counts.scene_count,
     intra_shot_transition_count: manifest.counts.intra_shot_transition_count,
     ordinary_scene_transition_count: manifest.counts.ordinary_scene_transition_count,
-    cover_deterministic_rerun_identical: manifest.cover.deterministic_rerun_identical,
+    ...(manifest.timeline_opening?.contract_version === 'direct-first-shot-v1' ? {
+      direct_first_shot_contract: 'direct-first-shot-v1',
+      publishing_cover_included: false,
+    } : {
+      cover_deterministic_rerun_identical: manifest.cover.deterministic_rerun_identical,
+    }),
   };
 };
 
@@ -2319,7 +2399,9 @@ export const lockVisualAssets = async ({
 
       const manifestChecksum = sha256File(context.manifestPath);
       const nextState = structuredClone(context.state);
-      nextState.opening_cover_production = coverProductionState(context.value.cover, lockedAt);
+      if (context.value.cover !== undefined) {
+        nextState.opening_cover_production = coverProductionState(context.value.cover, lockedAt);
+      }
       nextState.active_visual_manifest = {
         status: 'active_locked',
         contract_version: VISUAL_MANIFEST_CONTRACT,
@@ -2336,8 +2418,11 @@ export const lockVisualAssets = async ({
         ...context.value.approval_lock,
         manifest_path: context.manifestRelative,
         manifest_checksum_sha256: manifestChecksum,
-        opening_cover_evidence_path: context.value.cover.normalization_evidence.path,
-        opening_cover_evidence_checksum_sha256: context.value.cover.normalization_evidence.checksum_sha256,
+        ...(context.value.cover === undefined ? {} : {
+          opening_cover_evidence_path: context.value.cover.normalization_evidence.path,
+          opening_cover_evidence_checksum_sha256:
+            context.value.cover.normalization_evidence.checksum_sha256,
+        }),
         locked_at: lockedAt,
         validator_confirmed_at: lockedAt,
         verification_sha256_pending_validator_confirmation: false,

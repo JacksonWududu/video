@@ -1,3 +1,6 @@
+import {buildStaticSpread} from '../storyboard/static-spread.mjs';
+import {FLIPBOOK_PROFILE_SHA256, FLIPBOOK_RENDERER} from '../flipbook-video/profile.mjs';
+import {resolveTransitionRecommendation} from '../scene-transitions/contract.mjs';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import test from 'node:test';
@@ -1889,4 +1892,116 @@ test('does not trust an embedded visual-direction review when its artifact is ab
     () => buildPlanWithVerification(input, {verifySharedReuseEvidence: passingVerifier}),
     /visual direction review artifact/i,
   );
+});
+
+const buildFlipbookAssemblyInput = () => {
+  const input = buildV3Input();
+  input.timeline.legacyFirstShotLeadInFrames = 0;
+  input.narrationFrames = 240;
+  const decision = {status: 'selected', exact_message: '选择图文翻书', decided_at: '2026-09-04T10:00:00Z'};
+  const whiteCatStyle = {
+    contract_version: 'white-cat-visual-style-selection-v2', gate2_script_sha256: 'a'.repeat(64),
+    style_source: 'builtin_flipbook', style_id: 'illustrated-flipbook', source_style_id: 'illustrated-flipbook',
+    style_label: '图文翻书', treatment_profile_id: 'imagegen-watercolor-narrative',
+    visual_cohesion_profile_id: 'illustrated-flipbook-cohesion-v1',
+    style_profile_path: 'leverage-video/src/topic99999/schema/flipbook-profile.json',
+    style_profile_checksum_sha256: FLIPBOOK_PROFILE_SHA256,
+    publishing_cover_package_path: null, publishing_cover_package_sha256: null, decision,
+  };
+  whiteCatStyle.selection_sha256 = buildWhiteCatVisualStyleSelectionSha256(whiteCatStyle);
+  const density = {contract_version: 'visual-density-selection-v1', gate2_script_sha256: whiteCatStyle.gate2_script_sha256,
+    white_cat_visual_style_selection_sha256: whiteCatStyle.selection_sha256, density_mode: 'standard', decision};
+  density.selection_sha256 = buildVisualDensitySelectionSha256(density);
+  const mode = {contract_version: 'workflow-approval-mode-v1', gate2_script_sha256: whiteCatStyle.gate2_script_sha256,
+    visual_density_selection_sha256: density.selection_sha256, approval_mode: 'manual', decision};
+  mode.selection_sha256 = buildWorkflowApprovalModeSha256(mode);
+  input.workflowApproval = {gate2ScriptSha256: whiteCatStyle.gate2_script_sha256, whiteCatStyle, density, mode};
+  input.visualDirectionReview.presentation_mode = 'illustrated-flipbook';
+  input.visualDirectionReview.white_cat_visual_style_binding = whiteCatStyle;
+  input.shots.forEach((shot, index) => {
+    shot.start_frame = index * 120;
+    shot.end_frame = (index + 1) * 120;
+    shot.narration_source_text = ['一幅静态画面，承载完整叙事。', '一幅结构图，解释因果关系。'][index];
+    shot.static_spread = buildStaticSpread(shot.narration_source_text);
+    shot.presentation_mode = 'illustrated-flipbook';
+    shot.motion_tier = 'static_spread';
+    shot.assets = [{...shot.assets[0], from: 0, duration_in_frames: 120}];
+    shot.intra_shot_transitions = [];
+    delete shot.action_state_schedule;
+    delete shot.ian_layered_scene;
+    const row = input.visualDirectionReview.rows[index];
+    row.presentation_mode = shot.presentation_mode;
+    row.static_spread = structuredClone(shot.static_spread);
+    row.compatible_routes = VISUAL_ROUTE_CATALOG.routes.map((item) => item.route_id).filter((id) => ['ian-handdrawn-ppt', 'imagegen'].includes(id));
+    row.incompatible_routes = VISUAL_ROUTE_CATALOG.routes.map((item) => item.route_id).filter((id) => !['comic-imagegen', 'doodle-slides', ...row.compatible_routes].includes(id));
+    row.incompatible_route_reasons = Object.fromEntries(row.incompatible_routes.map((id) => [id, '图文翻书只消费静态整图。']));
+    for (const target of [row, row.user_selection]) {
+      target.white_cat_visual_style_id = whiteCatStyle.style_id;
+      target.white_cat_visual_style_selection_sha256 = whiteCatStyle.selection_sha256;
+      target.visual_cohesion_profile_id = whiteCatStyle.visual_cohesion_profile_id;
+    }
+    row.user_selection.presentation_mode = shot.presentation_mode;
+    row.user_selection.static_spread = structuredClone(shot.static_spread);
+  });
+  const transition = input.shots[0].transition;
+  Object.assign(transition, {
+    white_cat_visual_style_id: 'illustrated-flipbook',
+    ...resolveTransitionRecommendation({boundaryChangeClass: transition.boundary_change_class,
+      sourceVisualGenerationRoute: 'imagegen', nextVisualGenerationRoute: 'ian-handdrawn-ppt',
+      whiteCatVisualStyleId: 'illustrated-flipbook'}),
+    kind: 'book-page-turn', options: {}, duration_seconds: 0.5, duration_in_frames: 15,
+    renderer: FLIPBOOK_RENDERER,
+  });
+  input.visualDirectionReview.presented_map_sha256 = buildPresentedMapSha256(input.visualDirectionReview);
+  input.visualDirectionReview.rows.forEach((row) => { row.user_selection.presented_map_sha256 = input.visualDirectionReview.presented_map_sha256; });
+  return input;
+};
+
+const flipbookAssemblyOptions = {
+  verifySharedReuseEvidence: passingVerifier,
+  verifyStoryboardVisualRhythmEvidence: (input) => {
+    const result = passingV2StoryboardVisualRhythmVerifier(input);
+    result.artifact.presentation_mode = 'illustrated-flipbook';
+    result.artifact.shots.forEach((shot, index) => {
+      shot.presentation_mode = 'illustrated-flipbook';
+      shot.static_spread = structuredClone(input.shots[index].static_spread);
+      shot.asset_plan.layer_count = 0;
+    });
+    return result;
+  },
+  verifyIanLayeredScenePackageEvidence: () => ({contract_version: 'ian-layered-scene-consumption-evidence-v1', result: 'pass', records: []}),
+};
+
+test('builds both no-cat static flipbook routes with exact body and a physical page turn', () => {
+  const input = buildFlipbookAssemblyInput();
+  const plan = buildKnowledgeVideoAssemblyPlan(input, flipbookAssemblyOptions);
+  assert.equal(plan.render_backend, 'codex-browser-flipbook');
+  assert.equal(plan.scenes.length, 2);
+  assert.deepEqual(plan.scenes.map((scene) => scene.scene_type), ['flipbook-spread', 'flipbook-spread']);
+  assert.deepEqual(plan.scenes.map((scene) => scene.scene_class), ['narrative_illustration', 'structured_graphic']);
+  assert.equal(plan.scenes[0].transition.kind, 'book-page-turn');
+  assert.equal(plan.scenes[0].transition.duration_in_frames, 15);
+  for (const [index, scene] of plan.scenes.entries()) {
+    assert.deepEqual(scene.static_spread, input.shots[index].static_spread);
+    assert.equal(scene.image_sequence.length, 1);
+    assert.equal(scene.action_state_schedule, null);
+    assert.equal(scene.ian_layered_scene, null);
+  }
+});
+
+test('flipbook assembly rejects unselected mode, fake cut and invented layered assets', () => {
+  const cases = [
+    [(input) => { delete input.shots[0].presentation_mode; }, /static spread shot binding|shot mode/],
+    [(input) => { input.shots[0].transition.kind = 'cut'; input.shots[0].transition.duration_seconds = 0; input.shots[0].transition.duration_in_frames = 0; }, /book-page-turn/],
+    [(input) => {
+      input.shots[0].transition = buildV3Input().shots[0].transition;
+    }, /book-page-turn|flipbook transition/],
+    [(input) => { input.shots[1].ian_layered_scene = {fake: true}; }, /without layered or action assets/],
+    [(input) => { input.shots[0].action_state_schedule = {fake: true}; }, /without layered or action assets/],
+  ];
+  for (const [mutate, expected] of cases) {
+    const input = buildFlipbookAssemblyInput();
+    mutate(input);
+    assert.throws(() => buildKnowledgeVideoAssemblyPlan(input, flipbookAssemblyOptions), expected);
+  }
 });

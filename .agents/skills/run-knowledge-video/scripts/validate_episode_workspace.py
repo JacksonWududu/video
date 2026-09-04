@@ -7,6 +7,7 @@ import math
 import os
 import re
 import stat
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -17,6 +18,8 @@ REQUIRED_ASSETS = {"audio", "image", "narration", "video"}
 EXTENSION_CATEGORIES = {
     ".json": ("schema",),
     ".js": ("script",),
+    ".css": ("script",),
+    ".html": ("docs",),
     ".jsx": ("script",),
     ".ts": ("script",),
     ".tsx": ("script",),
@@ -435,6 +438,52 @@ def _canonical_sha256(value: Any) -> str:
     ).hexdigest()
 
 
+STATIC_SPREAD_VALIDATOR_PATH = (
+    Path(__file__).resolve().parents[4]
+    / "leverage-video/src/shared/visual-assets/static-spread-contract.mjs"
+)
+
+
+def _is_static_spread(value: Any) -> bool:
+    return isinstance(value, dict) and value.get("presentation_mode") == "illustrated-flipbook"
+
+
+def _validate_static_spread_queue_item(repo: Path, state: dict, item: dict) -> list[str]:
+    operation = (
+        "asset"
+        if item.get("status") in IAN_LAYERED_PACKAGE_REQUIRED_STATUSES
+        else "authority"
+    )
+    result = subprocess.run(
+        ["node", str(STATIC_SPREAD_VALIDATOR_PATH)],
+        input=json.dumps(
+            {
+                "repositoryRoot": str(repo),
+                "state": state,
+                "item": item,
+                "operation": operation,
+            },
+            ensure_ascii=False,
+        ),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    label = f"Active static spread {item.get('asset_id')!r}"
+    if result.returncode:
+        return [f"{label}: {result.stderr.strip() or 'static validation failed'}"]
+    if operation == "asset":
+        evidence = json.loads(result.stdout)
+        if item.get("static_spread_review") != evidence:
+            return [f"{label} current review evidence is stale"]
+        if (
+            item.get("status") == "approved"
+            and item.get("approved_static_spread_review") != evidence
+        ):
+            return [f"{label} approved review evidence is stale"]
+    return []
+
+
 def _validate_active_ian_layered_scene_queue(
     repo: Path,
     workspace: Path,
@@ -459,8 +508,12 @@ def _validate_active_ian_layered_scene_queue(
         if (
             item.get("active_for_current_storyboard") is False
             or item.get("status") == "superseded"
-            or item.get("visual_generation_route") != "ian-handdrawn-ppt"
         ):
+            continue
+        if _is_static_spread(item) or state.get("white_cat_visual_style_selection", {}).get("style_id") == "illustrated-flipbook":
+            errors.extend(_validate_static_spread_queue_item(repo, state, item))
+            continue
+        if item.get("visual_generation_route") != "ian-handdrawn-ppt":
             continue
         label = f"Active Ian asset {item.get('asset_id')!r}"
         plan = item.get("ian_scene_plan")
@@ -775,11 +828,47 @@ def _validate_visible_text_batch_review(
         rows = rows if isinstance(rows, list) else []
         direction_rows = direction_rows if isinstance(direction_rows, list) else []
 
+    flipbook = _is_static_spread(direction)
+    selected_flipbook = state.get("white_cat_visual_style_selection", {}).get("style_id") == "illustrated-flipbook"
+    if flipbook != selected_flipbook or _is_static_spread(review) != flipbook:
+        errors.append("Visible-text flipbook branch differs from selected episode style")
+    if flipbook and review.get("body_text_contract") != "locked-narration-spread-body-v1":
+        errors.append("Visible-text flipbook body contract is invalid")
+    if flipbook or selected_flipbook:
+        result = subprocess.run(
+            ["node", str(STATIC_SPREAD_VALIDATOR_PATH)],
+            input=json.dumps({"repositoryRoot": str(repo), "state": state,
+                              "operation": "direction"}, ensure_ascii=False),
+            text=True, capture_output=True, check=False,
+        )
+        if result.returncode:
+            errors.append(f"Visible-text flipbook direction/style authority is invalid: {result.stderr.strip()}")
+
     for index, row in enumerate(rows):
         if not isinstance(row, dict):
             errors.append(f"Visible-text row {index} must be a JSON object")
             continue
         shot_id = row.get("shot_id", index)
+        direction_row = direction_rows[index] if index < len(direction_rows) and isinstance(direction_rows[index], dict) else {}
+        spread = row.get("static_spread")
+        if _is_static_spread(row) != flipbook or _is_static_spread(direction_row) != flipbook:
+            errors.append(f"Visible-text row {shot_id} flipbook branch binding is stale")
+        if flipbook:
+            source_text = spread.get("source_text") if isinstance(spread, dict) else None
+            if (
+                row.get("body_text_contract") != "locked-narration-spread-body-v1"
+                or not isinstance(spread, dict)
+                or set(spread) != {"contract_version", "source_text", "source_text_sha256"}
+                or spread.get("contract_version") != "knowledge-video-static-spread-v1"
+                or not isinstance(source_text, str) or not source_text
+                or hashlib.sha256(source_text.encode("utf-8")).hexdigest() != spread.get("source_text_sha256")
+                or row.get("source_text_sha256") != spread.get("source_text_sha256")
+                or spread != direction_row.get("static_spread")
+                or spread != direction_row.get("user_selection", {}).get("static_spread")
+            ):
+                errors.append(f"Visible-text row {shot_id} exact flipbook body is stale")
+        elif spread is not None or row.get("body_text_contract") is not None:
+            errors.append(f"Visible-text row {shot_id} static body requires the selected flipbook style")
         if any(field in row for field in VISIBLE_TEXT_ROW_APPROVAL_FIELDS):
             errors.append(
                 f"Visible-text row {shot_id} must not carry per-shot approval evidence"
@@ -831,6 +920,9 @@ def _validate_visible_text_batch_review(
             "rows",
         )
     }
+    if "presentation_mode" in review:
+        projection.update(presentation_mode=review.get("presentation_mode"),
+                          body_text_contract=review.get("body_text_contract"))
     expected_map_sha256 = _canonical_sha256(projection)
     presentation = review.get("presentation")
     approval = review.get("approval")

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import crypto from 'node:crypto';
+import {isFlipbookRow} from '../flipbook-video/profile.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -50,6 +51,7 @@ const parseTiming = (section, shotId) => {
 
 const stateCountFor = (section, row, priorItems, rhythmShot = null, actionSchedule = null) => {
   const route = row.user_selection.visual_generation_route;
+  if (isFlipbookRow(row)) return 1;
   if (route === LOCAL_VIDEO_ROUTE) return 1;
   if (route === 'ink-doodle-knowledge-card') {
     const match = section.match(/墨线知识卡([一二三四五])个独立 1920×1080 栅格状态/);
@@ -77,8 +79,27 @@ const stateCountFor = (section, row, priorItems, rhythmShot = null, actionSchedu
   return [...priorCounts][0];
 };
 
-const buildStandardItems = ({shotId, row, count, actionSchedule}) => {
+export const buildStandardItems = ({shotId, row, count, actionSchedule}) => {
   const route = row.user_selection.visual_generation_route;
+  if (isFlipbookRow(row)) {
+    if (count !== 1
+        || !['ian-handdrawn-ppt', 'imagegen'].includes(route)
+        || row.white_cat_recommendation?.recommended !== false) {
+      throw new Error(`${shotId} flipbook queue requires one no-cat static image`);
+    }
+    return [{
+      asset_id: `${shotId}-static-v01`,
+      shot_id: shotId,
+      role: 'standalone-graphic',
+      depends_on: [],
+      status: 'pending_generation',
+      active_for_current_storyboard: true,
+      strict_review: false,
+      has_downstream_action_variants: false,
+      state_count_total: 1,
+      state_index: 0,
+    }];
+  }
   if (route === 'ian-handdrawn-ppt') {
     if (count !== 1) throw new Error(`${shotId} Ian queue must contain exactly one layered-scene package`);
     return [{
@@ -135,6 +156,7 @@ const cleanPendingItem = (item) => {
     'scene_package_manifest_path', 'scene_package_manifest_checksum_sha256',
     'ian_scene_plan', 'ian_scene_plan_sha256', 'ian_scene_package_members',
     'presented_ian_layered_scene_package', 'approved_ian_layered_scene_package',
+    'static_spread_review', 'presented_static_spread_review', 'approved_static_spread_review',
     'qa_contract_version',
   ]) delete next[key];
   next.status = 'pending_generation';
@@ -195,6 +217,11 @@ const preservedRebindAssetIds = ({state, review}) => {
 };
 
 const assertPreservedVisualContract = ({item, row, summaryRow, timing, count, actionSchedule}) => {
+  if (isFlipbookRow(item) !== isFlipbookRow(row)
+      || (isFlipbookRow(row)
+        && canonicalJson(item.static_spread) !== canonicalJson(row.static_spread))) {
+    throw new Error(`${item.asset_id} static spread contract changed`);
+  }
   const expected = {
     visual_generation_route: row.user_selection.visual_generation_route,
     scene_class: row.scene_class,
@@ -295,6 +322,7 @@ const bindItem = ({
   preservedExactBytes = false,
 }) => ({
   ...item,
+  ...(isFlipbookRow(row) ? {presentation_mode: row.presentation_mode, structured_visual_kind: row.structured_visual_kind ?? null, static_spread: structuredClone(row.static_spread)} : {}),
   visual_generation_route: row.user_selection.visual_generation_route,
   scene_class: row.scene_class,
   visual_structure_id: row.user_selection.visual_structure_id,
@@ -488,7 +516,7 @@ export const buildReconciledState = ({
     }
     const actionSchedule = actionScheduleById.get(shotId) ?? null;
     const timing = parseTiming(section, shotId);
-    const ianScenePlan = row.user_selection.visual_generation_route === 'ian-handdrawn-ppt'
+    const ianScenePlan = !isFlipbookRow(row) && row.user_selection.visual_generation_route === 'ian-handdrawn-ppt'
       ? validateIanStoryboardLayeredSceneSection(section, shotId, {
           sourceText: summaryRow.locked_narration,
           durationFrames: timing.endFrame - timing.startFrame,

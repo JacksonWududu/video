@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 import crypto from 'node:crypto';
+import {isFlipbookRow, FLIPBOOK_STYLE_ID} from '../flipbook-video/profile.mjs';
+import {validateStaticSpreadStoryboardSection} from '../storyboard/static-spread.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -64,8 +66,10 @@ const parseDetailedProjection = ({storyboardMarkdown, normalizedRows}) => {
         throw new Error(`${row.shot_id} detailed storyboard lacks the exact local video source path`);
       }
     }
+    if (isFlipbookRow(row)) validateStaticSpreadStoryboardSection(section, row.shot_id, {sourceText: row.static_spread.source_text});
     return {
       shot_id: row.shot_id,
+      ...(isFlipbookRow(row) ? {presentation_mode: FLIPBOOK_STYLE_ID, static_spread: structuredClone(row.static_spread)} : {}),
       visual_description: visualDescription,
       white_cat_present: row.white_cat_present,
       visual_structure_id: row.visual_structure_id,
@@ -128,6 +132,7 @@ const buildArtifacts = ({episodeWorkspace, submissionPath, processedAt}) => {
     }
     next.user_selection = {
       status: 'approved',
+      ...(isFlipbookRow(normalized) ? {presentation_mode: FLIPBOOK_STYLE_ID, static_spread: structuredClone(normalized.static_spread)} : {}),
       white_cat_present: normalized.white_cat_present,
       visual_structure_id: normalized.visual_structure_id,
       treatment_profile_id: normalized.treatment_profile_id,

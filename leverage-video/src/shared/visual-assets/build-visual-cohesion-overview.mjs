@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import {isFlipbookRow} from '../flipbook-video/profile.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
@@ -235,7 +236,10 @@ export const selectVisualRepresentatives = ({state, episodeWorkspace, repository
       const route = item.visual_generation_route;
       let sourcePath = null;
       let selection = null;
-      if (route === 'ian-handdrawn-ppt') {
+      if (isFlipbookRow(item)) {
+        sourcePath = normalPath(item);
+        selection = 'flipbook-static-image';
+      } else if (route === 'ian-handdrawn-ppt') {
         sourcePath = ianPath(item);
         selection = 'ian-final-composite';
       } else if (route === 'srt-whiteboard-animation') {

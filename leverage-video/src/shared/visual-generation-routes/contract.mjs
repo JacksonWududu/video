@@ -1,4 +1,6 @@
 import crypto from 'node:crypto';
+import {FLIPBOOK_STYLE_ID, isFlipbookRow, isFlipbookStyle} from '../flipbook-video/profile.mjs';
+import {validateStaticSpread} from '../storyboard/static-spread.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -109,6 +111,7 @@ const presentedRow = (
   includeWhiteCatStyleBinding = true,
 ) => ({
   shot_id: row.shot_id,
+  ...(row.presentation_mode !== undefined ? {presentation_mode: row.presentation_mode, static_spread: row.static_spread} : {}),
   scene_class: row.scene_class,
   structured_visual_kind: row.structured_visual_kind ?? null,
   factual_identity: row.factual_identity,
@@ -149,6 +152,7 @@ const buildPresentedMapSha256WithPolicy = (
   {includeLocalVideoPath, includeWhiteCatStyleBinding},
 ) => sha256Canonical({
   contract_version: review?.contract_version,
+  ...(review?.presentation_mode !== undefined ? {presentation_mode: review.presentation_mode} : {}),
   catalog_version: review?.catalog_version,
   catalog_checksum_sha256: review?.catalog_checksum_sha256,
   ...(isV2(review) ? {
@@ -200,6 +204,7 @@ export const authorizeVisualDirectionRecommendationsOneClick = (
   next.rows.forEach((row) => {
     row.user_selection = {
       status: 'policy_authorized',
+      ...(isFlipbookRow(row) ? {presentation_mode: FLIPBOOK_STYLE_ID, static_spread: structuredClone(row.static_spread)} : {}),
       white_cat_present: row.white_cat_recommendation.recommended,
       visual_structure_id: row.visual_language_recommendation.visual_structure_id,
       treatment_profile_id: row.visual_language_recommendation.treatment_profile_id,
@@ -252,6 +257,7 @@ const expectedCompatibleRoutes = (
   legacyV3PreLocalVideo,
   legacyV3PreWhiteCatStyle,
 ) => {
+  if (isFlipbookRow(row)) return whiteCatPresent ? [] : ACTIVE_ROUTE_IDS.filter((route) => ['imagegen', 'ian-handdrawn-ppt'].includes(route));
   if (!version2) {
     if (whiteCatPresent) return ['imagegen'];
     return row.scene_class === 'structured_graphic'
@@ -468,6 +474,19 @@ const validateRow = (
   policyAuthorized = false,
 ) => {
   validateClassificationAndIdentity(row);
+  if (isFlipbookRow(row)) {
+    if (!version3 || row.white_cat_recommendation.recommended !== false
+      || row.user_selection?.white_cat_present !== false
+      || row.user_selection?.presentation_mode !== FLIPBOOK_STYLE_ID) {
+      throw new Error(`${row.shot_id} illustrated-flipbook requires a v3 no-cat static selection`);
+    }
+    validateStaticSpread(row.static_spread, {shotId: row.shot_id});
+    if (!sameCanonical(row.static_spread, row.user_selection.static_spread)) {
+      throw new Error(`${row.shot_id} static spread selected narration is stale`);
+    }
+  } else if (row.static_spread !== undefined || row.user_selection?.static_spread !== undefined) {
+    throw new Error(`${row.shot_id} static spread requires the illustrated-flipbook style`);
+  }
   const routeIds = version3
     ? (legacyV3PreLocalVideo ? LEGACY_V3_PRE_LOCAL_VIDEO_ROUTE_IDS : ACTIVE_ROUTE_IDS)
     : (version2 ? LEGACY_V2_ROUTE_IDS : LEGACY_ROUTE_IDS);
@@ -583,6 +602,7 @@ const validateRow = (
     }
     validateVisualLanguageSelection({
       scene_class: row.scene_class,
+      presentation_mode: row.presentation_mode,
       visual_structure_id: selection.visual_structure_id,
       treatment_profile_id: selection.treatment_profile_id,
       visual_generation_route: selection.visual_generation_route,
@@ -711,6 +731,11 @@ export const validateVisualDirectionReview = (review, {shots = []} = {}) => {
     || review.presented_map_sha256 !== expectedPresentedMapSha256) {
     throw new Error('visual direction presented map checksum mismatch');
   }
+  const flipbook = isFlipbookStyle(review.white_cat_visual_style_binding);
+  if (flipbook !== isFlipbookRow(review)
+    || review.rows.some((row) => isFlipbookRow(row) !== flipbook)) {
+    throw new Error('illustrated-flipbook rows must match the selected episode style');
+  }
   const ids = new Set();
   for (const row of review.rows) {
     if (ids.has(row.shot_id)) throw new Error(`duplicate visual direction row: ${row.shot_id}`);
@@ -732,6 +757,12 @@ export const validateVisualDirectionReview = (review, {shots = []} = {}) => {
   shots.forEach((shot, index) => {
     const row = review.rows[index];
     const selection = row.user_selection;
+    if (isFlipbookRow(row)) {
+      if (!isFlipbookRow(shot) || !sameCanonical(shot.static_spread, row.static_spread)) {
+        throw new Error(`${row.shot_id} static spread shot binding is stale`);
+      }
+      validateStaticSpread(row.static_spread, {sourceText: shot.source_text ?? shot.narration_source_text, shotId: row.shot_id});
+    }
     if (shot.shot_id !== row.shot_id) throw new Error('visual direction shot order mismatch');
     if (shot.scene_class !== row.scene_class
       || (shot.structured_visual_kind ?? null) !== (row.structured_visual_kind ?? null)) {

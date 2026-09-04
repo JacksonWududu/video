@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import {FLIPBOOK_STYLE_ID, FLIPBOOK_RENDERER} from '../flipbook-video/profile.mjs';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -135,6 +136,28 @@ export const validateEpisodeTransitionReviewProposal = (episodeWorkspace) => {
     || review.rows.some((row) => row.user_selection?.status !== directionStatus)) {
     throw new Error('transition review lacks authorized visual-direction evidence');
   }
+  const episodeVisualStyleId = review.white_cat_visual_style_binding?.style_id
+    ?? 'loose-line-vivid-watercolor';
+  const expectedFixedExemptions = {
+    ...(episodeVisualStyleId === FLIPBOOK_STYLE_ID ? {} : {opening: {
+      source_shot_id: 'OPEN-00',
+      next_shot_id: review.rows[0].shot_id,
+      kind: 'cut',
+      options: {},
+      duration_seconds: 0,
+      duration_in_frames: 0,
+      selectable: false,
+    }}),
+    terminal: {
+      source_shot_id: review.rows.at(-1).shot_id,
+      next_shot_id: null,
+      kind: 'terminal-clean-hold',
+      selectable: false,
+    },
+  };
+  if (!sameCanonical(proposal.fixed_exemptions, expectedFixedExemptions)) {
+    throw new Error('transition fixed exemptions differ from the selected presentation');
+  }
   const overrideByBoundary = new Map();
   const overrideBinding = proposal.user_requested_transition_overrides;
   if (overrideBinding !== undefined) {
@@ -182,10 +205,12 @@ export const validateEpisodeTransitionReviewProposal = (episodeWorkspace) => {
     }
     const sourceSelection = reviewById.get(sourceShotId).user_selection;
     const nextSelection = reviewById.get(nextShotId).user_selection;
+    const whiteCatVisualStyleId = episodeVisualStyleId;
     if (row.source_visual_generation_route !== sourceSelection.visual_generation_route
       || row.next_visual_generation_route !== nextSelection.visual_generation_route
       || row.source_white_cat_present !== sourceSelection.white_cat_present
-      || row.next_white_cat_present !== nextSelection.white_cat_present) {
+      || row.next_white_cat_present !== nextSelection.white_cat_present
+      || row.white_cat_visual_style_id !== whiteCatVisualStyleId) {
       throw new Error(`transition visual-direction context is stale: ${row.source_shot_id}`);
     }
     const expectedRecommendation = resolveTransitionRecommendation({
@@ -194,13 +219,14 @@ export const validateEpisodeTransitionReviewProposal = (episodeWorkspace) => {
       nextVisualGenerationRoute: row.next_visual_generation_route,
       sourceWhiteCatPresent: row.source_white_cat_present,
       nextWhiteCatPresent: row.next_white_cat_present,
+      whiteCatVisualStyleId,
     });
     if (!sameCanonical(row.recommended_transition, expectedRecommendation.recommended_transition)
       || !sameCanonical(row.recommendation_source, expectedRecommendation.recommendation_source)) {
       throw new Error(`transition base recommendation is stale: ${row.source_shot_id}`);
     }
     const rowSelectionStatus = row.user_selection?.status;
-    if (row.renderer !== RENDERER
+    if (row.renderer !== (whiteCatVisualStyleId === FLIPBOOK_STYLE_ID ? FLIPBOOK_RENDERER : RENDERER)
       || !['pending', 'approved', 'policy_authorized'].includes(rowSelectionStatus)
       || (approved && rowSelectionStatus !== finalizedStatus)
       || (!approved && refreshLineage === null && rowSelectionStatus !== 'pending')) {

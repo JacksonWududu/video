@@ -160,6 +160,9 @@ export const buildKnowledgeVideoSoundDesign = (input, {
     if (candidate.anchor_kind === 'ian-layer-entry') {
       return buildIanDecision({candidate, shot: shotsById.get(candidate.shot_id), library});
     }
+    if (candidate.anchor_kind === 'flipbook-text-reveal' && !decisions.has(candidate.event_id)) {
+      return silentDecision(candidate, '正文逐句显现仅供阅读，不对应独立可听动作');
+    }
     const decision = decisions.get(candidate.event_id);
     if (!decision) throw new Error(`sound-design analysis is missing: ${candidate.event_id}`);
     decisions.delete(candidate.event_id);

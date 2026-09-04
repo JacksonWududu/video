@@ -29,3 +29,5 @@ export function validateOneClickFinalVisualReview(review: unknown, context?: unk
 export function approveOneClickFinalVisualReview(review: unknown, decision: unknown): unknown;
 export function assertOneClickProtectedActionAllowed(state: unknown, action: string): unknown;
 export function validateRevoiceDensityLock(value: unknown): unknown;
+
+export function buildFlipbookStyleSelection(value: {gate2ScriptSha256: string; profilePath: string; decision: unknown}): unknown;

@@ -1,3 +1,5 @@
+import {FLIPBOOK_STYLE_ID, FLIPBOOK_RENDERER, FLIPBOOK_TRANSITION_KIND, isFlipbookRow, isFlipbookStyle} from '../flipbook-video/profile.mjs';
+import {validateStaticSpread} from '../storyboard/static-spread.mjs';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -565,6 +567,16 @@ const buildScene = (
   expectedActionScheduleVersion,
   ianLayeredSceneEvidence,
 ) => {
+  const flipbook = isFlipbookRow(shot);
+  if (flipbook) {
+    validateStaticSpread(shot.static_spread, {sourceText: shot.narration_source_text, shotId: shot.shot_id});
+    if (shot.white_cat_present !== false || shot.motion_tier !== 'static_spread'
+      || !['imagegen', IAN_ROUTE].includes(shot.visual_generation_route)
+      || shot.assets?.length !== 1 || shot.ian_layered_scene != null
+      || shot.action_state_schedule != null || shot.internal_motion != null) {
+      throw new Error(`${shot.shot_id} flipbook requires one no-cat static spread without layered or action assets`);
+    }
+  }
   const startFrame = requireInteger(shot.start_frame, `${shot.shot_id}.start_frame`);
   const endFrame = requireInteger(shot.end_frame, `${shot.shot_id}.end_frame`, 1);
   if (endFrame <= startFrame) throw new Error(`${shot.shot_id} must have positive duration`);
@@ -591,7 +603,7 @@ const buildScene = (
         throw new Error(`${shot.shot_id} assembly must not receive a generic top-title or timeline text overlay field`);
       }
     }
-    if (!['layered', 'stateful', 'hero_pose'].includes(shot.motion_tier)) {
+    if (!(flipbook ? ['static_spread'] : ['layered', 'stateful', 'hero_pose']).includes(shot.motion_tier)) {
       throw new Error(`${shot.shot_id} requires a locked v3 motion_tier`);
     }
   }
@@ -605,6 +617,7 @@ const buildScene = (
     || shot.comic_plan !== undefined || visualGenerationRoute === COMIC_ROUTE) {
     validateVisualLanguageSelection({
       scene_class: shot.scene_class,
+      presentation_mode: shot.presentation_mode,
       visual_structure_id: shot.visual_structure_id,
       treatment_profile_id: shot.treatment_profile_id,
       visual_generation_route: visualGenerationRoute,
@@ -662,7 +675,7 @@ const buildScene = (
   if (actionStateSchedule && actionStateSchedule.motion_tier !== shot.motion_tier) {
     throw new Error(`${shot.shot_id} action-state motion tier differs from the approved shot tier`);
   }
-  const sceneType = {
+  const sceneType = flipbook ? 'flipbook-spread' : {
     imagegen: 'narrative',
     [XUAN_ROUTE]: 'narrative',
     [COMIC_ROUTE]: 'comic',
@@ -680,6 +693,11 @@ const buildScene = (
     && (shot.transition?.source_visual_generation_route !== visualGenerationRoute
       || shot.transition?.next_visual_generation_route !== shots[index + 1].visual_generation_route)) {
     throw new Error(`${shot.shot_id} transition recommendation routes do not match the adjacent shots`);
+  }
+  if (!isTerminal && flipbook && (shot.transition?.kind !== FLIPBOOK_TRANSITION_KIND
+    || shot.transition?.renderer !== FLIPBOOK_RENDERER
+    || shot.transition?.white_cat_visual_style_id !== FLIPBOOK_STYLE_ID)) {
+    throw new Error(`${shot.shot_id} flipbook transition must execute its style-bound book-page-turn`);
   }
   let transition = isTerminal
     ? null
@@ -706,7 +724,7 @@ const buildScene = (
     }
   }
   let ianLayeredScene = null;
-  if (requireV3Contracts && visualGenerationRoute === IAN_ROUTE) {
+  if (requireV3Contracts && visualGenerationRoute === IAN_ROUTE && !flipbook) {
     if (shot.internal_motion_contract != null || shot.internal_motion != null) {
       throw new Error(`${shot.shot_id} Ian whole-raster motion is retired; use a layered scene package`);
     }
@@ -802,6 +820,8 @@ const buildScene = (
     end_frame: endFrame,
     duration_frames: durationFrames,
     scene_type: sceneType,
+    ...(flipbook ? {presentation_mode: FLIPBOOK_STYLE_ID, static_spread: structuredClone(shot.static_spread),
+      text_reveals: structuredClone(shot.text_reveals ?? [])} : {}),
     scene_class: shot.scene_class,
     structured_visual_kind: shot.structured_visual_kind ?? null,
     visual_structure_id: shot.visual_structure_id ?? null,
@@ -1059,7 +1079,7 @@ const verifyIanLayeredScenePackageEvidence = (input) => {
     throw new Error('episodeWorkspace is required for Ian layered-scene verification');
   }
   const records = input.shots
-    .filter((shot) => shot.visual_generation_route === IAN_ROUTE)
+    .filter((shot) => shot.visual_generation_route === IAN_ROUTE && !isFlipbookRow(shot))
     .map((shot) => {
       const binding = shot.ian_layered_scene;
       const manifestBinding = binding?.package_manifest;
@@ -1202,7 +1222,7 @@ const verifyIanLayeredScenePackageEvidence = (input) => {
 
 export const validateIanLayeredSceneEvidence = ({evidence, input}) => {
   const expectedShotIds = input.shots
-    .filter((shot) => shot.visual_generation_route === IAN_ROUTE)
+    .filter((shot) => shot.visual_generation_route === IAN_ROUTE && !isFlipbookRow(shot))
     .map((shot) => shot.shot_id);
   if (evidence?.contract_version !== 'ian-layered-scene-consumption-evidence-v1'
     || evidence.result !== 'pass'
@@ -1416,6 +1436,13 @@ export const buildKnowledgeVideoAssemblyPlan = (input, options = {}) => {
       }, 'composition');
     }
   }
+  const flipbook = isFlipbookStyle(input.workflowApproval?.whiteCatStyle);
+  if (input.shots.some((shot) => isFlipbookRow(shot) !== flipbook)) {
+    throw new Error('flipbook shot mode must equal the episode-wide approved style selection');
+  }
+  if (flipbook && (!requireV3Contracts || legacyFirstShotLeadInFrames !== 0)) {
+    throw new Error('flipbook requires current v3 direction and a direct frame-zero start');
+  }
   const transitionContract = requireV3Contracts ? 'scene-transition-v3' : 'scene-transition-v2';
   const transitionCatalog = requireV3Contracts ? 'scene-transition-catalog-v3' : 'scene-transition-catalog-v2';
   if (requireV3Contracts && input.ianInternalMotionPolicy !== undefined) {
@@ -1447,7 +1474,7 @@ export const buildKnowledgeVideoAssemblyPlan = (input, options = {}) => {
   if (requireV3Contracts) {
     sourceScenes.forEach((scene, index) => {
       const rhythmShot = visualRhythmEvidence.artifact.shots[index];
-      if (scene.visual_generation_route === IAN_ROUTE) {
+      if (scene.visual_generation_route === IAN_ROUTE && !isFlipbookRow(scene)) {
         const layeredEvidence = ianLayeredSceneByShot.get(scene.shot_id);
         validateIanLayeredSceneRhythmBinding(layeredEvidence.package.scene_plan, {
           shotStartFrame: scene.start_frame,
@@ -1518,6 +1545,7 @@ export const buildKnowledgeVideoAssemblyPlan = (input, options = {}) => {
       ? 'knowledge-video-assembly-plan-v3'
       : 'knowledge-video-assembly-plan-v2',
     episode_id: input.episodeId,
+    ...(flipbook ? {presentation_mode: FLIPBOOK_STYLE_ID, render_backend: 'codex-browser-flipbook'} : {}),
     canvas: {width: 1920, height: 1080, fps, aspect: '16:9'},
     full_master_frames: narrationFrames,
     narration_frames: narrationFrames,

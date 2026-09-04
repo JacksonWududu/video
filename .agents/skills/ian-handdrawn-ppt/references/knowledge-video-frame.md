@@ -1,5 +1,7 @@
 # Ian knowledge-video layered-scene adapter
 
+The selected `illustrated-flipbook` branch uses `knowledge-video-static-spread.md` instead. This layered contract remains mandatory for all other knowledge-video styles.
+
 Use `ian-knowledge-video-layered-scene-v2` only when an approved knowledge-video
 shot selects `visual_generation_route: ian-handdrawn-ppt`. This mode overrides
 the ordinary article/PPT page shell; it does not create a deck or one flattened

@@ -1,4 +1,5 @@
 export type MotionTier = 'layered' | 'stateful' | 'hero_pose';
+export type FlipbookMotionTier = 'static_spread';
 
 export type StoryboardVisualRhythmArtifact = Readonly<Record<string, unknown>> & {
   readonly contract_version: 'storyboard-visual-rhythm-v1' | 'storyboard-visual-rhythm-v2';

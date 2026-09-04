@@ -17,6 +17,8 @@ Also read:
 - [references/white-cat-generation-accuracy.md](references/white-cat-generation-accuracy.md) when any active shot contains the recurring white cat
 - [../run-knowledge-video/references/visual-language-and-comic-routing.md](../run-knowledge-video/references/visual-language-and-comic-routing.md) for `episode-visual-cohesion-v2`, or when reading unchanged legacy v2 structure, treatment, or Comic evidence
 
+For checksum-bound `illustrated-flipbook` rows, also read [references/static-spread.md](references/static-spread.md). That conditional adapter overrides only the layered-package, action-family, subtitle-safe-band, and crop requirements below: one approved no-cat complete image is contained in one book page. All existing approval, provenance, failure-count and lock gates remain.
+
 ## Preconditions
 
 - The validated narration master and exact audio-timed storyboard are locked.

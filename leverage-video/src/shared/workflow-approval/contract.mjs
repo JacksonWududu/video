@@ -1,5 +1,7 @@
 import crypto from 'node:crypto';
 
+import {FLIPBOOK_PROFILE_SHA256, FLIPBOOK_STYLE_ID} from '../flipbook-video/profile.mjs';
+
 export const WHITE_CAT_VISUAL_STYLE_SELECTION_VERSION = 'white-cat-visual-style-selection-v1';
 export const WHITE_CAT_VISUAL_STYLE_SELECTION_VERSION_V2 = 'white-cat-visual-style-selection-v2';
 export const VISUAL_DENSITY_SELECTION_VERSION = 'visual-density-selection-v1';
@@ -41,7 +43,12 @@ export const WHITE_CAT_VISUAL_STYLE_OPTIONS = Object.freeze({
 const DENSITY_MODES = new Set(['standard', 'rich']);
 const APPROVAL_MODES = new Set(['manual', 'one_click']);
 const NARRATION_AUDIO_SOURCE_MODES = new Set(['colocated_voice', 'edge_tts']);
-const DYNAMIC_STYLE_SOURCES = new Set(['episode_cover', 'registered_custom']);
+const DYNAMIC_STYLE_SOURCES = new Set(['episode_cover', 'registered_custom', 'builtin_flipbook']);
+const FLIPBOOK_STYLE_OPTION = Object.freeze({
+  style_id: FLIPBOOK_STYLE_ID,
+  treatment_profile_id: 'imagegen-watercolor-narrative',
+  visual_cohesion_profile_id: 'illustrated-flipbook-cohesion-v1',
+});
 const DYNAMIC_STYLE_OPTION = Object.freeze({
   style_id: 'cover-derived-episode-style',
   treatment_profile_id: 'imagegen-cover-derived-narrative',
@@ -144,9 +151,9 @@ export const validateWhiteCatVisualStyleSelection = (selection, {gate2ScriptSha2
       }
     }
   } else {
-    option = DYNAMIC_STYLE_OPTION;
+    option = selection.style_source === 'builtin_flipbook' ? FLIPBOOK_STYLE_OPTION : DYNAMIC_STYLE_OPTION;
     if (!DYNAMIC_STYLE_SOURCES.has(selection.style_source)) {
-      throw new Error('white-cat visual style v2 source must be episode_cover or registered_custom');
+      throw new Error('white-cat visual style v2 source is unsupported');
     }
     if (selection.style_id !== option.style_id
       || selection.treatment_profile_id !== option.treatment_profile_id
@@ -158,7 +165,16 @@ export const validateWhiteCatVisualStyleSelection = (selection, {gate2ScriptSha2
       throw new Error('white-cat visual style v2 requires an episode-local label and profile path');
     }
     requireSha256(selection.style_profile_checksum_sha256, 'white-cat visual style v2 profile checksum');
-    if (selection.style_source === 'episode_cover') {
+    if (selection.style_source === 'builtin_flipbook') {
+      if (selection.source_style_id !== FLIPBOOK_STYLE_ID
+        || selection.style_profile_checksum_sha256 !== FLIPBOOK_PROFILE_SHA256
+        || !/^leverage-video\/src\/topic[0-9]+\/schema\/[^/]+\.json$/.test(selection.style_profile_path)
+        || selection.style_profile_path.includes('..')
+        || selection.publishing_cover_package_path !== null
+        || selection.publishing_cover_package_sha256 !== null) {
+        throw new Error('flipbook style requires its immutable episode-local profile snapshot');
+      }
+    } else if (selection.style_source === 'episode_cover') {
       if (selection.source_style_id !== null
         || typeof selection.publishing_cover_package_path !== 'string'
         || selection.publishing_cover_package_path.trim() === '') {
@@ -200,6 +216,25 @@ const densityProjection = (selection) => ({
     decided_at: selection.decision?.decided_at,
   },
 });
+
+export const buildFlipbookStyleSelection = ({gate2ScriptSha256, profilePath, decision}) => {
+  const selection = {
+    contract_version: WHITE_CAT_VISUAL_STYLE_SELECTION_VERSION_V2,
+    gate2_script_sha256: gate2ScriptSha256,
+    ...FLIPBOOK_STYLE_OPTION,
+    style_source: 'builtin_flipbook',
+    source_style_id: FLIPBOOK_STYLE_ID,
+    style_label: '图文翻书',
+    style_profile_path: profilePath,
+    style_profile_checksum_sha256: FLIPBOOK_PROFILE_SHA256,
+    publishing_cover_package_path: null,
+    publishing_cover_package_sha256: null,
+    decision: structuredClone(decision),
+  };
+  selection.selection_sha256 = buildWhiteCatVisualStyleSelectionSha256(selection);
+  validateWhiteCatVisualStyleSelection(selection, {gate2ScriptSha256});
+  return selection;
+};
 
 export const buildVisualDensitySelectionSha256 = (selection) => sha256(densityProjection(selection));
 

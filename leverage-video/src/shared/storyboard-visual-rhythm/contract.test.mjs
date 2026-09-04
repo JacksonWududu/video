@@ -1,3 +1,4 @@
+import {buildStaticSpread} from '../storyboard/static-spread.mjs';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import test from 'node:test';
@@ -279,4 +280,33 @@ test('v2 canonical hash binds density mode, selection hash, fallback, and split 
   const before = buildStoryboardVisualRhythmMapSha256(artifact);
   artifact.visual_density_selection_sha256 = 'e'.repeat(64);
   assert.notEqual(buildStoryboardVisualRhythmMapSha256(artifact), before);
+});
+
+test('flipbook standard and rich mean static information density without layers or poses', () => {
+  for (const density of ['standard', 'rich']) {
+    const artifact = buildArtifact();
+    artifact.contract_version = 'storyboard-visual-rhythm-v2';
+    artifact.presentation_mode = 'illustrated-flipbook';
+    artifact.density_mode = density;
+    artifact.visual_density_selection_sha256 = 'd'.repeat(64);
+    for (const shot of artifact.shots) {
+      shot.presentation_mode = 'illustrated-flipbook';
+      shot.static_spread = buildStaticSpread('完整锁稿，保持原字与标点。');
+      shot.motion_tier = 'static_spread';
+      shot.asset_plan = {main_image_count: 1, layer_count: 0, pose_count: 0,
+        information_density: density, diagram_detail: '按本镜语义表达关系与必要细节。', reuse_plan: ['复用翻书版式']};
+      shot.performance_plan = null;
+      shot.intra_shot_transition_plan = [];
+    }
+    artifact.presented_map_sha256 = buildStoryboardVisualRhythmMapSha256(artifact);
+    artifact.approval.presented_map_sha256 = artifact.presented_map_sha256;
+    assert.equal(validateStoryboardVisualRhythm(artifact).result, 'pass');
+    assert.ok(!validateStoryboardVisualRhythm(artifact).rhythm_qa.warnings.some((item) => item.code.startsWith('hero-pose')));
+    const changed = structuredClone(artifact);
+    changed.shots[0].asset_plan.layer_count = 3;
+    assert.throws(() => validateStoryboardVisualRhythm(changed), /zero layers or poses/);
+    const missingMode = structuredClone(artifact);
+    delete missingMode.presentation_mode;
+    assert.throws(() => validateStoryboardVisualRhythm(missingMode), /selected presentation/);
+  }
 });

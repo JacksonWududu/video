@@ -1,5 +1,7 @@
 # Final mix and delivery contract
 
+The selected `illustrated-flipbook` branch applies [its explicit conditional contract](../../run-knowledge-video/references/illustrated-flipbook-v1.md): static spreads and actual browser page turns replace only the layered/Remotion visual path; exact-body text is separate from bottom captions, and all shared audio, approval and delivery gates remain required.
+
 ## BGM mode
 
 - `bgm.mode` has two values: `disabled` and `enabled`; missing or unspecified state means `disabled`.

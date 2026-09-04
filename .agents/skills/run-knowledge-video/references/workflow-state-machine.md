@@ -1,5 +1,7 @@
 # Knowledge-video state machine
 
+The explicitly selected `illustrated-flipbook` branch follows [illustrated-flipbook-v1.md](illustrated-flipbook-v1.md) for its static-image, exact body-text, physical page-turn and browser-capture differences. Its conditional contract overrides only the corresponding Ian layered/action-count/subtitle-band/Remotion-renderer requirements below, plus the publishing-cover exclusion and frame-zero presentation rule when the user explicitly binds its 54-frame `opening_cover` adapter. The approved body plan stays unchanged at frame zero; all selection, approval, immutable-input, sound, caption and delivery gates remain in force. Add 图文翻书 to the existing style selection after cover generation; never infer it from other selections.
+
 ## Episode workspace contract
 
 Resolve all paths from the repository root. Treat `leverage-video/src` as the only parent for episode workspaces.

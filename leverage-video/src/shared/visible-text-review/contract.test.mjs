@@ -1,3 +1,4 @@
+import {buildStaticSpread} from '../storyboard/static-spread.mjs';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
@@ -194,4 +195,30 @@ test('policy-authorized visual direction cannot substitute for batch text approv
     }),
     /batch review is not approved/,
   );
+});
+
+test('flipbook batch binds full punctuated narration independently from concise image labels', () => {
+  const fixture = buildFixture();
+  fixture.summaryRows = fixture.summaryRows.filter((row) => row.shot_id !== 'OPEN-00');
+  fixture.visualDirectionReview.presentation_mode = 'illustrated-flipbook';
+  for (const [index, row] of fixture.visualDirectionReview.rows.entries()) {
+    row.presentation_mode = 'illustrated-flipbook';
+    row.static_spread = buildStaticSpread(fixture.summaryRows[index].locked_narration);
+    row.user_selection.presentation_mode = row.presentation_mode;
+    row.user_selection.static_spread = structuredClone(row.static_spread);
+  }
+  const build = () => buildPendingVisibleTextBatchReview({episodeWorkspace: 'synthetic/flipbook', ...fixture,
+    presentedAt: '2026-09-04T10:00:00Z', exactMessage: '请整批审核图中短标签及逐镜书页正文。'});
+  const pending = build();
+  assert.equal(pending.body_text_contract, 'locked-narration-spread-body-v1');
+  assert.equal(pending.rows[0].static_spread.source_text, fixture.summaryRows[0].locked_narration);
+  assert.equal(pending.rows[0].text_style_contract, 'concise-summary-visible-text-v1');
+  assert.equal(pending.rows[1].visible_text_mode, 'none');
+  assert.equal(pending.rows[1].static_spread.source_text, fixture.summaryRows[1].locked_narration);
+  const approved = approveVisibleTextBatchReview(pending, {presentedMapSha256: pending.presented_map_sha256,
+    exactMessage: '批准全部短标签与书页正文', decidedAt: '2026-09-04T10:01:00Z'});
+  assert.equal(validateVisibleTextBatchReview(approved, {episodeWorkspace: 'synthetic/flipbook', ...fixture}).result, 'pass');
+  fixture.visualDirectionReview.rows[0].static_spread = buildStaticSpread('修改后的口播。');
+  assert.throws(build, /narration bytes or checksum are stale/);
+  assert.throws(() => validateConciseSummaryVisibleText('你看，口播正文仍然不能被塞进图片里的短标签。'), /spoken or prose-like/);
 });

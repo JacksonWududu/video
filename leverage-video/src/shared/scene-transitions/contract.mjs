@@ -1,3 +1,4 @@
+import {FLIPBOOK_STYLE_ID, FLIPBOOK_TRANSITION_KIND, FLIPBOOK_RENDERER} from '../flipbook-video/profile.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -38,7 +39,8 @@ export const RETIRED_TRANSITION_KINDS_V3 = Object.freeze([
 const RETIRED_TRANSITION_KIND_SET_V3 = new Set(RETIRED_TRANSITION_KINDS_V3);
 
 export const TRANSITION_CATALOG = Object.freeze(
-  LEGACY_TRANSITION_CATALOG.filter((entry) => !RETIRED_TRANSITION_KIND_SET_V3.has(entry.kind)),
+  [...LEGACY_TRANSITION_CATALOG.filter((entry) => !RETIRED_TRANSITION_KIND_SET_V3.has(entry.kind)),
+    Object.freeze({kind: FLIPBOOK_TRANSITION_KIND, label: '书页翻动', family: 'flipbook-browser', required_options: []})],
 );
 
 export const TRANSITION_KINDS_V2 = Object.freeze(
@@ -67,6 +69,7 @@ export const TWILIGHT_WHITE_CAT_TRANSITION_RECOMMENDATION_RULE_ID =
 export const GILDED_WHITE_CAT_TRANSITION_RECOMMENDATION_RULE_ID =
   'imagegen-white-cat-gilded-dissolve-priority-v1';
 const WHITE_CAT_VISUAL_STYLE_IDS = new Set([
+  FLIPBOOK_STYLE_ID,
   'loose-line-vivid-watercolor',
   'twilight-neon-animation',
   'gilded-mythic-storybook',
@@ -175,6 +178,22 @@ export const resolveTransitionRecommendation = ({
   const nextRoute = ROUTES_BY_ID.get(nextVisualGenerationRoute);
   if (!sourceRoute) throw new Error(`unknown source visual generation route: ${sourceVisualGenerationRoute}`);
   if (!nextRoute) throw new Error(`unknown next visual generation route: ${nextVisualGenerationRoute}`);
+  if (whiteCatVisualStyleId === FLIPBOOK_STYLE_ID) {
+    if (sourceWhiteCatPresent || nextWhiteCatPresent
+      || !['imagegen', 'ian-handdrawn-ppt'].includes(sourceVisualGenerationRoute)
+      || !['imagegen', 'ian-handdrawn-ppt'].includes(nextVisualGenerationRoute)
+      || !BOUNDARY_CHANGE_CLASSES.includes(boundaryChangeClass)) {
+      throw new Error('flipbook transitions require two supported no-cat static spreads');
+    }
+    return Object.freeze({
+      recommended_transition: {kind: FLIPBOOK_TRANSITION_KIND, options: {}},
+      recommendation_source: {
+        authority: 'visual-generation-route',
+        route_id: sourceVisualGenerationRoute,
+        rule_id: 'illustrated-flipbook-physical-page-turn-v1',
+      },
+    });
+  }
   const matchingRules = ROUTE_TRANSITION_RECOMMENDATIONS.rules.filter((rule) => (
     rule.source_route === sourceVisualGenerationRoute
     && rule.boundary_change_class === boundaryChangeClass
@@ -305,6 +324,15 @@ export const applyTransitionRecommendationDiversity = (rows) => {
     validateOptions(base.kind, base.options);
     const request = requestedTransition(row);
     const preferred = request ?? base;
+    if (row.white_cat_visual_style_id === FLIPBOOK_STYLE_ID) {
+      if (preferred.kind !== FLIPBOOK_TRANSITION_KIND || base.kind !== FLIPBOOK_TRANSITION_KIND) {
+        throw new Error('flipbook physical page turns cannot be replaced by diversity effects');
+      }
+      return {...row, proposed_transition: {...preferred, options: {}}, diversity_adjustment: {
+        rule_id: TRANSITION_RECOMMENDATION_DIVERSITY_RULE_ID, applied: false,
+        base_transition: {...base, options: {}}, reason: 'physical-page-turn-owned-by-flipbook-renderer',
+      }};
+    }
     if (preferred.kind === 'cut') {
       previousKind = null;
       consecutiveKindUses = 0;
@@ -484,7 +512,11 @@ export const validateUserApprovedTransition = (
   if (typeof transition.source_intent !== 'string' || transition.source_intent.trim() === '') {
     throw new Error(`transition source intent is missing: ${sourceShotId}`);
   }
-  if (transition.renderer !== 'leverage-video/src/shared/scene-transitions') {
+  const flipbook = transition.white_cat_visual_style_id === FLIPBOOK_STYLE_ID;
+  if (flipbook !== (transition.kind === FLIPBOOK_TRANSITION_KIND)) {
+    throw new Error('book-page-turn is required only for the selected illustrated-flipbook style');
+  }
+  if (transition.renderer !== (flipbook ? FLIPBOOK_RENDERER : 'leverage-video/src/shared/scene-transitions')) {
     throw new Error(`transition renderer mismatch: ${sourceShotId}`);
   }
   const selection = transition.user_selection;

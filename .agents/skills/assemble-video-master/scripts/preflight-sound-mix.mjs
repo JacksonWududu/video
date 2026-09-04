@@ -92,7 +92,7 @@ const validatePlan = (plan) => {
   return sound;
 };
 
-const runFfmpeg = ({narrationPath, cues, sound, fullMasterFrames, repositoryRoot, runImpl}) => {
+export const buildSoundMixInputs = ({narrationPath, cues, sound, fullMasterFrames, repositoryRoot}) => {
   const inputArgs = ['-i', narrationPath];
   const cueRecords = cues.map((cue, index) => {
     const file = resolveMediaAsset(
@@ -118,6 +118,11 @@ const runFfmpeg = ({narrationPath, cues, sound, fullMasterFrames, repositoryRoot
     + `dropout_transition=0:normalize=0,atrim=end_sample=${fullMasterFrames * SAMPLES_PER_FRAME},`
     + 'volumedetect[mix]',
   );
+  return {inputArgs, filters, cueRecords};
+};
+
+const runFfmpeg = ({narrationPath, cues, sound, fullMasterFrames, repositoryRoot, runImpl}) => {
+  const {inputArgs, filters, cueRecords} = buildSoundMixInputs({narrationPath, cues, sound, fullMasterFrames, repositoryRoot});
   const args = [
     '-hide_banner', '-nostdin', ...inputArgs,
     '-filter_complex', filters.join(';'), '-map', '[mix]', '-f', 'null', '-',
