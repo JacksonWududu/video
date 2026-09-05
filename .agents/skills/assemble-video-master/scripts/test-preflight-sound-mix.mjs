@@ -15,9 +15,9 @@ const writeAsset = (asset, bytes) => {
   fs.writeFileSync(file, bytes);
   return crypto.createHash('sha256').update(bytes).digest('hex');
 };
-const narrationAsset = 'topic99/assets/audio/narration.wav';
+const narrationAsset = 'episode-test/assets/audio/narration.wav';
 writeAsset(narrationAsset, 'narration');
-const cueAsset = 'topic99/assets/audio/sfx/opening.wav';
+const cueAsset = 'episode-test/assets/audio/sfx/opening.wav';
 const cueSha = writeAsset(cueAsset, 'cue');
 
 const plan = {

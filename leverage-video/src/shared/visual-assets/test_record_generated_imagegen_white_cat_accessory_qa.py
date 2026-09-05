@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import copy
 import importlib.util
+import json
 from pathlib import Path
+import tempfile
 import unittest
 
 
@@ -278,6 +280,83 @@ class WhiteCatAccessoryQaTests(unittest.TestCase):
                 current_binding=current,
                 style_profile_checksum_sha256=selection["style_profile_checksum_sha256"],
             )
+
+    def test_cover_derived_v2_binding_loads_episode_summary_file(self) -> None:
+        selection = {
+            "contract_version": "white-cat-visual-style-selection-v2",
+            "gate2_script_sha256": "a" * 64,
+            "style_id": "cover-derived-episode-style",
+            "treatment_profile_id": "imagegen-cover-derived-narrative",
+            "visual_cohesion_profile_id": "cover-derived-cohesion-v1",
+            "style_profile_path": "episode/schema/cover-derived-style-profile-v1.json",
+            "style_profile_checksum_sha256": "b" * 64,
+            "style_source": "episode_cover",
+            "source_style_id": None,
+            "style_label": "当前封面风格（暖金深蓝编辑绘本）",
+            "publishing_cover_package_path": "episode/schema/publishing-cover-generation-v1.json",
+            "publishing_cover_package_sha256": "c" * 64,
+            "decision": {
+                "status": "selected",
+                "exact_message": "那选择1， 继续推进",
+                "decided_at": "2026-08-29T14:58:28+08:00",
+            },
+        }
+        selection["selection_sha256"] = self.recorder._canonical_sha256(selection)
+        with tempfile.TemporaryDirectory(dir=SCRIPT_DIR) as temporary:
+            root = Path(temporary)
+            selection_path = root / "episode/schema/white-cat-visual-style-selection-v2.json"
+            selection_path.parent.mkdir(parents=True)
+            selection_path.write_text(
+                json.dumps(selection, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            summary = {
+                "contract_version": selection["contract_version"],
+                "status": "selected",
+                "path": selection_path.relative_to(root).as_posix(),
+                "file_checksum_sha256": self.recorder.sha256_file(selection_path),
+                **{
+                    key: selection[key]
+                    for key in (
+                        "selection_sha256",
+                        "style_id",
+                        "style_source",
+                        "style_label",
+                        "treatment_profile_id",
+                        "visual_cohesion_profile_id",
+                        "style_profile_path",
+                        "style_profile_checksum_sha256",
+                        "publishing_cover_package_path",
+                        "publishing_cover_package_sha256",
+                        "decision",
+                    )
+                },
+            }
+            item = {
+                "white_cat_visual_style_id": selection["style_id"],
+                "white_cat_visual_style_selection_sha256": selection["selection_sha256"],
+                "visual_cohesion_profile_id": selection["visual_cohesion_profile_id"],
+                "treatment_profile_id": selection["treatment_profile_id"],
+            }
+            previous_root = self.recorder.REPOSITORY_ROOT
+            self.recorder.REPOSITORY_ROOT = root
+            try:
+                self.assertEqual(
+                    self.recorder.resolve_white_cat_visual_style_binding(
+                        {"white_cat_visual_style_selection": summary}, item
+                    ),
+                    ("cover-derived-episode-style", "cover-derived-cohesion-v1", True),
+                )
+                selection_path.write_text(
+                    selection_path.read_text(encoding="utf-8") + " ",
+                    encoding="utf-8",
+                )
+                with self.assertRaisesRegex(ValueError, "checksum is stale"):
+                    self.recorder.resolve_white_cat_visual_style_binding(
+                        {"white_cat_visual_style_selection": summary}, item
+                    )
+            finally:
+                self.recorder.REPOSITORY_ROOT = previous_root
 
 
 if __name__ == "__main__":

@@ -5,7 +5,7 @@
   "type": "object",
   "additionalProperties": false,
   "required": [
-    "contract_version", "visual_generation_route", "shot_id", "source_image",
+    "contract_version", "visual_generation_route", "drawing_overlay_policy", "shot_id", "source_image",
     "normalized_image", "annotation", "preview", "clip", "source_dimensions",
     "source_aspect_ratio_relative_error", "normalized_dimensions", "total_frames",
     "element_order", "media"
@@ -13,6 +13,7 @@
   "properties": {
     "contract_version": {"const": "whiteboard-render-evidence-v1"},
     "visual_generation_route": {"const": "srt-whiteboard-animation"},
+    "drawing_overlay_policy": {"const": "canvas-only-no-hand-pen-cursor-v1"},
     "shot_id": {"type": "string", "minLength": 1},
     "source_image": {"$ref": "#/$defs/artifact"},
     "normalized_image": {"$ref": "#/$defs/artifact"},

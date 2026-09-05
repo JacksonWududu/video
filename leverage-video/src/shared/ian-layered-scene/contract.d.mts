@@ -48,6 +48,49 @@ export type IanRasterBinding = {
   readonly has_alpha: boolean;
 };
 
+export type IanBbox = {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+};
+
+export type IanBottomSubtitleSafeAreaPolicy = {
+  readonly contract_version: 'ian-bottom-subtitle-safe-area-v1';
+  readonly target_height_percent: 23;
+  readonly pixel_rounding: 'nearest-integer-v1';
+  readonly safe_area: {
+    readonly x: 0;
+    readonly y: 832;
+    readonly width: 1920;
+    readonly height: 248;
+  };
+};
+
+export type IanPreSplitLayoutRepair = {
+  readonly contract_version: 'ian-pre-split-layout-repair-v1';
+  readonly method: 'matte-alpha-rational-downscale-integer-translate-v1';
+  readonly authorization: {
+    readonly asset_id: string;
+    readonly exact_user_message: string;
+  };
+  readonly source_failure: {
+    readonly attempt_number: number;
+    readonly prompt: {readonly path: string; readonly checksum_sha256: string};
+    readonly output: {readonly path: string; readonly checksum_sha256: string};
+    readonly failure_reason: string;
+  };
+  readonly source_outside_union_max_visible_pixels: 1024;
+  readonly source_bbox_minimum_matte_gutter_px: 8;
+  readonly layers: readonly {
+    readonly layer_id: string;
+    readonly source_bbox: IanBbox;
+    readonly scale_numerator: number;
+    readonly scale_denominator: number;
+    readonly target_bbox: IanBbox;
+  }[];
+};
+
 export type IanLayeredScenePackage = {
   readonly contract_version: 'ian-knowledge-video-layered-scene-v2';
   readonly episode_workspace: string;
@@ -117,9 +160,11 @@ export type IanLayeredScenePackage = {
     readonly paper_background_rgba: readonly [number, number, number, 255];
     readonly minimum_inter_layer_gutter_px: number;
     readonly outside_union_max_visible_pixels: 1024;
+    readonly subtitle_safe_area?: IanBottomSubtitleSafeAreaPolicy;
+    readonly layout_repair?: IanPreSplitLayoutRepair;
     readonly layers: readonly {
       readonly layer_id: string;
-      readonly bbox: {readonly x: number; readonly y: number; readonly width: number; readonly height: number};
+      readonly bbox: IanBbox;
     }[];
   };
   readonly background: IanRasterBinding;
@@ -164,7 +209,14 @@ export const IAN_LAYER_ENTRY_DURATION_FRAMES: 8;
 export const IAN_MASTER_GENERATION_VERSION: 'ian-gpt-image-2-text-free-master-v1';
 export const IAN_MODEL_PROVENANCE_VERSION: 'codex-native-imagegen-gpt-image-2-provenance-v1';
 export const IAN_SEMANTIC_SPLIT_VERSION: 'ian-semantic-region-alpha-split-v1';
+export const IAN_PRE_SPLIT_LAYOUT_REPAIR_VERSION: 'ian-pre-split-layout-repair-v1';
 export const IAN_TEXT_OVERLAY_VERSION: 'ian-deterministic-layer-text-overlay-v1';
+export const IAN_BOTTOM_SUBTITLE_SAFE_AREA_POLICY: Readonly<IanBottomSubtitleSafeAreaPolicy>;
+export const IAN_BOTTOM_SUBTITLE_SAFE_AREA_PROMPT_MARKER: 'IAN BOTTOM SUBTITLE SAFE AREA: x=0, y=832, width=1920, height=248.';
+export function validateIanBottomSubtitleSafeArea(
+  value: unknown,
+  label?: string,
+): IanBottomSubtitleSafeAreaPolicy;
 export const IAN_CANONICAL_STYLE_ANCHOR_PATH: '.agents/skills/ian-handdrawn-ppt/assets/reference-handdrawn-article-illustration-style.png';
 export function sha256Canonical(value: unknown): string;
 export function sha256Text(value: string): string;
@@ -215,6 +267,9 @@ export function deriveIanLayeredSceneV2Bytes(input: {
   layers: Buffer[];
   finalComposite: Buffer;
   outsideUnionVisiblePixels: number;
+  layoutRepairApplied: boolean;
+  layoutRepairSourceOutsideVisiblePixels: number | null;
+  layoutRepairSourceEdgeVisiblePixels: {layer_id: string; visible_pixels: number}[];
   glyphMeasurements: unknown[];
 }>;
 export function composeIanLayeredSceneBytes(input: {
@@ -235,9 +290,13 @@ export function inspectIanLayeredScenePackage(
   member_count: number;
   model_provenance_observation: Record<string, string>;
   deterministic_master_normalization_match: true;
+  deterministic_pre_split_layout_repair_match: true | null;
   deterministic_semantic_split_match: true;
   deterministic_text_overlay_match: true;
   deterministic_composite_match: true;
+  outside_union_visible_pixels: number;
+  layout_repair_source_outside_union_visible_pixels: number | null;
+  layout_repair_source_edge_visible_pixels: {layer_id: string; visible_pixels: number}[];
 }>;
 export function inspectLegacyIanLayeredScenePackageV1(
   manifest: Record<string, unknown>,

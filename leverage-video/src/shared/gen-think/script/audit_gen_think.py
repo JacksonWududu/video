@@ -127,8 +127,6 @@ def main() -> int:
     approval = review.get("approval") or {}
     if approval.get("status") != "approved" or approval.get("decision_message") != "批准 GEN-THINK 五图":
         fail("exact-byte approval evidence is missing")
-    if approval.get("topic3_visual_batch_approved") is not False:
-        fail("approval scope must explicitly exclude the topic3 visual batch")
     if review.get("derivatives_blocked_until_exact_byte_approval") is not False:
         fail("derivative gate did not unlock after exact-byte approval")
     if review.get("loop_contract", {}).get("state_order") != LOOP_ORDER:
@@ -338,10 +336,6 @@ def main() -> int:
     ):
         fail("frame-39 deterministic rerender evidence mismatch")
 
-    leaked = list((REPO_ROOT / "leverage-video/src/topic3").rglob("gen-think*"))
-    if leaked:
-        fail("GEN-THINK files leaked into topic3: " + ", ".join(str(path) for path in leaked))
-
     print("PASS GEN-THINK shared package")
     print("approved exact-byte sources: 5/5")
     print("composition derivatives: 5/5 at 1920x1080")
@@ -349,7 +343,6 @@ def main() -> int:
     print("internal transitions: intra-shot-watercolor-bloom-v1, 0.6s / 18 frames at 30fps; no radiating tendrils; first state fully visible")
     print("consumer mappings: 0 (reserved for user decision)")
     print("preview: 1920x1080, H.264, 30fps, 300 frames, 10.0s, no audio/subtitles")
-    print("topic3 pending visual batch: explicitly not approved")
     return 0
 
 

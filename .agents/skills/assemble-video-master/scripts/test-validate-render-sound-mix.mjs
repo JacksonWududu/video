@@ -7,7 +7,7 @@ import {validateRenderSoundMix} from './validate-render-sound-mix.mjs';
 const plan = {
   schema_version: 'knowledge-video-assembly-plan-v3',
   full_master_frames: 120,
-  narration_asset: 'topic99/assets/audio/narration.wav',
+  narration_asset: 'episode-test/assets/audio/narration.wav',
   bgm: {mode: 'disabled', source: null, track: null},
   sound_effects: {
     contract_version: 'knowledge-video-sound-effect-track-v2',

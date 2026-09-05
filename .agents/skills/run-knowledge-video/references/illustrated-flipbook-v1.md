@@ -4,9 +4,9 @@
 
 ## 选择、恢复与回滚
 
-保留 Gate 1、Gate 2 及三比例发布封面。按现有顺序选择“图文翻书”风格、`standard | rich`、`manual | one_click`，再选择已支持的音频来源。图文翻书不要求 cover-style scope，不改发布封面字节。用户明确选择封面开书时，按下文 `opening_cover` 展示适配使用当前 16:9 发布封面；这是本分支对发布封面不得进入 master 的明确例外，不新增品牌、标题或封面图层审批关卡。
+保留 Gate 1、Gate 2、封面白猫模式选择、三比例发布封面及完整 post-cover batch。现有风格表单新增“图文翻书”；其后仍选择 `standard | rich`、`manual | one_click` 和已支持的音频来源。图文翻书不要求 cover-style scope，不改发布封面字节。用户明确选择封面开书时，按下文 `opening_cover` 展示适配使用当前 16:9 发布封面；这是本分支对发布封面不得进入 master 的明确例外，不新增品牌、标题或封面图层审批关卡。
 
-用 `leverage-video/src/shared/flipbook-video/profile.mjs` 的 `FLIPBOOK_PROFILE_BYTES` 创建只读单集 `schema/` 快照，再用 `workflow-approval/contract.mjs::buildFlipbookStyleSelection` 建立 v2 选择。`FLIPBOOK_PROFILE_SHA256` 是该版本的精确快照哈希。继续用 `validateApprovalSelectionSequence` 校验 style → density → mode 哈希链，音频来源仍由现有独立选择合同校验；不增加自动默认或审批捷径。
+用 `leverage-video/src/shared/flipbook-video/profile.mjs` 的 `FLIPBOOK_PROFILE_BYTES` 创建只读单集 `schema/` 快照，再用 `workflow-approval/contract.mjs::buildFlipbookStyleSelection` 建立 v2 选择。`FLIPBOOK_PROFILE_SHA256` 是该版本的精确快照哈希。继续使用 `validatePostCoverSelectionBatch` 原哈希链和一次原子状态写入；不增加自动默认或独立审批捷径。
 
 已批准选择、快照、正文、时间表、图片、随机种子及分配结果均为不可变输入。任一改变按现有回滚矩阵使依赖审批和下游输出失效。音频字节和已批准未变图片可按原规则保留。恢复时复验磁盘哈希，不重新随机。旧记录不迁移。
 

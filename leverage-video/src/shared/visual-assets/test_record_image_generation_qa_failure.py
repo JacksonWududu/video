@@ -29,6 +29,15 @@ def failure(checksum: str, index: int, prompt_version: int = 1) -> dict:
     }
 
 
+def ian_geometry_finding(checksum: str, index: int) -> dict:
+    value = failure(checksum, index)
+    value["failure_reason"] = (
+        "IAN_ZONE_GEOMETRY_AND_SUBTITLE_SAFE_BAND: "
+        "semantic groups are intact and separated but miss their approved zones"
+    )
+    return value
+
+
 class ImageGenerationQaFailureAttemptLimitTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
@@ -81,6 +90,89 @@ class ImageGenerationQaFailureAttemptLimitTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "user takeover required"):
             self.module.apply_failure_control(item, review, failure("4" * 64, 4))
         self.assertEqual(len(item["image_generation_qa_failures"]), 3)
+
+    def test_takeover_stop_moves_episode_to_visual_review_boundary(self) -> None:
+        state = {
+            "phase": "visual_production",
+            "current_phase": "visual_production",
+        }
+
+        self.module.mark_state_awaiting_user_takeover(state)
+
+        self.assertEqual(state["phase"], "awaiting_visual_asset_review")
+        self.assertEqual(state["current_phase"], "awaiting_visual_asset_review")
+
+    def test_repairable_ian_geometry_does_not_consume_rejected_generation_limit(self) -> None:
+        item = {
+            "asset_id": "S04-ian-v01",
+            "shot_id": "S04",
+            "role": "standalone-graphic",
+            "status": "pending_generation",
+            "visual_generation_route": "ian-handdrawn-ppt",
+        }
+        review = {"queue_generation_allowed": True, "current_asset_id": item["asset_id"]}
+
+        control = self.module.apply_failure_control(
+            item,
+            review,
+            ian_geometry_finding("e" * 64, 1),
+        )
+
+        self.assertEqual(control["rejected_generation_count"], 0)
+        self.assertEqual(
+            control["automatic_retry_status"],
+            "deterministic_layout_repair_required",
+        )
+        self.assertNotIn("image_generation_qa_failures", item)
+        self.assertEqual(len(item["image_generation_repairable_findings"]), 1)
+        self.assertEqual(
+            item["image_generation_repairable_findings"][0]["disposition"],
+            "deterministic_repair_required",
+        )
+        self.assertEqual(item["image_generation_repairable_findings"][0]["attempt_number"], 1)
+        self.assertFalse(review["queue_generation_allowed"])
+        self.assertTrue(review["ian_layout_repair_required"])
+        self.assertNotIn("user_takeover_required", review)
+
+    def test_ian_semantic_failure_still_consumes_rejected_generation_limit(self) -> None:
+        item = {
+            "asset_id": "S04-ian-v01",
+            "shot_id": "S04",
+            "role": "standalone-graphic",
+            "status": "pending_generation",
+            "visual_generation_route": "ian-handdrawn-ppt",
+        }
+        review = {"queue_generation_allowed": True, "current_asset_id": item["asset_id"]}
+
+        control = self.module.apply_failure_control(
+            item,
+            review,
+            failure("f" * 64, 1),
+        )
+
+        self.assertEqual(control["rejected_generation_count"], 1)
+        self.assertEqual(control["automatic_retry_status"], "retry_allowed")
+        self.assertEqual(len(item["image_generation_qa_failures"]), 1)
+        self.assertNotIn("image_generation_repairable_findings", item)
+
+    def test_geometry_code_is_not_repairable_for_non_ian_route(self) -> None:
+        item = {
+            "asset_id": "S04-imagegen-v01",
+            "shot_id": "S04",
+            "role": "standalone-graphic",
+            "status": "pending_generation",
+            "visual_generation_route": "imagegen",
+        }
+        review = {"queue_generation_allowed": True, "current_asset_id": item["asset_id"]}
+
+        control = self.module.apply_failure_control(
+            item,
+            review,
+            ian_geometry_finding("9" * 64, 1),
+        )
+
+        self.assertEqual(control["rejected_generation_count"], 1)
+        self.assertEqual(control["automatic_retry_status"], "retry_allowed")
 
 
 if __name__ == "__main__":

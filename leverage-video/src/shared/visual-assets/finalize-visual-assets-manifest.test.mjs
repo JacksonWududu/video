@@ -10,6 +10,7 @@ import sharp from 'sharp';
 import {
   buildActionStatePlanSha256,
   buildActionStateScheduleV3,
+  buildActionStateScheduleV4,
   validateActionStateSchedule,
 } from '../action-state-schedule/contract.mjs';
 import {coverGeometry} from '../episode-tooling/raster-contract.mjs';
@@ -31,10 +32,228 @@ import {
 } from '../storyboard-visual-rhythm/contract.mjs';
 import {
   buildVisualAssetsManifest,
+  buildScenes,
   canonicalJson,
   lockVisualAssets,
+  validateWhiteCatP2OverrideEvidence,
   validateVisualAssetsManifest,
 } from './finalize-visual-assets-manifest.mjs';
+
+const P2_SATCHEL_TOPOLOGY = 'P2_SATCHEL_TOPOLOGY';
+const BOTTOM_SUBTITLE_SAFE_AREA = 'BOTTOM_SUBTITLE_SAFE_AREA';
+
+test('early failed P2 acceptance is generic for attempt one or two and hash-bound', async (t) => {
+  for (const attemptCount of [1, 2]) {
+    await t.test(`attempt ${attemptCount}`, () => {
+      const repositoryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'early-p2-'));
+      const episodeWorkspace = 'work/episode-test';
+      const prefix = `${episodeWorkspace}/assets`;
+      const assetId = `S${attemptCount}-master-v01`;
+      const scopeId = `S${attemptCount}:base/master`;
+      const episodeId = 'episode-test';
+      const transitionId = `episode-test:early-p2:${attemptCount}`;
+      const failureReason = 'P2_SATCHEL_TOPOLOGY: rear anchor and subtitle-safe area fail.';
+      const bindingFor = (relative, bytes) => {
+        write(repositoryRoot, relative, bytes);
+        return {path: relative, checksum_sha256: sha256(bytes)};
+      };
+      const attempts = Array.from({length: attemptCount}, (_, index) => {
+        const number = index + 1;
+        const selected = number === attemptCount;
+        const output = bindingFor(
+          `${prefix}/image/generated/attempt-${number}.png`,
+          Buffer.from(`output-${number}`),
+        );
+        const prompt = bindingFor(
+          `${prefix}/image/prompts/attempt-${number}.txt`,
+          Buffer.from(`${selected ? 'WHITE-CAT SATCHEL STRAP LOCK:\n' : ''}prompt ${number}`),
+        );
+        return {
+          attempt_number: number,
+          prompt,
+          output,
+          failure_reason: selected ? failureReason : `P2 prior failure ${number}`,
+          error_code: P2_SATCHEL_TOPOLOGY,
+        };
+      });
+      const selected = attempts.at(-1);
+      const limbMap = bindingFor(
+        `${prefix}/image/review/limb-map.png`,
+        Buffer.from('limb-map'),
+      );
+      const identityQa = {
+        result: 'fail',
+        cat_count: 1,
+        foreleg_count: 2,
+        hindleg_count: 2,
+        paw_count: 4,
+        anatomy_evidence: {
+          contract_version: 'white-cat-anatomy-qa-v2',
+          result: 'pass',
+          inspection_evidence: {
+            methods: ['full_resolution', 'numbered_limb_map'],
+            numbered_limb_map_path: limbMap.path,
+            numbered_limb_map_checksum_sha256: limbMap.checksum_sha256,
+            numbered_limb_map_source_checksum_sha256: selected.output.checksum_sha256,
+            numbered_limb_map_limb_ids: ['F1', 'F2', 'H1', 'H2'],
+          },
+        },
+        accessory_geometry_correct: false,
+        front_strap_attached_to_forward_bag_end: true,
+        rear_strap_attached_to_rear_bag_end: false,
+        bag_end_attachment_count: 1,
+        both_bag_end_anchors_visibly_traceable: false,
+        source_retry_policy_compliant: false,
+      };
+      const visualQa = {
+        result: 'fail',
+        bottom_subtitle_safe_area_result: 'fail',
+        bottom_subtitle_safe_area_readable: false,
+      };
+      const p2GateId = `visual_asset.${assetId}.P2_SATCHEL_TOPOLOGY`;
+      const subtitleGateId = `visual_asset.${assetId}.BOTTOM_SUBTITLE_SAFE_AREA`;
+      const gateIds = [p2GateId, subtitleGateId];
+      const qa = {
+        contract_version: 'ordinary-imagegen-white-cat-master-qa-v2',
+        result: 'fail',
+        asset_id: assetId,
+        identity_qa: identityQa,
+        selected_source: selected.output,
+        selected_prompt: selected.prompt,
+        visual_qa: visualQa,
+        waivable_mechanical_failures: gateIds.map((gateId) => ({
+          error_code: gateId.endsWith('P2_SATCHEL_TOPOLOGY')
+            ? P2_SATCHEL_TOPOLOGY
+            : BOTTOM_SUBTITLE_SAFE_AREA,
+          observed_result: 'fail',
+          reason: failureReason,
+        })),
+      };
+      const qaBytes = jsonBytes(qa);
+      const qaBinding = bindingFor(`${episodeWorkspace}/schema/qa.json`, qaBytes);
+      const decision = {
+        exact_user_message: `接受 ${assetId} 第${attemptCount}次失败图，并仅此一次放行 P2 与字幕门禁；停止后续自动重试，保留真实失败证据。`,
+        decided_at: NOW,
+        disposition: 'allow_once',
+      };
+      const consumption = {
+        from_phase: 'visual_production',
+        to_phase: 'visual_production',
+        status: 'consumed',
+        consumed_transition_id: transitionId,
+        consumed_at: NOW,
+      };
+      const selection = {
+        contract_version: 'visual-asset-user-source-selection-v1',
+        episode_id: episodeId,
+        asset_id: assetId,
+        generation_attempt_scope_id: scopeId,
+        selected_attempt_number: attemptCount,
+        selected_generation_source: selected.output,
+        selected_prompt: selected.prompt,
+        preserved_failure: {
+          attempt_number: attemptCount,
+          error_code: P2_SATCHEL_TOPOLOGY,
+          failure_reason: failureReason,
+        },
+        disclosed_gate_ids: gateIds,
+        gate_effect: {
+          selection_recorded: true,
+          mechanical_gate_override_consumed: true,
+          release_decision: decision,
+          consumed_transition_id: transitionId,
+        },
+      };
+      const selectionBytes = jsonBytes(selection);
+      const selectionBinding = bindingFor(
+        `${episodeWorkspace}/schema/user-selection.json`,
+        selectionBytes,
+      );
+      const artifacts = [selected.output, selected.prompt, qaBinding, limbMap];
+      for (const failure of attempts) {
+        for (const binding of [failure.output, failure.prompt]) {
+          if (!artifacts.some((artifact) => canonicalJson(artifact) === canonicalJson(binding))) {
+            artifacts.push(binding);
+          }
+        }
+      }
+      artifacts.push(selectionBinding);
+      const override = {
+        contract_version: 'one-time-explicit-user-mechanical-gate-override-v1',
+        episode_id: episodeId,
+        scope_id: scopeId,
+        gate_ids: gateIds,
+        acknowledged_failures: gateIds.map((gateId) => ({
+          gate_id: gateId,
+          observed_result: 'fail',
+          reason: failureReason,
+        })),
+        bound_artifacts: artifacts,
+        decision,
+        consumption,
+        reuse_forbidden: true,
+      };
+      override.override_sha256 = canonicalSha256(override);
+      const item = {
+        asset_id: assetId,
+        role: 'base/master',
+        visual_generation_route: 'imagegen',
+        white_cat_present: true,
+        generation_attempt_scope_id: scopeId,
+        path: selected.output.path,
+        checksum_sha256: selected.output.checksum_sha256,
+        prompt_path: selected.prompt.path,
+        prompt_checksum_sha256: selected.prompt.checksum_sha256,
+        qa_evidence_path: qaBinding.path,
+        qa_evidence_checksum_sha256: qaBinding.checksum_sha256,
+        identity_qa: identityQa,
+        visual_qa: visualQa,
+        image_generation_attempt_control: {
+          contract_version: 'storyboard-image-generation-attempt-limit-v1',
+          generation_attempt_scope_id: scopeId,
+          maximum_automatic_rejected_generations: 3,
+          rejected_generation_count: attemptCount,
+          automatic_retry_status: 'stopped_by_explicit_user_acceptance',
+        },
+        white_cat_generation_attempt_control: {
+          contract_version: 'white-cat-imagegen-attempt-limit-v1',
+          maximum_automatic_qa_failures: 3,
+          qa_failed_generation_count: attemptCount,
+          automatic_retry_status: 'stopped_by_explicit_user_acceptance',
+        },
+        image_generation_qa_failures: attempts,
+        white_cat_imagegen_qa_failures: attempts,
+        mechanical_qa_result: 'failed_but_waived_once',
+        user_mechanical_gate_override_result: 'pass_with_user_override',
+        user_mechanical_gate_override: override,
+        waived_mechanical_gate_ids: gateIds,
+        override_bound_artifacts: artifacts,
+        user_source_selection_evidence: selectionBinding,
+      };
+      const state = {
+        episode_id: episodeId,
+        blockers: [],
+        transition_audit: [{consumed_transition_id: transitionId}],
+      };
+      assert.equal(validateWhiteCatP2OverrideEvidence({
+        repositoryRoot,
+        episodeWorkspace,
+        state,
+        item,
+        qa,
+      }).result, 'pass_with_user_override');
+      item.image_generation_attempt_control.automatic_retry_status =
+        'stopped_user_takeover_required';
+      assert.throws(() => validateWhiteCatP2OverrideEvidence({
+        repositoryRoot,
+        episodeWorkspace,
+        state,
+        item,
+        qa,
+      }), /attempt-limit\/white-cat failure history is stale/);
+    });
+  }
+});
 
 const NOW = '2026-08-22T10:00:00+08:00';
 const sha256 = (bytes) => crypto.createHash('sha256').update(bytes).digest('hex');
@@ -1146,6 +1365,42 @@ const rewriteState = (fixture, mutate) => {
   return state;
 };
 
+const convertFixtureToDirectFirst = (fixture) => {
+  const storyboardPath = path.join(fixture.repositoryRoot, fixture.paths.storyboard);
+  const storyboard = fs.readFileSync(storyboardPath, 'utf8').replace(
+    /^## OPEN-00\n[\s\S]*?(?=^## S01$)/m,
+    '',
+  );
+  assert.doesNotMatch(storyboard, /OPEN-00/);
+  fs.writeFileSync(storyboardPath, storyboard);
+  const storyboardChecksum = sha256(Buffer.from(storyboard));
+  const state = readJson(fixture.repositoryRoot, fixture.paths.state);
+  state.active_storyboard.checksum_sha256 = storyboardChecksum;
+  state.storyboard_review.presented_checksum_sha256 = storyboardChecksum;
+  state.storyboard_review.approved_checksum_sha256 = storyboardChecksum;
+  state.storyboard_timing = {direct_first_shot_contract: 'direct-first-shot-v1'};
+  state.storyboard_draft = {direct_first_shot_contract: 'direct-first-shot-v1'};
+  delete state.opening_cover;
+  state.visual_asset_review.queue.forEach((item) => {
+    item.storyboard_checksum_sha256 = storyboardChecksum;
+  });
+  const ianItem = state.visual_asset_review.queue.find(
+    (item) => item.visual_generation_route === 'ian-handdrawn-ppt',
+  );
+  const ianPackage = readJson(
+    fixture.repositoryRoot,
+    ianItem.scene_package_manifest_path,
+  );
+  ianPackage.storyboard_binding.checksum_sha256 = storyboardChecksum;
+  writeJson(
+    fixture.repositoryRoot,
+    ianItem.scene_package_manifest_path,
+    ianPackage,
+  );
+  writeJson(fixture.repositoryRoot, fixture.paths.state, state);
+  return storyboardChecksum;
+};
+
 const authorizeFixtureOneClick = (
   fixture,
   {fabricateDirectionSelection = false, fabricateTransitionApproval = false} = {},
@@ -1399,6 +1654,203 @@ test('build preserves accepted-asset evidence and complete timing maps', async (
   assert.equal(manifest.cover.approved_external_source.path, fixture.state.opening_cover.source_path);
   assert.equal(manifest.cover.episode_archive.exact_bytes_equal_external_source, true);
   assert.equal(manifest.scene_transitions[0].renderer, 'leverage-video/src/shared/scene-transitions');
+});
+
+test('direct-first storyboard builds and locks without consuming publishing-cover files', async (t) => {
+  const fixture = await setup(t);
+  convertFixtureToDirectFirst(fixture);
+  authorizeFixtureOneClick(fixture);
+
+  const manifest = await buildVisualAssetsManifest(buildOptions(fixture));
+  assert.equal(manifest.scenes[0].shot_id, 'S01');
+  assert.equal(manifest.scenes[0].visual_rhythm.row.start_frame, 0);
+  assert.equal(Object.hasOwn(manifest, 'cover'), false);
+  assert.equal(JSON.stringify(manifest).includes('cover-only-v1'), false);
+  assert.equal(JSON.stringify(manifest).includes('approved-external-cover.png'), false);
+
+  const validation = await lockVisualAssets(buildOptions(fixture));
+  assert.equal(validation.result, 'pass');
+  assert.equal(validation.direct_first_shot_contract, 'direct-first-shot-v1');
+  assert.equal(validation.publishing_cover_included, false);
+  const lockedState = readJson(fixture.repositoryRoot, fixture.paths.state);
+  assert.equal(Object.hasOwn(lockedState, 'opening_cover_production'), false);
+  assert.equal(
+    Object.hasOwn(lockedState.visual_assets_lock, 'opening_cover_evidence_path'),
+    false,
+  );
+});
+
+test('hero_pose scene keeps its independent background outside scheduled pose occurrences', () => {
+  const sourceText = '甲乙丙丁';
+  const densitySelectionSha256 = 'd'.repeat(64);
+  const schedule = buildActionStateScheduleV4({
+    totalFrames: 120,
+    sourceText,
+    motionTier: 'hero_pose',
+    densityMode: 'standard',
+    visualDensitySelectionSha256: densitySelectionSha256,
+    backgroundAssetId: 'S01-background',
+    states: [...sourceText].map((text, index) => ({
+      state_id: `S01-pose-${String(index + 1).padStart(2, '0')}`,
+      semantic_state: `姿态 ${index + 1}`,
+      narration_byte_start: index * 3,
+      narration_byte_end: (index + 1) * 3,
+      narration_text: text,
+      at_frame: index * 30,
+      semantic_hold_reason: null,
+    })),
+  });
+  const statePlanSha256 = buildActionStatePlanSha256(schedule);
+  const selected = {
+    status: 'approved',
+    visual_generation_route: 'imagegen',
+    visual_structure_id: 'single-scene',
+    treatment_profile_id: 'imagegen-cover-derived-narrative',
+    white_cat_present: true,
+    white_cat_visual_style_id: 'cover-derived-episode-style',
+    white_cat_visual_style_selection_sha256: 'e'.repeat(64),
+    visual_cohesion_profile_id: 'cover-derived-cohesion-v1',
+    visible_text_mode: 'none',
+    exact_visible_text: null,
+    visible_text_placement: null,
+  };
+  const common = {
+    shot_id: 'S01',
+    visual_generation_route: 'imagegen',
+    scene_class: 'narrative_illustration',
+    visual_structure_id: selected.visual_structure_id,
+    treatment_profile_id: selected.treatment_profile_id,
+    white_cat_visual_style_id: selected.white_cat_visual_style_id,
+    white_cat_visual_style_selection_sha256:
+      selected.white_cat_visual_style_selection_sha256,
+    visual_cohesion_profile_id: selected.visual_cohesion_profile_id,
+    visible_text_mode: 'none',
+    exact_visible_text: null,
+    visible_text_placement: null,
+    shot_start_frame: 0,
+    shot_end_frame: 120,
+    narration_source_text: sourceText,
+    motion_tier: 'hero_pose',
+    schedule_background_asset_id: 'S01-background',
+    action_state_schedule_contract_version: 'action-state-schedule-v4',
+    action_state_plan_sha256: statePlanSha256,
+  };
+  const queue = [{
+    ...common,
+    asset_id: 'S01-master-v01',
+    asset_kind: 'hero_pose_background',
+    role: 'base/master',
+    state_index: null,
+    white_cat_present: false,
+    qa_contract_version: 'ordinary-imagegen-hero-pose-background-qa-v1',
+    strict_review: true,
+    has_downstream_action_variants: true,
+    depends_on: [],
+  }, ...schedule.occurrences.map((occurrence, index) => ({
+    ...common,
+    asset_id: `S01-action-${String(index + 1).padStart(2, '0')}-v01`,
+    asset_kind: 'hero_pose',
+    role: `action-${String(index + 1).padStart(2, '0')}`,
+    state_index: index,
+    schedule_state_id: occurrence.state_id,
+    semantic_state: occurrence.semantic_state,
+    white_cat_present: true,
+    strict_review: false,
+    has_downstream_action_variants: false,
+    depends_on: ['S01-master-v01'],
+  }))];
+  const assets = queue.map((item) => ({
+    asset_id: item.asset_id,
+    role: item.role,
+    state_index: item.state_index,
+    schedule_state_id: item.schedule_state_id ?? null,
+    production: {
+      path: `episode/assets/image/production/${item.asset_id}.png`,
+      checksum_sha256: String(item.state_index ?? 9).repeat(64).slice(0, 64),
+    },
+  }));
+  const rhythmShot = {
+    shot_id: 'S01',
+    start_frame: 0,
+    end_frame: 120,
+    motion_tier: 'hero_pose',
+    asset_plan: {main_image_count: 1, layer_count: 0, pose_count: 4},
+    intra_shot_transition_plan: schedule.intra_shot_transitions.map((transition) => ({
+      from_asset_id: transition.from_asset_id,
+      to_asset_id: transition.to_asset_id,
+      kind: transition.kind,
+    })),
+  };
+  const options = {
+    queue,
+    assets,
+    directionAuthority: {
+      path: 'episode/schema/direction.json',
+      checksum_sha256: '1'.repeat(64),
+      value: {
+        catalog_version: 'visual-direction-catalog-v3',
+        catalog_checksum_sha256: '2'.repeat(64),
+        visual_language_catalog_version: 'visual-language-catalog-v1',
+        visual_language_catalog_checksum_sha256: '3'.repeat(64),
+        presented_map_sha256: '4'.repeat(64),
+        rows: [{shot_id: 'S01', scene_class: 'narrative_illustration', user_selection: selected}],
+      },
+    },
+    rhythmAuthority: {
+      path: 'episode/schema/rhythm.json',
+      checksum_sha256: '5'.repeat(64),
+      value: {
+        contract_version: 'storyboard-visual-rhythm-v2',
+        density_mode: 'standard',
+        visual_density_selection_sha256: densitySelectionSha256,
+        presented_map_sha256: '6'.repeat(64),
+        shots: [rhythmShot],
+      },
+    },
+    scheduleSet: {
+      schedules: [{
+        shot_id: 'S01',
+        shot_start_frame: 0,
+        shot_end_frame: 120,
+        state_plan_sha256: statePlanSha256,
+        validation: validateActionStateSchedule(schedule, {
+          totalFrames: 120,
+          fps: 30,
+          densityMode: 'standard',
+          densitySelectionSha256,
+        }),
+        schedule,
+      }],
+    },
+    storyboardSourceTexts: new Map([['S01', sourceText]]),
+    expectedDirectionStatus: 'approved',
+  };
+
+  const result = buildScenes(options);
+  assert.equal(result.scenes[0].hero_pose_background.asset_id, 'S01-master-v01');
+  assert.equal(
+    result.scenes[0].hero_pose_background.schedule_background_asset_id,
+    'S01-background',
+  );
+  assert.deepEqual(result.scenes[0].image_sequence.map((item) => item.asset_id), [
+    'S01-action-01-v01',
+    'S01-action-02-v01',
+    'S01-action-03-v01',
+    'S01-action-04-v01',
+  ]);
+  assert.equal(result.scenes[0].action_state_schedule.occurrence_asset_bindings.length, 4);
+
+  assert.throws(
+    () => buildScenes({...options, queue: queue.slice(1), assets: assets.slice(1)}),
+    /hero_pose.*background/i,
+  );
+
+  const strictPoseQueue = structuredClone(queue);
+  strictPoseQueue[1].strict_review = true;
+  assert.throws(
+    () => buildScenes({...options, queue: strictPoseQueue}),
+    /hero_pose occurrence queue contract/i,
+  );
 });
 
 test('finalizer rejects an Ian queue record that substitutes an arbitrary style reference', async (t) => {

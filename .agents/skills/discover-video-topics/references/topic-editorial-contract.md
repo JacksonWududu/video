@@ -7,9 +7,18 @@
 - Help the audience understand an important question rather than prescribe an individualized action.
 - Keep financial topics educational: no stock recommendations, price predictions, return promises, gambling or recovery methods, loan funnels, or individualized financial advice.
 
+## Duration policy
+
+Apply `knowledge-video-duration-policy-v1`.
+
+- Gate 1 and Gate 2 have no fixed minimum or maximum episode duration.
+- When the user states a target duration, record it and judge whether the central mechanism, evidence boundary, and useful conclusion can fit responsibly. Duration alone is never a blocker.
+- When no target is stated, let the uniquely resolved local script and later validated narration audio determine duration.
+- A short episode may merge its situation, mechanism, and boundary, but it may not omit the important limit merely to hit a time target. Downstream per-shot clean-frame and transition constraints remain unchanged.
+
 ## Episode shape
 
-Mature each topic into one ordinary-language question that does not require prior knowledge of the professional term. The proposed 100–240 second episode must contain:
+Mature each topic into one ordinary-language question that does not require prior knowledge of the professional term. Regardless of duration, the episode must contain:
 
 - one recognizable problem or life tension;
 - one central conclusion;
@@ -26,11 +35,11 @@ Use these dimensions as the workcard rubric when scoring, maturing, or validatin
 - `audience tension`: a concrete experience or decision the audience can recognize quickly;
 - `channel fit`: a clear connection to one of the channel pillars;
 - `evidence path`: credible research, official data, or authoritative sources can support the core claim and an important limit;
-- `scope`: the question can be answered responsibly in 100–240 seconds;
+- `scope`: the question can be answered responsibly within the user's stated target duration, or without a fixed duration when none was stated;
 - `safety`: no prohibited financial, gambling, medical, legal, or other high-risk prescription;
 - `visual potential`: the central conflict and explanation can be shown clearly, including with the recurring white cat when appropriate.
 
-Use scoring as an editorial diagnostic, not as an automatic rejection threshold. For a user-supplied topic, block Gate 1 only for a material evidence, scope, safety, or production-feasibility problem. Preserve the user's intent and disclose any required reframe for confirmation.
+Use scoring as an editorial diagnostic, not as an automatic rejection threshold. For a user-supplied topic, block Gate 1 only for a material evidence, scope, safety, or production-feasibility problem. A duration target may expose such a problem only when the required mechanism or boundary cannot fit responsibly; never block on a numeric duration threshold alone. Preserve the user's intent and disclose any required reframe for confirmation.
 
 ## Gate 1 user judgment
 

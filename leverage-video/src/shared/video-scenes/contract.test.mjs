@@ -95,6 +95,7 @@ test('current generic and Ian sound renderers share one bus and one owner each',
   assert.doesNotMatch(track, /playbackRate|trimBefore|trimAfter|normalize\s*\(/);
   assert.match(ian, /gain_multiplier \* soundEffectBusGain/);
   assert.match(ian, /requires the unified SFX bus multiplier/);
+  assert.doesNotMatch(ian, /soundEffectBusGain > 1/);
 });
 
 test('versioned burned-in caption component consumes only active display text', () => {
@@ -138,7 +139,17 @@ test('renderer keeps legacy null-route narrative plans readable without weakenin
   assert.match(source, /'comic-imagegen'/);
   assert.match(source, /intra_shot_transition_contract/);
   assert.match(source, /hero_pose_background/);
+  assert.match(source, /subject_entrance/);
   assert.match(source, /knowledge-video-assembly-plan-v3/);
   assert.match(source, /KnowledgeVideoSoundEffectCue/);
   assert.match(source, /IntraShotTransitionV1/);
+});
+
+test('narrative subject entrance animates only the first approved transparent pose', () => {
+  const narrative = read('NarrativeScene.tsx');
+  const sequence = read('../intra-shot-transitions/IntraShotImageSequence.tsx');
+  assert.match(narrative, /narrative-subject-entrance-v1|data-subject-entrance/);
+  assert.match(narrative, /firstOccurrenceContent/);
+  assert.match(narrative, /subjectEntrance\.subject_asset_id !== imageSequence\[0\]\.asset_id/);
+  assert.match(sequence, /firstOccurrenceContent/);
 });

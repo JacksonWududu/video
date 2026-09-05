@@ -7,6 +7,7 @@ import argparse
 import copy
 import html
 import hashlib
+import importlib.util
 import json
 import re
 import struct
@@ -15,7 +16,6 @@ from pathlib import Path
 from typing import Any
 
 
-REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 APPROVAL_WORDS = ("批准", "通过", "符合预期", "approve", "approved")
 REVIEW_MODES = {
@@ -24,7 +24,9 @@ REVIEW_MODES = {
 }
 GENERATION_UNLOCKING_STATUSES = {
     "approved", "qa_passed_pending_batch_review", "qa_passed_pending_final_review",
+    "qa_failed_but_waived_once_pending_final_review",
 }
+WAIVED_PENDING_FINAL_REVIEW_STATUS = "qa_failed_but_waived_once_pending_final_review"
 WHITEBOARD_ROUTE = "srt-whiteboard-animation"
 LOCAL_VIDEO_ROUTE = "local-video-file"
 IAN_ROUTE = "ian-handdrawn-ppt"
@@ -44,6 +46,15 @@ WHITE_CAT_STYLE_OPTIONS = {
 DYNAMIC_WHITE_CAT_STYLE_OPTION = (
     "imagegen-cover-derived-narrative", "cover-derived-cohesion-v1"
 )
+REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
+IMAGEGEN_HELPER_PATH = (
+    REPOSITORY_ROOT
+    / "leverage-video/src/shared/visual-assets/record-generated-imagegen-strict.py"
+)
+OVERRIDE_BRIDGE_PATH = (
+    REPOSITORY_ROOT
+    / "leverage-video/src/shared/user-gate-override/consume-override.mjs"
+)
 WHITE_CAT_LIMB_IDS = {"F1", "F2", "H1", "H2"}
 WHITE_CAT_MASTER_ROLES = {
     "base/master", "white-cat-master", "recurring-character-master",
@@ -52,8 +63,77 @@ WHITE_CAT_IMAGEGEN_MASTER_QA = "ordinary-imagegen-white-cat-master-qa-v2"
 WHITE_CAT_IMAGEGEN_ACTION_QA = "ordinary-imagegen-white-cat-action-qa-v2"
 WHITE_CAT_XUAN_MASTER_QA = "xuan-paper-diorama-asset-qa-v1"
 WHITE_CAT_XUAN_ACTION_QA = "xuan-paper-diorama-action-qa-v1"
+WHITE_CAT_PROMPT_FIXED_MARKER_QA_CONTRACT = (
+    "white-cat-prompt-fixed-marker-qa-v1"
+)
+WHITE_CAT_SATCHEL_PROMPT_MARKER = "WHITE-CAT SATCHEL STRAP LOCK:"
+WHITE_CAT_HERO_POSE_PROMPT_MARKER = (
+    "HERO-POSE ASSET: full-canvas transparent RGBA with fixed "
+    "registration anchors."
+)
+VISIBLE_SYMBOL_FREE = "VISIBLE_SYMBOL_FREE"
+P0_AMBIGUOUS_TRACE = "P0_AMBIGUOUS_TRACE"
+P0_FORWARD_REVERSE_MISMATCH = "P0_FORWARD_REVERSE_MISMATCH"
+BOTTOM_SUBTITLE_SAFE_AREA = "BOTTOM_SUBTITLE_SAFE_AREA"
 FINAL_REVIEW_PACKAGE_CONTRACT = "final-production-asset-review-package-v1"
 FINAL_REVIEW_ASSETS_PER_PAGE = 12
+
+
+def _load_imagegen_helper():
+    spec = importlib.util.spec_from_file_location(
+        "visual_approval_imagegen_helper", IMAGEGEN_HELPER_PATH
+    )
+    if spec is None or spec.loader is None:
+        raise ValueError("ordinary ImageGen helper cannot be loaded")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _validate_consumed_user_gate_override(
+    override: dict[str, Any],
+    *,
+    episode_id: str,
+    scope_id: str,
+    gate_ids: list[str],
+    artifacts: list[dict[str, str]],
+    from_phase: str = "awaiting_visual_asset_review",
+    to_phase: str = "visual_production",
+) -> dict[str, Any]:
+    payload = {
+        "operation": "validate",
+        "override": override,
+        "bindings": {
+            "episodeId": episode_id,
+            "requiredScopeId": scope_id,
+            "requiredGateIds": gate_ids,
+            "requiredArtifacts": artifacts,
+            "fromPhase": from_phase,
+            "toPhase": to_phase,
+            "requiredStatus": "consumed",
+        },
+    }
+    try:
+        command = subprocess.run(
+            ["node", str(OVERRIDE_BRIDGE_PATH)],
+            input=json.dumps(payload, ensure_ascii=False),
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+    except OSError as error:
+        raise ValueError("one-time user gate override validator is unavailable") from error
+    if command.returncode != 0:
+        raise ValueError(
+            f"one-time user gate override: {command.stderr.strip() or 'validation failed'}"
+        )
+    try:
+        result = json.loads(command.stdout)
+    except json.JSONDecodeError as error:
+        raise ValueError("one-time user gate override validator returned invalid JSON") from error
+    if result.get("result") != "pass_with_user_override":
+        raise ValueError("one-time user gate override did not validate")
+    return result
 
 
 def _canonical_sha256(value: Any) -> str:
@@ -103,6 +183,53 @@ def _sha256_file(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _load_white_cat_visual_style_selection(
+    state: dict[str, Any],
+) -> dict[str, Any] | None:
+    summary = state.get("white_cat_visual_style_selection")
+    if summary is None:
+        return None
+    if not isinstance(summary, dict):
+        raise ValueError("white-cat visual style selection is invalid")
+    path_value = summary.get("path")
+    checksum = summary.get("file_checksum_sha256")
+    if path_value is None and checksum is None:
+        return summary
+    if not isinstance(path_value, str) or not SHA256_RE.fullmatch(str(checksum or "")):
+        raise ValueError("white-cat visual style selection file binding is invalid")
+    selection_path = _resolve_regular_file(REPOSITORY_ROOT, path_value)
+    if _sha256_file(selection_path) != checksum:
+        raise ValueError("white-cat visual style selection file checksum is stale")
+    try:
+        selection = json.loads(selection_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise ValueError("white-cat visual style selection file is invalid JSON") from error
+    if not isinstance(selection, dict) or summary.get("status") != "selected":
+        raise ValueError("white-cat visual style selection summary is invalid")
+    summary_fields = [
+        "contract_version",
+        "selection_sha256",
+        "style_id",
+        "treatment_profile_id",
+        "visual_cohesion_profile_id",
+        "style_profile_path",
+        "style_profile_checksum_sha256",
+        "decision",
+    ]
+    if selection.get("contract_version") == "white-cat-visual-style-selection-v2":
+        summary_fields.extend(
+            [
+                "style_source",
+                "style_label",
+                "publishing_cover_package_path",
+                "publishing_cover_package_sha256",
+            ]
+        )
+    if any(summary.get(field) != selection.get(field) for field in summary_fields):
+        raise ValueError("white-cat visual style selection summary is stale or substituted")
+    return selection
 
 
 def _png_dimensions(path: Path) -> tuple[int, int]:
@@ -200,7 +327,7 @@ def _review(state: dict[str, Any]) -> dict[str, Any]:
     return review
 
 
-STATIC_SPREAD_VALIDATOR_PATH = REPOSITORY_ROOT / "leverage-video/src/shared/visual-assets/static-spread-contract.mjs"
+STATIC_SPREAD_VALIDATOR_PATH = Path(__file__).resolve().parents[4] / "leverage-video/src/shared/visual-assets/static-spread-contract.mjs"
 
 
 def _is_static_spread(item: dict[str, Any]) -> bool:
@@ -237,7 +364,7 @@ def _queue(state: dict[str, Any]) -> list[dict[str, Any]]:
         and item.get("status") != "superseded"
     ]
     local_video_seen = False
-    style_selection = state.get("white_cat_visual_style_selection")
+    style_selection = _load_white_cat_visual_style_selection(state)
     current_style = isinstance(style_selection, dict)
     if current_style:
         style_id = style_selection.get("style_id")
@@ -296,7 +423,10 @@ def _queue(state: dict[str, Any]) -> list[dict[str, Any]]:
             raise ValueError("white-cat visual style selection is invalid")
     for item in queue:
         _require_static_spread(state, item, authority_only=True)
-        if current_style and item.get("white_cat_present") is True:
+        if current_style and (
+            item.get("white_cat_present") is True
+            or item.get("asset_kind") == "hero_pose_background"
+        ):
             if (
                 item.get("visual_generation_route") != "imagegen"
                 or item.get("white_cat_visual_style_id") != style_id
@@ -362,8 +492,942 @@ def _is_whiteboard(item: dict[str, Any]) -> bool:
     return item.get("visual_generation_route") == WHITEBOARD_ROUTE
 
 
+def _consumed_transition_id_count(value: Any, transition_id: str) -> int:
+    if isinstance(value, dict):
+        return sum(
+            1
+            if key == "consumed_transition_id" and nested == transition_id
+            else _consumed_transition_id_count(nested, transition_id)
+            for key, nested in value.items()
+        )
+    if isinstance(value, list):
+        return sum(
+            _consumed_transition_id_count(nested, transition_id)
+            for nested in value
+        )
+    return 0
+
+
+def _white_cat_prompt_fixed_marker_failures(
+    item: dict[str, Any], prompt_text: str,
+) -> list[dict[str, str]]:
+    asset_id = item.get("asset_id")
+    failures: list[dict[str, str]] = []
+    if WHITE_CAT_SATCHEL_PROMPT_MARKER not in prompt_text:
+        failures.append({
+            "gate_id": f"visual_asset.{asset_id}.P2_PROMPT_FIXED_MARKER",
+            "observed_result": "fail",
+            "reason": (
+                "P2_PROMPT_FIXED_MARKER: required literal is missing: "
+                f"{WHITE_CAT_SATCHEL_PROMPT_MARKER}"
+            ),
+        })
+    if (
+        item.get("asset_kind") == "hero_pose"
+        and WHITE_CAT_HERO_POSE_PROMPT_MARKER not in prompt_text
+    ):
+        failures.append({
+            "gate_id": (
+                f"visual_asset.{asset_id}.HERO_POSE_PROMPT_FIXED_MARKER"
+            ),
+            "observed_result": "fail",
+            "reason": (
+                "HERO_POSE_PROMPT_FIXED_MARKER: required literal is missing: "
+                f"{WHITE_CAT_HERO_POSE_PROMPT_MARKER}"
+            ),
+        })
+    return failures
+
+
+def _is_exact_prompt_marker_release_message(
+    value: Any, *, asset_id: Any, hero_pose: bool,
+) -> bool:
+    if not isinstance(value, str) or not value.strip():
+        return False
+    message = value.lower()
+    return (
+        str(asset_id).lower() in message
+        and "p2" in message
+        and "提示词" in message
+        and "标记" in message
+        and (not hero_pose or "hero-pose" in message)
+        and any(marker in message for marker in ("放行", "接受", "允许"))
+        and any(marker in message for marker in ("一次", "本次", "仅此一次"))
+        and "保留" in message
+        and "真实提示词" in message
+        and "失败证据" in message
+    )
+
+
+def _bound_white_cat_prompt_failures(
+    item: dict[str, Any], repository_root: str | Path | None,
+) -> list[dict[str, str]]:
+    prompt_binding = {
+        "path": item.get("prompt_path"),
+        "checksum_sha256": item.get("prompt_checksum_sha256"),
+    }
+    verification_root = repository_root
+    prompt_path = prompt_binding["path"]
+    if (
+        verification_root is None
+        and isinstance(prompt_path, str)
+        and prompt_path
+        and not Path(prompt_path).is_absolute()
+        and ".." not in Path(prompt_path).parts
+        and (REPOSITORY_ROOT / prompt_path).exists()
+    ):
+        verification_root = REPOSITORY_ROOT
+    if verification_root is not None:
+        prompt_file = _resolve_regular_file(verification_root, prompt_path)
+        if _sha256_file(prompt_file) != prompt_binding["checksum_sha256"]:
+            raise ValueError("one-time user gate override prompt changed on disk")
+        try:
+            prompt_text = prompt_file.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as error:
+            raise ValueError(
+                "one-time user gate override prompt is not valid UTF-8"
+            ) from error
+        return _white_cat_prompt_fixed_marker_failures(item, prompt_text)
+
+    prompt_contract_qa = item.get("prompt_contract_qa")
+    if prompt_contract_qa is None:
+        return []
+    declared_failures = prompt_contract_qa.get("failures") \
+        if isinstance(prompt_contract_qa, dict) else None
+    allowed_failures = _white_cat_prompt_fixed_marker_failures(item, "")
+    if (
+        not isinstance(declared_failures, list)
+        or any(failure not in allowed_failures for failure in declared_failures)
+        or declared_failures != [
+            failure for failure in allowed_failures if failure in declared_failures
+        ]
+    ):
+        raise ValueError(
+            "one-time user gate override prompt-marker QA declaration is invalid"
+        )
+    return declared_failures
+
+
+def _white_cat_p2_override_evidence(
+    item: dict[str, Any],
+    *,
+    state: dict[str, Any] | None,
+    repository_root: str | Path | None,
+    inspection: dict[str, Any],
+) -> dict[str, Any] | None:
+    has_override_marker = any(
+        item.get(key) is not None
+        for key in (
+            "mechanical_qa_result",
+            "user_mechanical_gate_override",
+            "user_mechanical_gate_override_result",
+        )
+    )
+    if not has_override_marker:
+        return None
+    if (
+        item.get("mechanical_qa_result") != "failed_but_waived_once"
+        or item.get("user_mechanical_gate_override_result")
+        != "pass_with_user_override"
+        or not isinstance(item.get("user_mechanical_gate_override"), dict)
+        or state is None
+    ):
+        raise ValueError(
+            f"one-time user gate override state is incomplete: {item.get('asset_id')}"
+        )
+    scope_id = item.get("generation_attempt_scope_id")
+    episode_id = state.get("episode_id")
+    if not isinstance(scope_id, str) or not scope_id \
+            or not isinstance(episode_id, str) or not episode_id:
+        raise ValueError("one-time user gate override episode or scope is missing")
+    attempt_control = item.get("image_generation_attempt_control", {})
+    white_cat_control = item.get("white_cat_generation_attempt_control", {})
+    generation_failures = item.get("image_generation_qa_failures", [])
+    p2_failures = item.get("white_cat_imagegen_qa_failures", [])
+    p0_gate_id = (
+        f"visual_asset.{item.get('asset_id')}.{P0_FORWARD_REVERSE_MISMATCH}"
+    )
+    has_forward_reverse_override = p0_gate_id in item.get(
+        "waived_mechanical_gate_ids", []
+    )
+    generation_checksums = [
+        failure.get("output", {}).get("checksum_sha256")
+        for failure in generation_failures
+        if isinstance(failure, dict)
+    ]
+    failure_count = attempt_control.get("rejected_generation_count")
+    early_user_acceptance = (
+        failure_count in {1, 2}
+        and attempt_control.get("automatic_retry_status")
+        == "stopped_by_explicit_user_acceptance"
+        and white_cat_control.get("qa_failed_generation_count") == failure_count
+        and white_cat_control.get("automatic_retry_status")
+        == "stopped_by_explicit_user_acceptance"
+    )
+    expected_failure_count = failure_count if early_user_acceptance else 3
+    expected_retry_status = (
+        "stopped_by_explicit_user_acceptance"
+        if early_user_acceptance else "stopped_user_takeover_required"
+    )
+    if (
+        attempt_control.get("contract_version")
+        != "storyboard-image-generation-attempt-limit-v1"
+        or attempt_control.get("generation_attempt_scope_id") != scope_id
+        or attempt_control.get("maximum_automatic_rejected_generations") != 3
+        or failure_count != expected_failure_count
+        or attempt_control.get("automatic_retry_status") != expected_retry_status
+        or white_cat_control.get("contract_version")
+        != "white-cat-imagegen-attempt-limit-v1"
+        or white_cat_control.get("maximum_automatic_qa_failures") != 3
+        or white_cat_control.get("qa_failed_generation_count")
+        != expected_failure_count
+        or white_cat_control.get("automatic_retry_status") != expected_retry_status
+        or len(generation_failures) != expected_failure_count
+        or len(set(generation_checksums)) != len(generation_checksums)
+        or len(p2_failures) != expected_failure_count
+        or [row.get("attempt_number") for row in generation_failures]
+        != list(range(1, expected_failure_count + 1))
+        or [row.get("attempt_number") for row in p2_failures]
+        != list(range(1, expected_failure_count + 1))
+        or p2_failures[-1].get("error_code") != (
+            P0_FORWARD_REVERSE_MISMATCH
+            if has_forward_reverse_override else "P2_SATCHEL_TOPOLOGY"
+        )
+        or (early_user_acceptance and has_forward_reverse_override)
+    ):
+        raise ValueError("one-time user gate override attempt-limit evidence is stale")
+    latest_p2_failure = p2_failures[-1]
+    if has_forward_reverse_override:
+        mapping = item.get("identity_qa", {}).get("forward_reverse_mapping_qa")
+        if (
+            not isinstance(mapping, dict)
+            or mapping.get("contract_version")
+            != "white-cat-forward-reverse-mapping-qa-v1"
+            or mapping.get("result") != "fail"
+            or mapping.get("error_code") != P0_FORWARD_REVERSE_MISMATCH
+            or mapping.get("failure_reason")
+            != latest_p2_failure.get("failure_reason")
+            or mapping.get("observed_cat_facing_screen_direction")
+            != item.get("identity_qa", {}).get("cat_facing_screen_direction")
+            or mapping.get("observed_anatomical_front_maps_to_screen")
+            != item.get("identity_qa", {}).get("anatomical_front_maps_to_screen")
+            or mapping.get("observed_anatomical_rear_maps_to_screen")
+            != item.get("identity_qa", {}).get("anatomical_rear_maps_to_screen")
+            or mapping.get("observed_anatomical_front_maps_to_screen")
+            != mapping.get("expected_anatomical_rear_maps_to_screen")
+            or mapping.get("observed_anatomical_rear_maps_to_screen")
+            != mapping.get("expected_anatomical_front_maps_to_screen")
+            or mapping.get("observed_cat_facing_screen_direction")
+            == mapping.get("expected_cat_facing_screen_direction")
+        ):
+            raise ValueError(
+                "one-time user gate override forward/reverse mapping is stale"
+            )
+    prompt_binding = {
+        "path": item.get("prompt_path"),
+        "checksum_sha256": item.get("prompt_checksum_sha256"),
+    }
+    qa_binding = {
+        "path": item.get("qa_evidence_path"),
+        "checksum_sha256": item.get("qa_evidence_checksum_sha256"),
+    }
+    artifacts = [
+        {"path": item.get("path"), "checksum_sha256": item.get("checksum_sha256")},
+        prompt_binding,
+        qa_binding,
+        {
+            "path": inspection.get("numbered_limb_map_path"),
+            "checksum_sha256": inspection.get(
+                "numbered_limb_map_checksum_sha256"
+            ),
+        },
+    ]
+    source_binding = artifacts[0]
+    latest_generation_failure = generation_failures[-1]
+    if early_user_acceptance and (
+        latest_p2_failure.get("output") != source_binding
+        or latest_p2_failure.get("prompt") != prompt_binding
+        or latest_generation_failure.get("output") != source_binding
+        or latest_generation_failure.get("prompt") != prompt_binding
+        or latest_generation_failure.get("failure_reason")
+        != latest_p2_failure.get("failure_reason")
+    ):
+        raise ValueError(
+            "one-time user gate override source is not the exact accepted failed output"
+        )
+    artifact_failures = (
+        generation_failures if early_user_acceptance else [latest_p2_failure]
+    )
+    for failure in artifact_failures:
+        for key in ("output", "prompt"):
+            binding = failure.get(key)
+            if not isinstance(binding, dict):
+                raise ValueError(
+                    "one-time user gate override failed-artifact binding is missing"
+                )
+            normalized = {
+                "path": binding.get("path"),
+                "checksum_sha256": binding.get("checksum_sha256"),
+            }
+            if normalized not in artifacts:
+                artifacts.append(normalized)
+    selection_binding = item.get("user_source_selection_evidence")
+    if early_user_acceptance:
+        if not isinstance(selection_binding, dict):
+            raise ValueError(
+                "one-time user gate override selection evidence is missing"
+            )
+        if selection_binding not in artifacts:
+            artifacts.append(selection_binding)
+    if repository_root is not None:
+        for binding in artifacts:
+            file = _resolve_regular_file(repository_root, binding.get("path"))
+            if _sha256_file(file) != binding.get("checksum_sha256"):
+                raise ValueError("one-time user gate override artifact changed on disk")
+    prompt_failures = _bound_white_cat_prompt_failures(item, repository_root)
+    attempt_gate_id = f"storyboard-image-generation-attempt-limit:{scope_id}"
+    p2_gate_id = f"visual_asset.{item.get('asset_id')}.P2_SATCHEL_TOPOLOGY"
+    subtitle_gate_id = (
+        f"visual_asset.{item.get('asset_id')}.{BOTTOM_SUBTITLE_SAFE_AREA}"
+    )
+    prompt_gate_ids = [failure["gate_id"] for failure in prompt_failures]
+    visual_qa = item.get("visual_qa")
+    has_subtitle_override = (
+        early_user_acceptance
+        and isinstance(visual_qa, dict)
+        and visual_qa.get("result") == "fail"
+        and visual_qa.get("bottom_subtitle_safe_area_result") == "fail"
+        and visual_qa.get("bottom_subtitle_safe_area_readable") is False
+    )
+    gate_ids = (
+        [
+            p2_gate_id,
+            *([subtitle_gate_id] if has_subtitle_override else []),
+            *prompt_gate_ids,
+        ]
+        if early_user_acceptance
+        else [attempt_gate_id, p2_gate_id, *prompt_gate_ids]
+    )
+    if has_forward_reverse_override:
+        gate_ids.insert(1, p0_gate_id)
+    override = item["user_mechanical_gate_override"]
+    failure_by_gate = {
+        row.get("gate_id"): row
+        for row in override.get("acknowledged_failures", [])
+        if isinstance(row, dict)
+    }
+    if (
+        (
+            not early_user_acceptance
+            and failure_by_gate.get(attempt_gate_id, {}).get("observed_result")
+            != "stopped_user_takeover_required"
+        )
+        or failure_by_gate.get(p2_gate_id, {}).get("reason")
+        != latest_p2_failure.get("failure_reason")
+        or (
+            has_forward_reverse_override
+            and failure_by_gate.get(p0_gate_id, {}).get("reason")
+            != latest_p2_failure.get("failure_reason")
+        )
+        or (
+            has_subtitle_override
+            and failure_by_gate.get(subtitle_gate_id, {}).get("reason")
+            != latest_p2_failure.get("failure_reason")
+        )
+    ):
+        raise ValueError("one-time user gate override failed results are stale")
+    prompt_acknowledgements = [
+        failure
+        for failure in override.get("acknowledged_failures", [])
+        if isinstance(failure, dict)
+        and failure.get("gate_id") in prompt_gate_ids
+    ]
+    if prompt_acknowledgements != prompt_failures:
+        raise ValueError(
+            "one-time user gate override prompt-marker failed results are stale"
+        )
+    prompt_contract_qa = item.get("prompt_contract_qa")
+    expected_prompt_contract_qa = {
+        "contract_version": WHITE_CAT_PROMPT_FIXED_MARKER_QA_CONTRACT,
+        "result": "failed_but_waived_once",
+        "prompt": prompt_binding,
+        "failures": prompt_failures,
+    }
+    decision = override.get("decision")
+    if early_user_acceptance:
+        selection_root = (
+            repository_root if repository_root is not None else REPOSITORY_ROOT
+        )
+        selection_file = _resolve_regular_file(
+            selection_root, selection_binding.get("path")
+        )
+        if _sha256_file(selection_file) != selection_binding.get("checksum_sha256"):
+            raise ValueError(
+                "one-time user gate override selection evidence changed on disk"
+            )
+        try:
+            selection = json.loads(selection_file.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise ValueError(
+                "one-time user gate override selection evidence is invalid"
+            ) from error
+        if (
+            not isinstance(selection, dict)
+            or selection.get("contract_version")
+            != "visual-asset-user-source-selection-v1"
+            or selection.get("episode_id") != episode_id
+            or selection.get("asset_id") != item.get("asset_id")
+            or selection.get("generation_attempt_scope_id") != scope_id
+            or selection.get("selected_attempt_number") != expected_failure_count
+            or selection.get("selected_generation_source") != source_binding
+            or selection.get("selected_prompt") != prompt_binding
+            or selection.get("preserved_failure", {}).get("attempt_number")
+            != expected_failure_count
+            or selection.get("preserved_failure", {}).get("error_code")
+            != "P2_SATCHEL_TOPOLOGY"
+            or selection.get("preserved_failure", {}).get("failure_reason")
+            != latest_p2_failure.get("failure_reason")
+            or selection.get("disclosed_gate_ids") != gate_ids
+            or selection.get("gate_effect", {}).get("selection_recorded") is not True
+            or selection.get("gate_effect", {}).get(
+                "mechanical_gate_override_consumed"
+            ) is not True
+            or selection.get("gate_effect", {}).get("release_decision") != decision
+            or selection.get("gate_effect", {}).get("consumed_transition_id")
+            != override.get("consumption", {}).get("consumed_transition_id")
+        ):
+            raise ValueError(
+                "one-time user gate override selection evidence is stale"
+            )
+    if prompt_failures:
+        if prompt_contract_qa != expected_prompt_contract_qa:
+            raise ValueError(
+                "one-time user gate override prompt-marker QA evidence is stale"
+            )
+        supplemental = (
+            decision.get("supplemental_exact_user_messages")
+            if isinstance(decision, dict) else None
+        )
+        if (
+            not isinstance(supplemental, list)
+            or len(supplemental) != 1
+            or not isinstance(supplemental[0], dict)
+            or supplemental[0].get("gate_ids") != prompt_gate_ids
+            or supplemental[0].get("disposition") != "allow_once"
+            or not isinstance(supplemental[0].get("decided_at"), str)
+            or not supplemental[0]["decided_at"].strip()
+            or not _is_exact_prompt_marker_release_message(
+                supplemental[0].get("exact_user_message"),
+                asset_id=item.get("asset_id"),
+                hero_pose=item.get("asset_kind") == "hero_pose",
+            )
+        ):
+            raise ValueError(
+                "one-time user gate override supplemental prompt-marker release is stale"
+            )
+    else:
+        if prompt_contract_qa is not None:
+            raise ValueError(
+                "one-time user gate override has unexpected prompt-marker QA evidence"
+            )
+        if (
+            isinstance(decision, dict)
+            and decision.get("supplemental_exact_user_messages") not in (None, [])
+        ):
+            raise ValueError(
+                "one-time user gate override has an unexpected supplemental release"
+            )
+    message = (
+        decision.get("exact_user_message", "").lower()
+        if isinstance(decision, dict) else ""
+    )
+    if (
+        str(item.get("asset_id", "")).lower() not in message
+        or not any(marker in message for marker in ("p2", "背带", "挎包"))
+        or (
+            has_forward_reverse_override
+            and not any(marker in message for marker in ("p0", "朝向", "前后"))
+        )
+        or not (
+            (
+                any(marker in message for marker in ("停止", "不再"))
+                and "重试" in message
+                and any(
+                    marker in message
+                    for marker in (
+                        "第一次" if expected_failure_count == 1 else "第二次",
+                        f"第{expected_failure_count}次",
+                        f"attempt {expected_failure_count}",
+                    )
+                )
+            )
+            if early_user_acceptance
+            else any(
+                marker in message
+                for marker in ("三次", "3次", "重试", "attempt")
+            )
+        )
+        or not any(marker in message for marker in ("放行", "接受", "允许"))
+        or (
+            early_user_acceptance
+            and not any(marker in message for marker in ("一次", "本次", "仅此一次"))
+        )
+        or (early_user_acceptance and "保留" not in message)
+        or (early_user_acceptance and "失败证据" not in message)
+        or (
+            has_subtitle_override
+            and not any(marker in message for marker in ("字幕", "底部18%"))
+        )
+    ):
+        raise ValueError("one-time user gate override exact message is not asset-specific")
+    if item.get("waived_mechanical_gate_ids") != gate_ids:
+        raise ValueError("one-time user gate override waived gate list is stale")
+    if item.get("override_bound_artifacts") != artifacts:
+        raise ValueError("one-time user gate override artifact list is stale")
+    result = _validate_consumed_user_gate_override(
+        override,
+        episode_id=episode_id,
+        scope_id=scope_id,
+        gate_ids=gate_ids,
+        artifacts=artifacts,
+        from_phase=(
+            "visual_production"
+            if early_user_acceptance else "awaiting_visual_asset_review"
+        ),
+    )
+    matching_blockers = [
+        blocker
+        for blocker in state.get("blockers", [])
+        if isinstance(blocker, dict)
+        and blocker.get("blocker_id") == attempt_gate_id
+    ]
+    if early_user_acceptance and matching_blockers:
+        raise ValueError(
+            "one-time user gate override early acceptance has an attempt-limit blocker"
+        )
+    if not early_user_acceptance and (
+        len(matching_blockers) != 1
+        or matching_blockers[0].get("contract_version")
+        != "storyboard-image-generation-attempt-limit-v1"
+        or matching_blockers[0].get("asset_id") != item.get("asset_id")
+        or matching_blockers[0].get("generation_attempt_scope_id") != scope_id
+        or matching_blockers[0].get("status") != "failed_but_waived_once"
+        or matching_blockers[0].get("user_mechanical_gate_override_sha256")
+        != result["override_sha256"]
+    ):
+        raise ValueError("one-time user gate override attempt-limit blocker is stale")
+    transition_id = override.get("consumption", {}).get("consumed_transition_id")
+    if not isinstance(transition_id, str) \
+            or _consumed_transition_id_count(state, transition_id) != 1:
+        raise ValueError("one-time user gate override transition id is missing or reused")
+    return {
+        "result": result["result"],
+        "override_sha256": result["override_sha256"],
+        "gate_ids": gate_ids,
+        "bound_artifacts": artifacts,
+    }
+
+
+def _visible_symbol_override_evidence(
+    item: dict[str, Any],
+    *,
+    state: dict[str, Any] | None,
+    repository_root: str | Path | None,
+    inspection: dict[str, Any],
+) -> dict[str, Any]:
+    asset_id = item.get("asset_id")
+    scope_id = item.get("generation_attempt_scope_id")
+    if (
+        state is None
+        or item.get("mechanical_qa_result") != "failed_but_waived_once"
+        or item.get("user_mechanical_gate_override_result")
+        != "pass_with_user_override"
+        or not isinstance(item.get("user_mechanical_gate_override"), dict)
+        or not isinstance(scope_id, str)
+        or not scope_id
+        or item.get("visible_text_qa", {}).get("result") != "fail"
+        or item.get("visible_text_qa", {}).get("no_visible_text") is not True
+        or item.get("visible_text_qa", {}).get("no_pseudotext") is not True
+        or item.get("visible_text_qa", {}).get("no_decorative_symbols") is not False
+    ):
+        raise ValueError(
+            f"visible-symbol user gate override is incomplete: {asset_id}"
+        )
+    attempt_control = item.get("image_generation_attempt_control", {})
+    failures = item.get("image_generation_qa_failures", [])
+    checksums = [
+        failure.get("output", {}).get("checksum_sha256")
+        for failure in failures
+        if isinstance(failure, dict)
+    ]
+    if (
+        attempt_control.get("contract_version")
+        != "storyboard-image-generation-attempt-limit-v1"
+        or attempt_control.get("generation_attempt_scope_id") != scope_id
+        or attempt_control.get("maximum_automatic_rejected_generations") != 3
+        or attempt_control.get("rejected_generation_count") != 3
+        or attempt_control.get("automatic_retry_status")
+        != "stopped_user_takeover_required"
+        or len(failures) != 3
+        or len(set(checksums)) != 3
+    ):
+        raise ValueError("visible-symbol override attempt-limit evidence is stale")
+    latest = failures[-1]
+    source = {
+        "path": item.get("path"),
+        "checksum_sha256": item.get("checksum_sha256"),
+    }
+    prompt = {
+        "path": item.get("prompt_path"),
+        "checksum_sha256": item.get("prompt_checksum_sha256"),
+    }
+    if latest.get("output") != source or latest.get("prompt") != prompt:
+        raise ValueError(
+            "visible-symbol override source is not the exact third failed output"
+        )
+    artifacts = [
+        source,
+        prompt,
+        {
+            "path": item.get("qa_evidence_path"),
+            "checksum_sha256": item.get("qa_evidence_checksum_sha256"),
+        },
+        {
+            "path": inspection.get("numbered_limb_map_path"),
+            "checksum_sha256": inspection.get(
+                "numbered_limb_map_checksum_sha256"
+            ),
+        },
+    ]
+    for binding in (latest.get("output"), latest.get("prompt")):
+        if not isinstance(binding, dict):
+            raise ValueError(
+                "visible-symbol override failed-artifact binding is missing"
+            )
+        normalized = {
+            "path": binding.get("path"),
+            "checksum_sha256": binding.get("checksum_sha256"),
+        }
+        if normalized not in artifacts:
+            artifacts.append(normalized)
+    if repository_root is not None:
+        for binding in artifacts:
+            file = _resolve_regular_file(repository_root, binding.get("path"))
+            if _sha256_file(file) != binding.get("checksum_sha256"):
+                raise ValueError("visible-symbol override artifact changed on disk")
+    attempt_gate_id = f"storyboard-image-generation-attempt-limit:{scope_id}"
+    visible_gate_id = f"visual_asset.{asset_id}.{VISIBLE_SYMBOL_FREE}"
+    gate_ids = [attempt_gate_id, visible_gate_id]
+    override = item["user_mechanical_gate_override"]
+    failures_by_gate = {
+        row.get("gate_id"): row
+        for row in override.get("acknowledged_failures", [])
+        if isinstance(row, dict)
+    }
+    if (
+        item.get("waived_mechanical_gate_ids") != gate_ids
+        or item.get("override_bound_artifacts") != artifacts
+        or failures_by_gate.get(attempt_gate_id, {}).get("observed_result")
+        != "stopped_user_takeover_required"
+        or failures_by_gate.get(visible_gate_id, {}).get("reason")
+        != latest.get("failure_reason")
+    ):
+        raise ValueError("visible-symbol override failed results are stale")
+    message = str(
+        override.get("decision", {}).get("exact_user_message", "")
+    ).lower()
+    if (
+        str(asset_id).lower() not in message
+        or not any(marker in message for marker in ("可见符号", "符号", "图案", "浮雕"))
+        or not any(marker in message for marker in ("三次", "3次", "重试", "attempt"))
+        or not any(marker in message for marker in ("放行", "接受", "允许"))
+    ):
+        raise ValueError("visible-symbol override exact message is not asset-specific")
+    result = _validate_consumed_user_gate_override(
+        override,
+        episode_id=state.get("episode_id"),
+        scope_id=scope_id,
+        gate_ids=gate_ids,
+        artifacts=artifacts,
+    )
+    matching_blockers = [
+        blocker for blocker in state.get("blockers", [])
+        if isinstance(blocker, dict)
+        and blocker.get("blocker_id") == attempt_gate_id
+    ]
+    if (
+        len(matching_blockers) != 1
+        or matching_blockers[0].get("status") != "failed_but_waived_once"
+        or matching_blockers[0].get("user_mechanical_gate_override_sha256")
+        != result["override_sha256"]
+    ):
+        raise ValueError("visible-symbol override attempt-limit blocker is stale")
+    transition_id = override.get("consumption", {}).get(
+        "consumed_transition_id"
+    )
+    if not isinstance(transition_id, str) or _consumed_transition_id_count(
+        state, transition_id
+    ) != 1:
+        raise ValueError("visible-symbol override transition id is missing or reused")
+    return {
+        "result": result["result"],
+        "override_sha256": result["override_sha256"],
+        "gate_ids": gate_ids,
+        "bound_artifacts": artifacts,
+    }
+
+
+def _ambiguous_trace_override_evidence(
+    item: dict[str, Any],
+    *,
+    state: dict[str, Any] | None,
+    repository_root: str | Path | None,
+    inspection: dict[str, Any],
+) -> dict[str, Any]:
+    asset_id = item.get("asset_id")
+    scope_id = item.get("generation_attempt_scope_id")
+    early_action_acceptance = (
+        isinstance(item.get("role"), str)
+        and item["role"].startswith("action-")
+    )
+    identity = item.get("identity_qa")
+    anatomy = identity.get("anatomy_evidence") if isinstance(identity, dict) else None
+    if (
+        state is None
+        or item.get("mechanical_qa_result") != "failed_but_waived_once"
+        or item.get("user_mechanical_gate_override_result")
+        != "pass_with_user_override"
+        or not isinstance(item.get("user_mechanical_gate_override"), dict)
+        or not isinstance(scope_id, str)
+        or not scope_id
+        or not (
+            item.get("role") in WHITE_CAT_MASTER_ROLES
+            or early_action_acceptance
+        )
+        or not isinstance(identity, dict)
+        or identity.get("result") != "fail"
+        or identity.get("accessory_geometry_correct") is not True
+        or identity.get("satchel_count") != 1
+        or identity.get("bag_strap_count") != 2
+        or identity.get("bag_end_attachment_count") != 2
+        or identity.get("front_strap_attached_to_forward_bag_end") is not True
+        or identity.get("rear_strap_attached_to_rear_bag_end") is not True
+        or identity.get("himation_trim_distinct_from_bag_straps") is not True
+        or identity.get("both_bag_end_anchors_visibly_traceable") is not True
+        or identity.get("strap_paths_spatially_distinct") is not True
+        or identity.get("source_retry_policy_compliant") is not True
+        or not isinstance(anatomy, dict)
+        or anatomy.get("result") != "fail"
+        or anatomy.get("error_code") != P0_AMBIGUOUS_TRACE
+        or anatomy.get("ambiguous_limb_regions") != 1
+        or anatomy.get("unassigned_paw_like_shapes") != 0
+        or anatomy.get("branched_or_fused_limb_regions") != 0
+    ):
+        raise ValueError(
+            f"P0_AMBIGUOUS_TRACE user gate override is incomplete: {asset_id}"
+        )
+    traces = anatomy.get("limb_traces")
+    if (
+        not isinstance(traces, list)
+        or len(traces) != 4
+        or [trace.get("id") for trace in traces if isinstance(trace, dict)]
+        != ["F1", "F2", "H1", "H2"]
+        or [
+            trace.get("id")
+            for trace in traces
+            if isinstance(trace, dict)
+            and trace.get("continuous_to_torso") is not True
+        ]
+        != ["H1"]
+    ):
+        raise ValueError("P0_AMBIGUOUS_TRACE H1 evidence is stale")
+    attempt_control = item.get("image_generation_attempt_control", {})
+    white_cat_control = item.get("white_cat_generation_attempt_control", {})
+    generation_failures = item.get("image_generation_qa_failures", [])
+    white_cat_failures = item.get("white_cat_imagegen_qa_failures", [])
+    expected_failure_count = 1 if early_action_acceptance else 3
+    expected_retry_status = (
+        "stopped_by_explicit_user_acceptance"
+        if early_action_acceptance
+        else "stopped_user_takeover_required"
+    )
+    if (
+        attempt_control.get("contract_version")
+        != "storyboard-image-generation-attempt-limit-v1"
+        or attempt_control.get("generation_attempt_scope_id") != scope_id
+        or attempt_control.get("maximum_automatic_rejected_generations") != 3
+        or attempt_control.get("rejected_generation_count") != expected_failure_count
+        or attempt_control.get("automatic_retry_status") != expected_retry_status
+        or white_cat_control.get("contract_version")
+        != "white-cat-imagegen-attempt-limit-v1"
+        or white_cat_control.get("maximum_automatic_qa_failures") != 3
+        or white_cat_control.get("qa_failed_generation_count")
+        != expected_failure_count
+        or white_cat_control.get("automatic_retry_status") != expected_retry_status
+        or len(generation_failures) != expected_failure_count
+        or len(white_cat_failures) != expected_failure_count
+        or [row.get("attempt_number") for row in generation_failures]
+        != list(range(1, expected_failure_count + 1))
+        or [row.get("attempt_number") for row in white_cat_failures]
+        != list(range(1, expected_failure_count + 1))
+    ):
+        raise ValueError("P0_AMBIGUOUS_TRACE attempt-limit evidence is stale")
+    selected_index = 0 if early_action_acceptance else 1
+    selected = white_cat_failures[selected_index]
+    source = {
+        "path": item.get("path"),
+        "checksum_sha256": item.get("checksum_sha256"),
+    }
+    prompt = {
+        "path": item.get("prompt_path"),
+        "checksum_sha256": item.get("prompt_checksum_sha256"),
+    }
+    if (
+        selected.get("error_code") != P0_AMBIGUOUS_TRACE
+        or selected.get("output") != source
+        or selected.get("prompt") != prompt
+        or generation_failures[selected_index].get("output") != source
+        or generation_failures[selected_index].get("prompt") != prompt
+        or anatomy.get("failure_reason") != selected.get("failure_reason")
+        or next(trace for trace in traces if trace.get("id") == "H1").get(
+            "ambiguity_reason"
+        )
+        != selected.get("failure_reason")
+    ):
+        raise ValueError(
+            "P0_AMBIGUOUS_TRACE source is not the exact accepted failed output"
+        )
+    artifacts = [
+        source,
+        prompt,
+        {
+            "path": item.get("qa_evidence_path"),
+            "checksum_sha256": item.get("qa_evidence_checksum_sha256"),
+        },
+        {
+            "path": inspection.get("numbered_limb_map_path"),
+            "checksum_sha256": inspection.get(
+                "numbered_limb_map_checksum_sha256"
+            ),
+        },
+    ]
+    for failure in generation_failures:
+        for key in ("prompt", "output"):
+            binding = failure.get(key)
+            if not isinstance(binding, dict):
+                raise ValueError(
+                    "P0_AMBIGUOUS_TRACE failed-artifact binding is missing"
+                )
+            normalized = {
+                "path": binding.get("path"),
+                "checksum_sha256": binding.get("checksum_sha256"),
+            }
+            if normalized not in artifacts:
+                artifacts.append(normalized)
+    if repository_root is not None:
+        for binding in artifacts:
+            file = _resolve_regular_file(repository_root, binding.get("path"))
+            if _sha256_file(file) != binding.get("checksum_sha256"):
+                raise ValueError(
+                    "P0_AMBIGUOUS_TRACE override artifact changed on disk"
+                )
+    attempt_gate_id = f"storyboard-image-generation-attempt-limit:{scope_id}"
+    p0_gate_id = f"visual_asset.{asset_id}.{P0_AMBIGUOUS_TRACE}"
+    gate_ids = [p0_gate_id] if early_action_acceptance else [attempt_gate_id, p0_gate_id]
+    override = item["user_mechanical_gate_override"]
+    failures_by_gate = {
+        row.get("gate_id"): row
+        for row in override.get("acknowledged_failures", [])
+        if isinstance(row, dict)
+    }
+    if (
+        item.get("waived_mechanical_gate_ids") != gate_ids
+        or item.get("override_bound_artifacts") != artifacts
+        or (
+            not early_action_acceptance
+            and failures_by_gate.get(attempt_gate_id, {}).get("observed_result")
+            != "stopped_user_takeover_required"
+        )
+        or failures_by_gate.get(p0_gate_id, {}).get("reason")
+        != selected.get("failure_reason")
+    ):
+        raise ValueError("P0_AMBIGUOUS_TRACE override failed results are stale")
+    message = str(
+        override.get("decision", {}).get("exact_user_message", "")
+    ).lower()
+    if (
+        str(asset_id).lower() not in message
+        or "p0_ambiguous_trace" not in message
+        or not (
+            any(marker in message for marker in ("第一次", "第1次", "attempt 1"))
+            if early_action_acceptance
+            else any(marker in message for marker in ("第二", "第2", "attempt 2"))
+        )
+        or not (
+            any(marker in message for marker in ("停止", "不再"))
+            and "重试" in message
+            if early_action_acceptance
+            else any(marker in message for marker in ("三次", "3次", "attempt"))
+        )
+        or not any(marker in message for marker in ("放行", "接受", "允许"))
+        or not any(marker in message for marker in ("一次", "本次", "仅此一次"))
+        or "保留" not in message
+        or "失败证据" not in message
+    ):
+        raise ValueError(
+            "P0_AMBIGUOUS_TRACE override exact message is not asset-specific"
+        )
+    result = _validate_consumed_user_gate_override(
+        override,
+        episode_id=state.get("episode_id"),
+        scope_id=scope_id,
+        gate_ids=gate_ids,
+        artifacts=artifacts,
+        from_phase=(
+            "visual_production"
+            if early_action_acceptance
+            else "awaiting_visual_asset_review"
+        ),
+        to_phase="visual_production",
+    )
+    matching_blockers = [
+        blocker for blocker in state.get("blockers", [])
+        if isinstance(blocker, dict)
+        and blocker.get("blocker_id") == attempt_gate_id
+    ]
+    if early_action_acceptance and matching_blockers:
+        raise ValueError(
+            "P0_AMBIGUOUS_TRACE early acceptance has an unnecessary attempt-limit blocker"
+        )
+    if not early_action_acceptance and (
+        len(matching_blockers) != 1
+        or matching_blockers[0].get("status") != "failed_but_waived_once"
+        or matching_blockers[0].get("user_mechanical_gate_override_sha256")
+        != result["override_sha256"]
+    ):
+        raise ValueError(
+            "P0_AMBIGUOUS_TRACE override attempt-limit blocker is stale"
+        )
+    transition_id = override.get("consumption", {}).get(
+        "consumed_transition_id"
+    )
+    if not isinstance(transition_id, str) or _consumed_transition_id_count(
+        state, transition_id,
+    ) != 1:
+        raise ValueError(
+            "P0_AMBIGUOUS_TRACE override transition id is missing or reused"
+        )
+    return {
+        "result": result["result"],
+        "override_sha256": result["override_sha256"],
+        "gate_ids": gate_ids,
+        "bound_artifacts": artifacts,
+    }
+
+
 def _require_white_cat_qa_v2_state(
     item: dict[str, Any], repository_root: str | Path | None = None,
+    *, state: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     """Check recorder-bound white-cat v2 evidence and optionally reread its map."""
     route = item.get("visual_generation_route")
@@ -388,8 +1452,12 @@ def _require_white_cat_qa_v2_state(
             or not isinstance(checksum, str) or not SHA256_RE.fullmatch(checksum):
         raise ValueError(f"white-cat QA source binding is missing: {item.get('asset_id')}")
     identity = item.get("identity_qa")
-    if not isinstance(identity, dict) or identity.get("result") != "pass":
-        raise ValueError(f"white-cat identity QA did not pass: {item.get('asset_id')}")
+    if not isinstance(identity, dict):
+        raise ValueError(f"white-cat identity QA is missing: {item.get('asset_id')}")
+    ambiguous_trace_override = (
+        f"visual_asset.{item.get('asset_id')}.{P0_AMBIGUOUS_TRACE}"
+        in item.get("waived_mechanical_gate_ids", [])
+    )
     if (
         identity.get("cat_count") != 1
         or identity.get("foreleg_count") != 2
@@ -397,25 +1465,15 @@ def _require_white_cat_qa_v2_state(
         or identity.get("paw_count") != 4
     ):
         raise ValueError(f"white-cat P0 counts are invalid: {item.get('asset_id')}")
-    if (
-        identity.get("accessory_geometry_correct") is not True
-        or identity.get("satchel_count") != 1
-        or identity.get("bag_strap_count") != 2
-        or identity.get("bag_end_attachment_count") != 2
-        or identity.get("front_strap_attached_to_forward_bag_end") is not True
-        or identity.get("rear_strap_attached_to_rear_bag_end") is not True
-        or identity.get("himation_trim_distinct_from_bag_straps") is not True
-        or identity.get("satchel_anatomical_flank") != "right"
-        or identity.get("both_bag_end_anchors_visibly_traceable") is not True
-        or identity.get("strap_paths_spatially_distinct") is not True
-        or identity.get("source_retry_policy_compliant") is not True
-    ):
-        raise ValueError(f"white-cat P2 accessory QA is invalid: {item.get('asset_id')}")
     anatomy = identity.get("anatomy_evidence")
     if not isinstance(anatomy, dict) \
             or anatomy.get("contract_version") != "white-cat-anatomy-qa-v2" \
-            or anatomy.get("result") != "pass":
-        raise ValueError(f"white-cat anatomy QA v2 did not pass: {item.get('asset_id')}")
+            or anatomy.get("result") != (
+                "fail" if ambiguous_trace_override else "pass"
+            ):
+        raise ValueError(
+            f"white-cat anatomy QA v2 disposition is invalid: {item.get('asset_id')}"
+        )
     if anatomy.get("source_image") != {
         "path": path,
         "checksum_sha256": checksum,
@@ -442,7 +1500,23 @@ def _require_white_cat_qa_v2_state(
             raise ValueError(
                 f"white-cat bidirectional trace evidence is invalid: {item.get('asset_id')}"
             )
-    if any(anatomy.get(field) != 0 for field in (
+    if ambiguous_trace_override:
+        if (
+            anatomy.get("error_code") != P0_AMBIGUOUS_TRACE
+            or anatomy.get("unassigned_paw_like_shapes") != 0
+            or anatomy.get("ambiguous_limb_regions") != 1
+            or anatomy.get("branched_or_fused_limb_regions") != 0
+            or [
+                trace.get("id")
+                for trace in traces
+                if trace.get("continuous_to_torso") is not True
+            ]
+            != ["H1"]
+        ):
+            raise ValueError(
+                f"white-cat P0 ambiguity evidence is stale: {item.get('asset_id')}"
+            )
+    elif any(anatomy.get(field) != 0 for field in (
         "unassigned_paw_like_shapes",
         "ambiguous_limb_regions",
         "branched_or_fused_limb_regions",
@@ -482,12 +1556,130 @@ def _require_white_cat_qa_v2_state(
             raise ValueError(
                 f"white-cat numbered limb map changed on disk: {item.get('asset_id')}"
             )
-    return {
+
+    if item.get("asset_kind") == "hero_pose":
+        transparent_qa = item.get("transparent_pose_qa")
+        measured_alpha = (
+            transparent_qa.get("measured_alpha")
+            if isinstance(transparent_qa, dict) else None
+        )
+        expected_transparency = {
+            "result": "pass",
+            "source_checksum_sha256": checksum,
+            "full_canvas_rgba": True,
+            "transparent_background": True,
+            "registration_anchor_policy": "fixed-full-canvas-v1",
+        }
+        if (
+            not isinstance(transparent_qa, dict)
+            or any(
+                transparent_qa.get(key) != value
+                for key, value in expected_transparency.items()
+            )
+            or not isinstance(measured_alpha, dict)
+            or measured_alpha.get("min_alpha") != 0
+            or not isinstance(measured_alpha.get("max_alpha"), int)
+            or measured_alpha["max_alpha"] <= 0
+            or measured_alpha.get("transparent_pixel_count", 0) < 1
+            or measured_alpha.get("nontransparent_pixel_count", 0) < 1
+        ):
+            raise ValueError(
+                f"hero-pose transparent registration QA is invalid: {item.get('asset_id')}"
+            )
+        if repository_root is not None:
+            source = _resolve_regular_file(repository_root, path)
+            actual_alpha = _load_imagegen_helper().png_rgba_alpha_evidence(source)
+            recorded_alpha = {
+                key: value for key, value in measured_alpha.items()
+                if key not in {"width", "height"}
+            }
+            recorded_dimensions = {
+                key: measured_alpha[key] for key in ("width", "height")
+                if key in measured_alpha
+            }
+            actual_width, actual_height = _png_dimensions(source)
+            if (
+                actual_alpha != recorded_alpha
+                or recorded_dimensions not in (
+                    {}, {"width": actual_width, "height": actual_height},
+                )
+            ):
+                raise ValueError(
+                    f"hero-pose alpha evidence changed on disk: {item.get('asset_id')}"
+                )
+
+    p2_failed = (
+        identity.get("accessory_geometry_correct") is not True
+        or identity.get("satchel_count") != 1
+        or identity.get("bag_strap_count") != 2
+        or identity.get("bag_end_attachment_count") != 2
+        or identity.get("front_strap_attached_to_forward_bag_end") is not True
+        or identity.get("rear_strap_attached_to_rear_bag_end") is not True
+        or identity.get("himation_trim_distinct_from_bag_straps") is not True
+        or identity.get("satchel_anatomical_flank") != "right"
+        or identity.get("both_bag_end_anchors_visibly_traceable") is not True
+        or identity.get("strap_paths_spatially_distinct") is not True
+        or identity.get("source_retry_policy_compliant") is not True
+    )
+    override_evidence = None
+    visible_symbol_override = (
+        f"visual_asset.{item.get('asset_id')}.{VISIBLE_SYMBOL_FREE}"
+        in item.get("waived_mechanical_gate_ids", [])
+    )
+    if ambiguous_trace_override:
+        if identity.get("result") != "fail" or p2_failed:
+            raise ValueError(
+                f"white-cat P0 ambiguity override changed another gate: {item.get('asset_id')}"
+            )
+        override_evidence = _ambiguous_trace_override_evidence(
+            item,
+            state=state,
+            repository_root=repository_root,
+            inspection=inspection,
+        )
+    elif identity.get("result") == "pass":
+        if p2_failed or (
+            any(
+            item.get(key) is not None
+            for key in (
+                "mechanical_qa_result",
+                "user_mechanical_gate_override",
+                "user_mechanical_gate_override_result",
+            )
+            )
+            and not visible_symbol_override
+        ):
+            raise ValueError(f"white-cat P2 accessory QA is invalid: {item.get('asset_id')}")
+        if visible_symbol_override:
+            override_evidence = _visible_symbol_override_evidence(
+                item,
+                state=state,
+                repository_root=repository_root,
+                inspection=inspection,
+            )
+    elif identity.get("result") == "fail" and p2_failed:
+        override_evidence = _white_cat_p2_override_evidence(
+            item,
+            state=state,
+            repository_root=repository_root,
+            inspection=inspection,
+        )
+        if override_evidence is None:
+            raise ValueError(
+                f"white-cat failed QA lacks an exact user override: {item.get('asset_id')}"
+            )
+    else:
+        raise ValueError(f"white-cat identity QA did not pass: {item.get('asset_id')}")
+
+    result = {
         "numbered_limb_map_path": numbered_map_path,
         "numbered_limb_map_checksum_sha256": numbered_map_checksum,
         "numbered_limb_map_source_checksum_sha256": checksum,
         "numbered_limb_map_limb_ids": ["F1", "F2", "H1", "H2"],
     }
+    if override_evidence is not None:
+        result["mechanical_gate_override"] = override_evidence
+    return result
 
 
 def _is_strict(item: dict[str, Any], queue: list[dict[str, Any]]) -> bool:
@@ -544,6 +1736,8 @@ def require_generation_allowed(state: dict[str, Any], asset_id: str) -> dict[str
     attempt_control = current.get("image_generation_attempt_control", {})
     if attempt_control.get("automatic_retry_status") == "stopped_user_takeover_required":
         raise ValueError(f"automatic image retry stopped; user takeover required: {asset_id}")
+    if attempt_control.get("automatic_retry_status") == "deterministic_layout_repair_required":
+        raise ValueError(f"Ian deterministic layout repair required before generation: {asset_id}")
     legacy_white_cat_control = current.get("white_cat_generation_attempt_control", {})
     if legacy_white_cat_control.get("automatic_retry_status") == "stopped_user_takeover_required":
         raise ValueError(f"white-cat automatic retry stopped; user takeover required: {asset_id}")
@@ -707,12 +1901,9 @@ def record_approval(
         raise ValueError("normal hybrid assets require a batch manifest approval")
     if _is_whiteboard(item):
         raise ValueError("whiteboard assets require source, annotation, and clip approvals")
-    _require_white_cat_qa_v2_state(item, repository_root)
+    _require_white_cat_qa_v2_state(item, repository_root, state=state)
     static_review = _require_static_spread(state, item, repository_root)
-    if (
-        static_review is not None
-        and item.get("presented_static_spread_review") != static_review
-    ):
+    if static_review is not None and item.get("presented_static_spread_review") != static_review:
         raise ValueError("presented static spread review is stale")
     ian_package = _require_ian_layered_scene_package(item, repository_root)
     if ian_package is not None \
@@ -1045,7 +2236,7 @@ def record_batch_qa_pass(
         raise ValueError("batch QA asset path is missing")
     if not isinstance(current_checksum, str) or not SHA256_RE.fullmatch(current_checksum):
         raise ValueError("batch QA checksum is invalid")
-    _require_white_cat_qa_v2_state(item)
+    _require_white_cat_qa_v2_state(item, state=state)
     _require_static_spread(state, item)
     _require_generation_aspect_ratio(state, item)
     item["status"] = "qa_passed_pending_batch_review"
@@ -1075,7 +2266,7 @@ def record_batch_approval(
         raise ValueError(f"assets not ready for batch approval: {', '.join(not_ready)}")
     for item in queue:
         if item.get("status") != "approved":
-            _require_white_cat_qa_v2_state(item)
+            _require_white_cat_qa_v2_state(item, state=state)
     for item in queue:
         if item.get("status") == "approved":
             continue
@@ -1341,7 +2532,7 @@ def record_hybrid_qa_pass(
     checksum = item.get("checksum_sha256")
     if not isinstance(checksum, str) or not SHA256_RE.fullmatch(checksum):
         raise ValueError("hybrid QA checksum is invalid")
-    _require_white_cat_qa_v2_state(item)
+    _require_white_cat_qa_v2_state(item, state=state)
     _require_static_spread(state, item)
     _require_generation_aspect_ratio(state, item)
     if item.get("technical_qa", {}).get("result") != "pass":
@@ -1407,7 +2598,7 @@ def record_hybrid_batch_approval(
     for asset_id in requested:
         item = _find(queue, asset_id)
         if item is not None and item.get("status") != "approved":
-            _require_white_cat_qa_v2_state(item, repository_root)
+            _require_white_cat_qa_v2_state(item, repository_root, state=state)
             _require_static_spread(state, item, repository_root)
             _require_ian_layered_scene_package(item, repository_root)
     approved = []
@@ -1463,6 +2654,7 @@ def validate_visual_assets_locked(
     if review.get("active_batch") is not None or review.get("queue_generation_allowed") is False:
         raise ValueError("visual asset review still has an active approval boundary")
     checksum_map: dict[str, str] = {}
+    mechanical_dispositions: dict[str, dict[str, Any]] = {}
     for item in queue:
         asset_id = item.get("asset_id")
         if not isinstance(asset_id, str) or not asset_id:
@@ -1475,7 +2667,20 @@ def validate_visual_assets_locked(
             WHITE_CAT_XUAN_MASTER_QA,
             WHITE_CAT_XUAN_ACTION_QA,
         }:
-            _require_white_cat_qa_v2_state(item, repository_root)
+            white_cat_review = _require_white_cat_qa_v2_state(
+                item, repository_root, state=state,
+            )
+            override = white_cat_review.get("mechanical_gate_override")
+            if override is not None:
+                mechanical_dispositions[asset_id] = {
+                    "mechanical_qa_result": item["mechanical_qa_result"],
+                    "user_mechanical_gate_override_result": (
+                        item["user_mechanical_gate_override_result"]
+                    ),
+                    "user_mechanical_gate_override_sha256": override[
+                        "override_sha256"
+                    ],
+                }
         _require_static_spread(state, item, repository_root)
         _require_ian_layered_scene_package(item, repository_root)
         if _is_whiteboard(item):
@@ -1517,7 +2722,11 @@ def validate_visual_assets_locked(
         "contract_version": "visual-assets-lock-verification-v1",
         "mode": review["mode"],
         "assets": [
-            {"asset_id": asset_id, "checksum_sha256": checksum}
+            {
+                "asset_id": asset_id,
+                "checksum_sha256": checksum,
+                **mechanical_dispositions.get(asset_id, {}),
+            }
             for asset_id, checksum in checksum_map.items()
         ],
     }
@@ -1528,7 +2737,10 @@ def validate_visual_assets_locked(
         **payload,
         "active_asset_count": len(checksum_map),
         "verification_sha256": hashlib.sha256(encoded).hexdigest(),
-        "result": "pass",
+        "result": (
+            "pass_with_user_override"
+            if mechanical_dispositions else "pass"
+        ),
     }
 
 
@@ -1544,12 +2756,15 @@ def _one_click_final_review_payload(state: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("one-click final review bindings are missing")
     assets = []
     for item in _queue(state):
-        if item.get("status") != "qa_passed_pending_final_review":
-            raise ValueError(f"asset has not passed QA for final review: {item.get('asset_id')}")
+        if item.get("status") not in {
+            "qa_passed_pending_final_review",
+            WAIVED_PENDING_FINAL_REVIEW_STATUS,
+        }:
+            raise ValueError(f"asset is not ready for final review: {item.get('asset_id')}")
         if not isinstance(item.get("path"), str) or not item["path"] \
                 or not SHA256_RE.fullmatch(item.get("checksum_sha256", "")):
             raise ValueError(f"asset final-review evidence is incomplete: {item.get('asset_id')}")
-        anatomy_review = _require_white_cat_qa_v2_state(item)
+        anatomy_review = _require_white_cat_qa_v2_state(item, state=state)
         asset = {
             "asset_id": item["asset_id"],
             "path": item["path"],
@@ -1564,6 +2779,14 @@ def _one_click_final_review_payload(state: dict[str, Any]) -> dict[str, Any]:
             asset["ian_layered_scene_package"] = ian_package
         if anatomy_review is not None:
             asset["white_cat_anatomy_review"] = anatomy_review
+        if item.get("status") == WAIVED_PENDING_FINAL_REVIEW_STATUS:
+            asset["mechanical_qa_result"] = item["mechanical_qa_result"]
+            asset["user_mechanical_gate_override_result"] = item[
+                "user_mechanical_gate_override_result"
+            ]
+            asset["user_mechanical_gate_override_sha256"] = item[
+                "user_mechanical_gate_override"
+            ]["override_sha256"]
         assets.append(asset)
     if not assets:
         raise ValueError("one-click final review asset list is empty")
@@ -1654,12 +2877,21 @@ def _validate_one_click_final_review_package(
         raise ValueError("image-rich unified final review Ian package count is stale")
     for expected, actual in zip(assets, manifest_assets, strict=True):
         fields = ["asset_id", "path", "checksum_sha256", "qa_status"]
-        if expected.get("static_spread_review") is not None:
-            fields.append("static_spread_review")
+        fields.extend(
+            field for field in (
+                "static_spread_review",
+                "mechanical_qa_result",
+                "user_mechanical_gate_override_result",
+                "user_mechanical_gate_override_sha256",
+            )
+            if expected.get(field) is not None
+        )
         for field in fields:
             expected_value = expected.get(field)
             if field == "qa_status" and final_review.get("status") == "approved":
-                expected_value = "qa_passed_pending_final_review"
+                expected_value = expected.get(
+                    "preapproval_qa_status", "qa_passed_pending_final_review"
+                )
             if actual.get(field) != expected_value:
                 raise ValueError(
                     f"image-rich unified final review asset map is stale: "
@@ -1771,7 +3003,7 @@ def approve_one_click_final_visual_review(
             or final_review.get("presented_map_sha256") != expected["presented_map_sha256"]:
         raise ValueError("one-click final visual approval is stale or not bound to the complete list")
     for item in _queue(state):
-        _require_white_cat_qa_v2_state(item, repository_root)
+        _require_white_cat_qa_v2_state(item, repository_root, state=state)
         _require_static_spread(state, item, repository_root)
         _require_ian_layered_scene_package(item, repository_root)
         evidence = _disk_evidence(repository_root, item["path"], item)
@@ -1824,7 +3056,12 @@ def approve_one_click_final_visual_review(
     final_review = {
         **expected,
         "assets": [
-            {**asset, "qa_status": "approved"} for asset in expected["assets"]
+            {
+                **asset,
+                "preapproval_qa_status": asset["qa_status"],
+                "qa_status": "approved",
+            }
+            for asset in expected["assets"]
         ],
         "status": "approved",
         "exact_hash_list_approved": True,
@@ -1856,7 +3093,10 @@ def record_one_click_changes_requested(
         raise ValueError("one-click visual change requires visual-asset-review-v3")
     queue = _queue(state)
     item = _find(queue, asset_id)
-    if item is None or item.get("status") != "qa_passed_pending_final_review":
+    if item is None or item.get("status") not in {
+        "qa_passed_pending_final_review",
+        WAIVED_PENDING_FINAL_REVIEW_STATUS,
+    }:
         raise ValueError(f"asset is not in the pending one-click exact list: {asset_id}")
 
     payload = _one_click_final_review_payload(state)
@@ -1916,6 +3156,9 @@ def record_one_click_changes_requested(
         "qa_contract_version", "revision_source", "ian_scene_plan_sha256",
         "ian_scene_package_members", "generation_lineage", "static_spread_review",
         "presented_static_spread_review", "approved_static_spread_review",
+        "mechanical_qa_result", "user_mechanical_gate_override",
+        "user_mechanical_gate_override_result", "waived_mechanical_gate_ids",
+        "override_bound_artifacts", "original_qa_result",
     }
     stale_prefixes = (
         "approved_", "presented_", "batch_", "generated_source_",

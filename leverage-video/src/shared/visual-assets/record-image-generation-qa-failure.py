@@ -12,6 +12,12 @@ from typing import Any
 REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
 MAX_AUTOMATIC_REJECTED_GENERATIONS = 3
 STOP_STATUS = "stopped_user_takeover_required"
+REPAIR_REQUIRED_STATUS = "deterministic_layout_repair_required"
+IAN_LAYOUT_REPAIR_DISPOSITION = "ian-generation-layout-repair-disposition-v1"
+REPAIRABLE_IAN_GEOMETRY_PREFIXES = (
+    "IAN_ZONE_GEOMETRY:",
+    "IAN_ZONE_GEOMETRY_AND_SUBTITLE_SAFE_BAND:",
+)
 GENERATED_STORYBOARD_IMAGE_ROUTES = {
     "imagegen",
     "xuan-paper-diorama",
@@ -63,6 +69,73 @@ def generation_attempt_scope_id(item: dict[str, Any]) -> str:
     return asset_id
 
 
+def is_repairable_ian_geometry(item: dict[str, Any], reason: str) -> bool:
+    return (
+        item.get("visual_generation_route") == "ian-handdrawn-ppt"
+        and reason.startswith(REPAIRABLE_IAN_GEOMETRY_PREFIXES)
+    )
+
+
+def recorded_output_checksums(item: dict[str, Any]) -> set[str]:
+    records = [
+        *item.get("image_generation_qa_failures", []),
+        *item.get("image_generation_repairable_findings", []),
+    ]
+    return {
+        str(record.get("output", {}).get("checksum_sha256"))
+        for record in records
+        if isinstance(record, dict)
+    }
+
+
+def apply_repairable_ian_geometry_disposition(
+    item: dict[str, Any],
+    review: dict[str, Any],
+    failure: dict[str, Any],
+    scope_id: str,
+) -> dict[str, Any]:
+    findings = item.setdefault("image_generation_repairable_findings", [])
+    rejected_failures = item.get("image_generation_qa_failures", [])
+    generation_output_number = len(recorded_output_checksums(item)) + 1
+    recorded_finding = {
+        **failure,
+        "failure_reason": failure["failure_reason"].strip(),
+        "finding_number": len(findings) + 1,
+        "generation_output_number": generation_output_number,
+        "attempt_number": generation_output_number,
+        "disposition": "deterministic_repair_required",
+        "counts_toward_rejected_generation_limit": False,
+    }
+    findings.append(recorded_finding)
+    message = (
+        f"分镜图片逻辑资产 {scope_id} 的 Ian 语义组完整且可分离，"
+        "但未满足锁定分区或字幕安全区；改走确定性布局修复，不计入三次生图失败。"
+    )
+    control = {
+        "contract_version": "storyboard-image-generation-attempt-limit-v1",
+        "generation_attempt_scope_id": scope_id,
+        "maximum_automatic_rejected_generations": MAX_AUTOMATIC_REJECTED_GENERATIONS,
+        "rejected_generation_count": len(rejected_failures),
+        "automatic_retry_status": REPAIR_REQUIRED_STATUS,
+        "last_qa_time": recorded_finding["qa_time"],
+        "handoff_message": message,
+        "reset_for_prompt_reference_base_composition_model_route_path_version_or_revision": False,
+    }
+    item["image_generation_attempt_control"] = control
+    item["ian_layout_repair_disposition"] = {
+        "contract_version": IAN_LAYOUT_REPAIR_DISPOSITION,
+        "status": "repair_required",
+        "generation_attempt_scope_id": scope_id,
+        "source_finding": recorded_finding,
+    }
+    review["queue_generation_allowed"] = False
+    review["ian_layout_repair_required"] = True
+    review["ian_layout_repair_asset_id"] = item["asset_id"]
+    review["ian_layout_repair_scope_id"] = scope_id
+    review["ian_layout_repair_message"] = message
+    return control
+
+
 def apply_failure_control(
     item: dict[str, Any],
     review: dict[str, Any],
@@ -71,6 +144,8 @@ def apply_failure_control(
     existing_control = item.get("image_generation_attempt_control", {})
     if existing_control.get("automatic_retry_status") == STOP_STATUS:
         raise ValueError("automatic image retry already stopped; user takeover required")
+    if existing_control.get("automatic_retry_status") == REPAIR_REQUIRED_STATUS:
+        raise ValueError("Ian deterministic layout repair is required before another generation")
     reason = failure.get("failure_reason")
     if not isinstance(reason, str) or not reason.strip():
         raise ValueError("image generation QA failure reason is empty")
@@ -80,15 +155,29 @@ def apply_failure_control(
 
     scope_id = generation_attempt_scope_id(item)
     item["generation_attempt_scope_id"] = scope_id
-    history = item.setdefault("image_generation_qa_failures", [])
-    if any(
-        existing.get("output", {}).get("checksum_sha256") == output_checksum
-        for existing in history
-    ):
+    if output_checksum in recorded_output_checksums(item):
         raise ValueError("image generation QA failure output was already recorded")
+    if is_repairable_ian_geometry(item, reason.strip()):
+        return apply_repairable_ian_geometry_disposition(
+            item,
+            review,
+            failure,
+            scope_id,
+        )
+    return append_counted_failure(item, review, failure, scope_id)
+
+
+def append_counted_failure(
+    item: dict[str, Any],
+    review: dict[str, Any],
+    failure: dict[str, Any],
+    scope_id: str,
+) -> dict[str, Any]:
+    """Append a rejection after the calling transition validates its evidence."""
+    history = item.setdefault("image_generation_qa_failures", [])
     recorded_failure = {
         **failure,
-        "failure_reason": reason.strip(),
+        "failure_reason": failure["failure_reason"].strip(),
         "attempt_number": len(history) + 1,
     }
     history.append(recorded_failure)
@@ -125,6 +214,11 @@ def apply_failure_control(
     return control
 
 
+def mark_state_awaiting_user_takeover(state: dict[str, Any]) -> None:
+    state["phase"] = "awaiting_visual_asset_review"
+    state["current_phase"] = "awaiting_visual_asset_review"
+
+
 def record_failure(args: argparse.Namespace) -> dict[str, Any]:
     workspace_candidate = Path(args.episode_workspace)
     if workspace_candidate.is_absolute() or not args.episode_workspace:
@@ -158,6 +252,7 @@ def record_failure(args: argparse.Namespace) -> dict[str, Any]:
     }
     control = apply_failure_control(item, review, failure)
     if control["automatic_retry_status"] == STOP_STATUS:
+        mark_state_awaiting_user_takeover(state)
         blocker = {
             "blocker_id": f"storyboard-image-generation-attempt-limit:{control['generation_attempt_scope_id']}",
             "contract_version": control["contract_version"],
@@ -178,7 +273,11 @@ def record_failure(args: argparse.Namespace) -> dict[str, Any]:
     temporary.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     temporary.replace(state_file)
     return {
-        "result": "pass",
+        "result": (
+            "repair_required"
+            if control["automatic_retry_status"] == REPAIR_REQUIRED_STATUS
+            else "pass"
+        ),
         "asset_id": args.asset_id,
         **control,
         "queue_generation_allowed": review.get("queue_generation_allowed"),

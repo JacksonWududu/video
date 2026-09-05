@@ -1,8 +1,21 @@
 import crypto from 'node:crypto';
 
+import {validateOneTimeUserGateOverride} from '../user-gate-override/contract.mjs';
+
 export const PUBLISHING_COVER_GENERATION_VERSION = 'publishing-cover-generation-v1';
 export const COVER_DERIVED_STYLE_PROFILE_VERSION = 'cover-derived-style-profile-v1';
 export const COVER_STYLE_SCOPE_SELECTION_VERSION = 'cover-style-scope-selection-v1';
+
+const CURRENT_GENERATION_POLICY_VERSION = 'publishing-cover-generation-policy-v2';
+const WHITE_CAT_MODES = new Set(['narrative_adaptive', 'fixed_centered_reference']);
+const COVER_OVERRIDE_TARGET_PHASES = new Set([
+  'awaiting_video_style_selection', 'awaiting_post_cover_selection_batch',
+]);
+const FIXED_CENTERED_SAFE_BOXES = Object.freeze({
+  landscape_16_9: Object.freeze({width: 0.40, height: 0.84}),
+  portrait_9_16: Object.freeze({width: 0.84, height: 0.64}),
+  landscape_4_3: Object.freeze({width: 0.44, height: 0.68}),
+});
 
 const SHA256 = /^[a-f0-9]{64}$/;
 const REQUIRED_STYLE_AXES = Object.freeze([
@@ -43,18 +56,23 @@ const coverAssetProjection = (asset) => ({
   path: asset?.path,
   checksum_sha256: asset?.checksum_sha256,
   prompt_checksum_sha256: asset?.prompt_checksum_sha256,
+  prompt_evidence_status: asset?.prompt_evidence_status,
   width: asset?.width,
   height: asset?.height,
   generation_attempt_scope_id: asset?.generation_attempt_scope_id,
   generation_attempt_count: asset?.generation_attempt_count,
   rejected_outputs: asset?.rejected_outputs,
   automatic_retry_status: asset?.automatic_retry_status,
+  selected_rejected_output_attempt: asset?.selected_rejected_output_attempt,
+  mechanical_result: asset?.mechanical_result,
+  white_cat_layout: asset?.white_cat_layout,
   qa_status: asset?.qa_status,
   qa: asset?.qa,
 });
 
 const packageProjection = (value) => ({
   contract_version: PUBLISHING_COVER_GENERATION_VERSION,
+  episode_id: value.episode_id,
   gate1_topic_sha256: value.gate1_topic_sha256,
   gate2_script_sha256: value.gate2_script_sha256,
   exact_theme_words: value.exact_theme_words,
@@ -63,6 +81,7 @@ const packageProjection = (value) => ({
   generation_policy: value.generation_policy,
   generation_rounds_used: value.generation_rounds_used,
   delegated_review: value.delegated_review,
+  user_mechanical_gate_override: value.user_mechanical_gate_override,
   assets: {
     landscape_16_9: coverAssetProjection(value.assets?.landscape_16_9),
     portrait_9_16: coverAssetProjection(value.assets?.portrait_9_16),
@@ -72,28 +91,94 @@ const packageProjection = (value) => ({
 
 export const buildPublishingCoverPackageSha256 = (value) => digest(packageProjection(value));
 
-const validateCoverAsset = (asset, {role, ratio}) => {
+const validateCurrentWhiteCatLayout = (asset, {
+  role, whiteCatMode, geometryWaived, referenceFormWaived, relativeScaleWaived,
+}) => {
+  const layout = asset?.white_cat_layout;
+  if (layout?.mode !== whiteCatMode) {
+    throw new Error(`publishing cover ${role} white-cat mode binding is invalid`);
+  }
+  if (whiteCatMode === 'narrative_adaptive') return;
+
+  const safeBox = FIXED_CENTERED_SAFE_BOXES[role];
+  if (layout.scale_policy !== 'uniform_contain_reference_bbox_v1'
+    || layout.safe_box_width_ratio !== safeBox.width
+    || layout.safe_box_height_ratio !== safeBox.height
+    || typeof layout.center_x_ratio !== 'number'
+    || typeof layout.center_y_ratio !== 'number'
+    || layout.reference_form_preserved !== !referenceFormWaived) {
+    throw new Error(`publishing cover ${role} fixed white-cat layout is invalid`);
+  }
+  const centered = Math.abs(layout.center_x_ratio - 0.5) <= 0.02
+    && Math.abs(layout.center_y_ratio - 0.5) <= 0.02;
+  if (!centered && !geometryWaived) {
+    throw new Error(`publishing cover ${role} fixed white-cat layout is invalid`);
+  }
+  if (asset.qa?.fixed_reference_form !== (referenceFormWaived ? 'reject' : 'pass')
+    || asset.qa?.aspect_relative_scale !== (relativeScaleWaived ? 'reject' : 'pass')
+    || asset.qa?.geometric_centering !== (geometryWaived ? 'reject' : 'pass')) {
+    throw new Error(`publishing cover ${role} fixed white-cat QA is incomplete or rejected`);
+  }
+};
+
+const validateCoverAsset = (asset, {
+  role, ratio, whiteCatMode, currentGenerationPolicy, overrideGateIds,
+}) => {
+  const geometryGateId = `publishing_cover.${role}.fixed_centered_geometry`;
+  const geometryWaived = overrideGateIds.has(geometryGateId);
+  const referenceFormWaived = overrideGateIds.has(`publishing_cover.${role}.fixed_reference_form`);
+  const relativeScaleWaived = overrideGateIds.has(`publishing_cover.${role}.aspect_relative_scale`);
+  const formOrScaleWaived = referenceFormWaived || relativeScaleWaived;
+  const fixedQaWaived = geometryWaived || formOrScaleWaived;
+  const promptWaived = overrideGateIds.has('publishing_cover.prompt_evidence_projection');
+  if (formOrScaleWaived && (!currentGenerationPolicy || whiteCatMode !== 'fixed_centered_reference')) {
+    throw new Error(`publishing cover ${role} fixed white-cat override mode is invalid`);
+  }
   if (asset?.role !== role) throw new Error(`publishing cover ${role} role mismatch`);
   requireText(asset.path, `publishing cover ${role} path`);
   requireSha256(asset.checksum_sha256, `publishing cover ${role} checksum`);
-  requireSha256(asset.prompt_checksum_sha256, `publishing cover ${role} prompt checksum`);
+  if (promptWaived) {
+    if (asset.prompt_checksum_sha256 !== null
+      || asset.prompt_evidence_status !== 'not_projected_from_tool_call_waived_once') {
+      throw new Error(`publishing cover ${role} waived prompt evidence is invalid`);
+    }
+  } else {
+    requireSha256(asset.prompt_checksum_sha256, `publishing cover ${role} prompt checksum`);
+  }
   if (!Number.isInteger(asset.width) || !Number.isInteger(asset.height)
     || asset.width < 1 || asset.height < 1
     || Math.abs((asset.width / asset.height) - ratio) / ratio > 0.005) {
     throw new Error(`publishing cover ${role} aspect ratio is invalid`);
   }
   requireText(asset.generation_attempt_scope_id, `publishing cover ${role} attempt scope`);
-  if (!Number.isInteger(asset.generation_attempt_count)
-    || asset.generation_attempt_count < 1 || asset.generation_attempt_count > 3
-    || !Array.isArray(asset.rejected_outputs)
-    || asset.rejected_outputs.length !== asset.generation_attempt_count - 1
-    || asset.rejected_outputs.length > 2
-    || asset.automatic_retry_status !== 'accepted') {
+  const ordinaryAttemptEvidence = Number.isInteger(asset.generation_attempt_count)
+    && asset.generation_attempt_count >= 1 && asset.generation_attempt_count <= 3
+    && Array.isArray(asset.rejected_outputs)
+    && asset.rejected_outputs.length === asset.generation_attempt_count - 1
+    && asset.rejected_outputs.length <= 2
+    && asset.automatic_retry_status === 'accepted';
+  const waivedAttemptEvidence = fixedQaWaived
+    && asset.generation_attempt_count === 3
+    && Array.isArray(asset.rejected_outputs)
+    && asset.rejected_outputs.length === 3
+    && asset.automatic_retry_status === 'stopped_user_takeover_required'
+    && asset.selected_rejected_output_attempt === 3
+    && asset.mechanical_result === (formOrScaleWaived
+      ? 'rejected_fixed_reference_form_or_aspect_relative_scale'
+      : 'rejected_fixed_centered_geometry');
+  if (fixedQaWaived ? !waivedAttemptEvidence : !ordinaryAttemptEvidence) {
     throw new Error(`publishing cover ${role} attempt evidence is invalid`);
   }
   const rejectedChecksums = new Set();
   for (const rejected of asset.rejected_outputs) {
-    requireSha256(rejected?.prompt_checksum_sha256, `publishing cover ${role} rejected prompt checksum`);
+    if (promptWaived) {
+      if (rejected?.prompt_checksum_sha256 !== null
+        || rejected?.prompt_evidence_status !== 'not_projected_from_tool_call_waived_once') {
+        throw new Error(`publishing cover ${role} waived rejected prompt evidence is invalid`);
+      }
+    } else {
+      requireSha256(rejected?.prompt_checksum_sha256, `publishing cover ${role} rejected prompt checksum`);
+    }
     requireSha256(rejected?.output_checksum_sha256, `publishing cover ${role} rejected output checksum`);
     requireText(rejected?.reason, `publishing cover ${role} rejection reason`);
     if (rejectedChecksums.has(rejected.output_checksum_sha256)) {
@@ -101,7 +186,8 @@ const validateCoverAsset = (asset, {role, ratio}) => {
     }
     rejectedChecksums.add(rejected.output_checksum_sha256);
   }
-  if (asset.qa_status !== 'qa_accepted_by_codex') {
+  if ((!fixedQaWaived && asset.qa_status !== 'qa_accepted_by_codex')
+    || (fixedQaWaived && asset.qa_status !== 'rejected_with_user_override')) {
     throw new Error(`publishing cover ${role} lacks delegated QA acceptance`);
   }
   const qa = asset.qa;
@@ -116,12 +202,19 @@ const validateCoverAsset = (asset, {role, ratio}) => {
     || qa.character_checks.some((row) => row?.result !== 'pass')) {
     throw new Error(`publishing cover ${role} structured QA is incomplete or rejected`);
   }
+  if (currentGenerationPolicy) {
+    validateCurrentWhiteCatLayout(asset, {
+      role, whiteCatMode, geometryWaived, referenceFormWaived, relativeScaleWaived,
+    });
+  }
 };
 
 export const validatePublishingCoverPackage = (value, {
   gate1TopicSha256,
   gate1ExactThemeWords,
   gate2ScriptSha256,
+  episodeId,
+  overrideToPhase = value?.user_mechanical_gate_override?.consumption?.to_phase,
   canonicalWhiteCatReferencePath,
   canonicalWhiteCatReferenceSha256,
 }) => {
@@ -145,24 +238,87 @@ export const validatePublishingCoverPackage = (value, {
     || value.white_cat_reference?.checksum_sha256 !== canonicalWhiteCatReferenceSha256) {
     throw new Error('publishing cover white-cat reference is stale or substituted');
   }
-  if (value.generation_policy?.style_mode !== 'open_unconstrained'
-    || value.generation_policy?.style_reference_count !== 0
-    || value.generation_policy?.independent_aspect_compositions !== true
-    || value.generation_policy?.maximum_automatic_rounds !== 3
+  const generationPolicy = value.generation_policy;
+  const currentGenerationPolicy = generationPolicy?.contract_version !== undefined;
+  if (currentGenerationPolicy
+    && generationPolicy.contract_version !== CURRENT_GENERATION_POLICY_VERSION) {
+    throw new Error('publishing cover generation policy version is invalid');
+  }
+  if (generationPolicy?.style_mode !== 'open_unconstrained'
+    || generationPolicy?.style_reference_count !== 0
+    || generationPolicy?.independent_aspect_compositions !== true
+    || generationPolicy?.maximum_automatic_rounds !== 3
     || !Number.isInteger(value.generation_rounds_used)
     || value.generation_rounds_used < 1 || value.generation_rounds_used > 3) {
     throw new Error('publishing cover generation policy is invalid');
   }
+  const whiteCatMode = generationPolicy?.white_cat_mode;
+  if (currentGenerationPolicy) {
+    const selection = generationPolicy.white_cat_mode_selection;
+    if (!WHITE_CAT_MODES.has(whiteCatMode)
+      || selection?.status !== 'selected'
+      || selection?.value !== whiteCatMode
+      || typeof selection?.decided_at !== 'string'
+      || Number.isNaN(Date.parse(selection.decided_at))) {
+      throw new Error('publishing cover white-cat mode selection is invalid');
+    }
+    requireText(selection.exact_message, 'publishing cover white-cat mode exact message');
+  }
+  const overrideGateIds = new Set(value.user_mechanical_gate_override?.gate_ids ?? []);
+  const hasOverride = overrideGateIds.size > 0;
+  const expectedOverrideGateIds = [];
+  for (const role of ['landscape_16_9', 'portrait_9_16', 'landscape_4_3']) {
+    const asset = value.assets?.[role];
+    if (asset?.prompt_checksum_sha256 === null) {
+      if (!expectedOverrideGateIds.includes('publishing_cover.prompt_evidence_projection')) {
+        expectedOverrideGateIds.push('publishing_cover.prompt_evidence_projection');
+      }
+    }
+    if (asset?.qa_status === 'rejected_with_user_override') {
+      if (asset.qa?.geometric_centering === 'reject') {
+        expectedOverrideGateIds.push(`publishing_cover.${role}.fixed_centered_geometry`);
+      }
+      for (const check of ['fixed_reference_form', 'aspect_relative_scale']) {
+        if (asset.qa?.[check] === 'reject') {
+          expectedOverrideGateIds.push(`publishing_cover.${role}.${check}`);
+        }
+      }
+    }
+  }
+  if (hasOverride) {
+    if (!COVER_OVERRIDE_TARGET_PHASES.has(overrideToPhase)) {
+      throw new Error('publishing cover override target transition is invalid');
+    }
+    validateOneTimeUserGateOverride(value.user_mechanical_gate_override, {
+      episodeId,
+      requiredGateIds: expectedOverrideGateIds,
+      requiredArtifacts: ['landscape_16_9', 'portrait_9_16', 'landscape_4_3'].map((role) => ({
+        path: value.assets?.[role]?.path,
+        checksum_sha256: value.assets?.[role]?.checksum_sha256,
+      })),
+      fromPhase: 'stopped_user_takeover_required',
+      toPhase: overrideToPhase,
+      requiredStatus: 'consumed',
+    });
+  } else if (expectedOverrideGateIds.length > 0) {
+    throw new Error('publishing cover mechanical failures require an exact one-time user override');
+  }
   if (value.delegated_review?.authority !== 'user_delegated_cover_qa'
-    || value.delegated_review?.status !== 'qa_accepted_by_codex'
-    || value.delegated_review?.user_approval_claimed !== false
+    || value.delegated_review?.status !== (hasOverride ? 'pass_with_user_override' : 'qa_accepted_by_codex')
+    || value.delegated_review?.user_approval_claimed !== hasOverride
     || typeof value.delegated_review?.exact_authorization_message !== 'string'
     || value.delegated_review.exact_authorization_message.trim() === '') {
     throw new Error('publishing cover delegated review evidence is invalid');
   }
-  validateCoverAsset(value.assets?.landscape_16_9, {role: 'landscape_16_9', ratio: 16 / 9});
-  validateCoverAsset(value.assets?.portrait_9_16, {role: 'portrait_9_16', ratio: 9 / 16});
-  validateCoverAsset(value.assets?.landscape_4_3, {role: 'landscape_4_3', ratio: 4 / 3});
+  validateCoverAsset(value.assets?.landscape_16_9, {
+    role: 'landscape_16_9', ratio: 16 / 9, whiteCatMode, currentGenerationPolicy, overrideGateIds,
+  });
+  validateCoverAsset(value.assets?.portrait_9_16, {
+    role: 'portrait_9_16', ratio: 9 / 16, whiteCatMode, currentGenerationPolicy, overrideGateIds,
+  });
+  validateCoverAsset(value.assets?.landscape_4_3, {
+    role: 'landscape_4_3', ratio: 4 / 3, whiteCatMode, currentGenerationPolicy, overrideGateIds,
+  });
   if (value.generation_rounds_used !== Math.max(
     value.assets.landscape_16_9.generation_attempt_count,
     value.assets.portrait_9_16.generation_attempt_count,
@@ -172,7 +328,7 @@ export const validatePublishingCoverPackage = (value, {
   }
   const expected = buildPublishingCoverPackageSha256(value);
   if (value.package_sha256 !== expected) throw new Error('publishing cover package checksum is stale');
-  return {result: 'pass', package_sha256: expected};
+  return {result: hasOverride ? 'pass_with_user_override' : 'pass', package_sha256: expected};
 };
 
 const styleProjection = (value) => ({

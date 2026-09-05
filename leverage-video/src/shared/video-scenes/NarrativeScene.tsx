@@ -1,4 +1,4 @@
-import {AbsoluteFill, staticFile, useCurrentFrame} from 'remotion';
+import {AbsoluteFill, CanvasImage, Easing, interpolate, staticFile, useCurrentFrame} from 'remotion';
 
 import {
   INTRA_SHOT_TRANSITION_VERSION,
@@ -7,6 +7,7 @@ import {
 import {WatercolorImageSequence} from '../watercolor-bloom';
 import type {
   LegacyIntraShotWatercolorTransition,
+  NarrativeSubjectEntrance,
   RenderableImageOccurrence,
 } from './types';
 import type {IntraShotTransitionV1} from '../intra-shot-transitions';
@@ -16,12 +17,14 @@ export const NarrativeScene: React.FC<{
   readonly intraShotTransitionContract: 'intra-shot-transition-v1' | 'intra-shot-watercolor-bloom-v1';
   readonly intraShotTransitions: readonly (IntraShotTransitionV1 | LegacyIntraShotWatercolorTransition)[];
   readonly heroPoseBackground?: string | null;
+  readonly subjectEntrance?: NarrativeSubjectEntrance | null;
   readonly shotId: string;
 }> = ({
   imageSequence,
   intraShotTransitionContract,
   intraShotTransitions,
   heroPoseBackground = null,
+  subjectEntrance = null,
   shotId,
 }) => {
   if (imageSequence.length === 0) {
@@ -35,6 +38,40 @@ export const NarrativeScene: React.FC<{
   const scale = motionActive ? 1.035 + 0.028 * (1 + Math.sin(motionFrame / 42)) / 2 : 1;
   const translateX = motionActive ? direction * 24 * Math.sin(motionFrame / 53) : 0;
   const translateY = motionActive ? 13 * Math.cos(motionFrame / 61) : 0;
+  if (subjectEntrance !== null
+    && subjectEntrance.subject_asset_id !== imageSequence[0].asset_id) {
+    throw new Error(`NarrativeScene subject entrance does not match its first pose: ${shotId}`);
+  }
+  const entranceProgress = subjectEntrance === null
+    ? 1
+    : Easing.out(Easing.cubic)(interpolate(
+        frame,
+        [subjectEntrance.at_frame, subjectEntrance.at_frame + subjectEntrance.duration_in_frames - 1],
+        [0, 1],
+        {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'},
+      ));
+  const firstOccurrenceContent = subjectEntrance === null ? undefined : (
+    <AbsoluteFill
+      data-subject-entrance={subjectEntrance.contract_version}
+      style={{
+        opacity: interpolate(entranceProgress, [0, 1], [subjectEntrance.initial_opacity, 1]),
+        transform: [
+          `translate(${interpolate(entranceProgress, [0, 1], [subjectEntrance.translate_x_px, 0])}px,`,
+          `${interpolate(entranceProgress, [0, 1], [subjectEntrance.translate_y_px, 0])}px)`,
+          `scale(${interpolate(entranceProgress, [0, 1], [subjectEntrance.initial_scale, 1])})`,
+        ].join(' '),
+        transformOrigin: '50% 68%',
+      }}
+    >
+      <CanvasImage
+        src={staticFile(imageSequence[0].asset)}
+        width={1920}
+        height={1080}
+        fit="fill"
+        style={{position: 'absolute', inset: 0}}
+      />
+    </AbsoluteFill>
+  );
 
   return (
     <AbsoluteFill
@@ -55,6 +92,7 @@ export const NarrativeScene: React.FC<{
           }))}
           transitions={intraShotTransitions as readonly IntraShotTransitionV1[]}
           backgroundSrc={heroPoseBackground ? staticFile(heroPoseBackground) : undefined}
+          firstOccurrenceContent={firstOccurrenceContent}
         />
       ) : intraShotTransitionContract === 'intra-shot-watercolor-bloom-v1' ? (
         <WatercolorImageSequence

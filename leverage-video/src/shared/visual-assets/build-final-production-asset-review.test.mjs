@@ -43,7 +43,7 @@ const png = ({width = 1920, height = 1080, background}) => sharp({
 
 const makeFixture = async ({assetCount = 13} = {}) => {
   const repositoryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'final-production-review-'));
-  const episodeWorkspace = 'leverage-video/src/topic99';
+  const episodeWorkspace = 'leverage-video/src/episode-test';
   const root = path.join(repositoryRoot, episodeWorkspace);
   const relative = (value) => `${episodeWorkspace}/${value}`;
   const absolute = (value) => path.join(repositoryRoot, value);
@@ -218,6 +218,118 @@ test('builds immutable HTML, paged sheets, Ian cumulative sheet, and JSON withou
       manifest.assets.at(-1).ian_layered_scene_package.production_inputs.map((entry) => entry.member_role),
       ['background', 'semantic-layer'],
     );
+  } finally {
+    cleanup(fixture);
+  }
+});
+
+test('renders and preserves a hash-bound failed-but-waived mechanical disposition', async () => {
+  const fixture = await makeFixture({assetCount: 2});
+  try {
+    const state = JSON.parse(fs.readFileSync(fixture.statePath, 'utf8'));
+    const queueItem = state.visual_asset_review.queue[0];
+    const reviewAsset = state.visual_asset_review.final_review.assets[0];
+    const overrideEvidence = {
+      mechanical_qa_result: 'failed_but_waived_once',
+      user_mechanical_gate_override_result: 'pass_with_user_override',
+      user_mechanical_gate_override_sha256: '8'.repeat(64),
+    };
+    Object.assign(queueItem, {
+      status: 'qa_failed_but_waived_once_pending_final_review',
+      ...overrideEvidence,
+    });
+    Object.assign(reviewAsset, {
+      qa_status: 'qa_failed_but_waived_once_pending_final_review',
+      ...overrideEvidence,
+    });
+    state.visual_asset_review.final_review.presented_map_sha256 = completeReviewDigest(
+      state.visual_asset_review.final_review,
+    );
+    writeJson(fixture.statePath, state);
+
+    const report = await buildFinalProductionAssetReview({
+      episodeWorkspace: fixture.episodeWorkspace,
+      expectedPresentedMapSha256: state.visual_asset_review.final_review.presented_map_sha256,
+      repositoryRoot: fixture.repositoryRoot,
+      createdAt: '2026-08-29T16:00:00+08:00',
+      inspectIanPackage: fixture.inspectIanPackage,
+    });
+    const html = fs.readFileSync(path.join(fixture.repositoryRoot, report.html.path), 'utf8');
+    const manifest = JSON.parse(fs.readFileSync(
+      path.join(fixture.repositoryRoot, report.manifest.path),
+      'utf8',
+    ));
+    assert.match(html, /机械门禁失败已获一次性用户放行/);
+    assert.match(html, new RegExp(overrideEvidence.user_mechanical_gate_override_sha256));
+    assert.deepEqual(
+      Object.fromEntries(Object.entries(manifest.assets[0]).filter(([key]) => key in overrideEvidence)),
+      overrideEvidence,
+    );
+  } finally {
+    cleanup(fixture);
+  }
+});
+
+test('rejects a failed-but-waived final-review asset without complete override evidence', async () => {
+  const fixture = await makeFixture({assetCount: 2});
+  try {
+    const state = JSON.parse(fs.readFileSync(fixture.statePath, 'utf8'));
+    state.visual_asset_review.queue[0].status = 'qa_failed_but_waived_once_pending_final_review';
+    state.visual_asset_review.final_review.assets[0].qa_status = 'qa_failed_but_waived_once_pending_final_review';
+    state.visual_asset_review.final_review.presented_map_sha256 = completeReviewDigest(
+      state.visual_asset_review.final_review,
+    );
+    writeJson(fixture.statePath, state);
+    await assert.rejects(
+      buildFinalProductionAssetReview({
+        episodeWorkspace: fixture.episodeWorkspace,
+        expectedPresentedMapSha256: state.visual_asset_review.final_review.presented_map_sha256,
+        repositoryRoot: fixture.repositoryRoot,
+        inspectIanPackage: fixture.inspectIanPackage,
+      }),
+      /mechanical override evidence is incomplete/,
+    );
+  } finally {
+    cleanup(fixture);
+  }
+});
+
+test('direct-first review excludes publishing covers from HTML and manifest', async () => {
+  const fixture = await makeFixture({assetCount: 2});
+  try {
+    const state = JSON.parse(fs.readFileSync(fixture.statePath, 'utf8'));
+    state.storyboard_timing = {direct_first_shot_contract: 'direct-first-shot-v1'};
+    state.storyboard_draft = {direct_first_shot_contract: 'direct-first-shot-v1'};
+    state.publishing_cover = structuredClone(state.opening_cover);
+    delete state.opening_cover;
+    state.visual_asset_review.queue.forEach((item) => {
+      item.shot_start_frame = item.shot_id === 'S01' ? 0 : 30;
+    });
+    writeJson(fixture.statePath, state);
+
+    const report = await buildFinalProductionAssetReview({
+      episodeWorkspace: fixture.episodeWorkspace,
+      expectedPresentedMapSha256: fixture.finalReview.presented_map_sha256,
+      repositoryRoot: fixture.repositoryRoot,
+      createdAt: '2026-08-29T16:00:00+08:00',
+      inspectIanPackage: fixture.inspectIanPackage,
+    });
+    const html = fs.readFileSync(path.join(fixture.repositoryRoot, report.html.path), 'utf8');
+    const manifest = JSON.parse(fs.readFileSync(
+      path.join(fixture.repositoryRoot, report.manifest.path),
+      'utf8',
+    ));
+    assert.doesNotMatch(html, /固定开场封面|cover-only-v1/);
+    assert.match(html, /发布封面不进入视频生产/);
+    assert.equal(Object.hasOwn(manifest, 'cover'), false);
+    assert.deepEqual(manifest.timeline_opening, {
+      contract_version: 'direct-first-shot-v1',
+      first_shot_id: 'S01',
+      start_frame: 0,
+      fixed_opening_cover: false,
+      publishing_cover_included: false,
+    });
+    assert.equal(JSON.stringify(manifest).includes('cover.png'), false);
   } finally {
     cleanup(fixture);
   }

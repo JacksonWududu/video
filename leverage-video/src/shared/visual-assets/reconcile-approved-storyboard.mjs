@@ -14,7 +14,10 @@ import {
   sha256Canonical as sha256IanCanonical,
 } from '../ian-layered-scene/contract.mjs';
 import {parseStoryboardSummary} from '../visual-direction-review-form/contract.mjs';
-import {validateActionStateSchedule} from '../action-state-schedule/contract.mjs';
+import {
+  buildActionStatePlanSha256,
+  validateActionStateSchedule,
+} from '../action-state-schedule/contract.mjs';
 import {validateStoryboardVisualRhythm} from '../storyboard-visual-rhythm/contract.mjs';
 import {buildPresentedMapSha256 as buildVisualDirectionMapSha256} from '../visual-generation-routes/contract.mjs';
 import {validateWhiteCatVisualStyleSelection} from '../workflow-approval/contract.mjs';
@@ -36,6 +39,32 @@ const resolveRootRelative = (rootRelativePath, label) => {
   const resolved = path.resolve(REPOSITORY_ROOT, rootRelativePath);
   if (!resolved.startsWith(`${REPOSITORY_ROOT}${path.sep}`)) throw new Error(`${label} escapes repository root`);
   return resolved;
+};
+
+const loadBoundWhiteCatVisualStyleSelection = (binding) => {
+  const hasFileBinding = binding?.path !== undefined || binding?.file_checksum_sha256 !== undefined;
+  if (!hasFileBinding) return binding;
+  if (!SHA256.test(binding?.file_checksum_sha256 ?? '')) {
+    throw new Error('white-cat visual style selection file checksum is invalid');
+  }
+  const target = resolveRootRelative(binding.path, 'white-cat visual style selection path');
+  const status = fs.lstatSync(target);
+  if (!status.isFile() || status.isSymbolicLink()) {
+    throw new Error('white-cat visual style selection path must be a regular non-symlink file');
+  }
+  const bytes = fs.readFileSync(target);
+  if (sha256(bytes) !== binding.file_checksum_sha256) {
+    throw new Error('white-cat visual style selection file checksum is stale');
+  }
+  const selection = JSON.parse(bytes);
+  const metadataFields = new Set(['status', 'path', 'file_checksum_sha256']);
+  for (const [field, value] of Object.entries(binding)) {
+    if (metadataFields.has(field) || !Object.hasOwn(selection, field)) continue;
+    if (canonicalJson(selection[field]) !== canonicalJson(value)) {
+      throw new Error(`white-cat visual style selection summary is stale at ${field}`);
+    }
+  }
+  return selection;
 };
 
 const parseSections = (markdown) => new Map(
@@ -79,26 +108,22 @@ const stateCountFor = (section, row, priorItems, rhythmShot = null, actionSchedu
   return [...priorCounts][0];
 };
 
+const queueItemCountFor = (stateCount, actionSchedule) => (
+  actionSchedule?.schedule?.contract_version === 'action-state-schedule-v4'
+    && actionSchedule.schedule.motion_tier === 'hero_pose'
+    ? stateCount + 1
+    : stateCount
+);
+
 export const buildStandardItems = ({shotId, row, count, actionSchedule}) => {
   const route = row.user_selection.visual_generation_route;
   if (isFlipbookRow(row)) {
-    if (count !== 1
-        || !['ian-handdrawn-ppt', 'imagegen'].includes(route)
-        || row.white_cat_recommendation?.recommended !== false) {
+    if (count !== 1 || !['ian-handdrawn-ppt', 'imagegen'].includes(route) || row.white_cat_recommendation?.recommended !== false) {
       throw new Error(`${shotId} flipbook queue requires one no-cat static image`);
     }
-    return [{
-      asset_id: `${shotId}-static-v01`,
-      shot_id: shotId,
-      role: 'standalone-graphic',
-      depends_on: [],
-      status: 'pending_generation',
-      active_for_current_storyboard: true,
-      strict_review: false,
-      has_downstream_action_variants: false,
-      state_count_total: 1,
-      state_index: 0,
-    }];
+    return [{asset_id: `${shotId}-static-v01`, shot_id: shotId, role: 'standalone-graphic',
+      depends_on: [], status: 'pending_generation', active_for_current_storyboard: true,
+      strict_review: false, has_downstream_action_variants: false, state_count_total: 1, state_index: 0}];
   }
   if (route === 'ian-handdrawn-ppt') {
     if (count !== 1) throw new Error(`${shotId} Ian queue must contain exactly one layered-scene package`);
@@ -124,6 +149,49 @@ export const buildStandardItems = ({shotId, row, count, actionSchedule}) => {
     throw new Error(`${shotId} action schedule cannot initialize its visual queue`);
   }
   const masterId = `${shotId}-master-v01`;
+  if (actionSchedule.schedule.contract_version === 'action-state-schedule-v4'
+    && actionSchedule.schedule.motion_tier === 'hero_pose') {
+    const scheduleBackgroundAssetId = actionSchedule.schedule.background_asset_id;
+    if (typeof scheduleBackgroundAssetId !== 'string' || scheduleBackgroundAssetId === '') {
+      throw new Error(`${shotId} hero-pose schedule lacks its independent background`);
+    }
+    const actionStateBinding = {
+      motion_tier: actionSchedule.schedule.motion_tier,
+      schedule_background_asset_id: scheduleBackgroundAssetId,
+      action_state_schedule_contract_version: actionSchedule.schedule.contract_version,
+      action_state_plan_sha256: actionSchedule.state_plan_sha256,
+    };
+    return [{
+      asset_id: masterId,
+      asset_kind: 'hero_pose_background',
+      shot_id: shotId,
+      role: 'base/master',
+      depends_on: [],
+      status: 'pending_generation',
+      active_for_current_storyboard: true,
+      strict_review: true,
+      has_downstream_action_variants: true,
+      white_cat_present: false,
+      state_count_total: count,
+      state_index: null,
+      ...actionStateBinding,
+    }, ...occurrences.map((occurrence, stateIndex) => ({
+      asset_id: `${shotId}-action-${String(stateIndex + 1).padStart(2, '0')}-v01`,
+      asset_kind: 'hero_pose',
+      shot_id: shotId,
+      role: `action-${String(stateIndex + 1).padStart(2, '0')}`,
+      depends_on: [masterId],
+      status: 'pending_generation',
+      active_for_current_storyboard: true,
+      strict_review: false,
+      has_downstream_action_variants: false,
+      state_count_total: count,
+      state_index: stateIndex,
+      schedule_state_id: occurrence.state_id,
+      semantic_state: occurrence.semantic_state,
+      ...actionStateBinding,
+    }))];
+  }
   return occurrences.map((occurrence, stateIndex) => ({
     asset_id: stateIndex === 0 ? masterId : `${shotId}-action-${String(stateIndex).padStart(2, '0')}-v01`,
     shot_id: shotId,
@@ -141,6 +209,46 @@ export const buildStandardItems = ({shotId, row, count, actionSchedule}) => {
     action_state_schedule_contract_version: actionSchedule.schedule.contract_version,
     action_state_plan_sha256: actionSchedule.state_plan_sha256,
   }));
+};
+
+export const validateFreshActionScheduleSet = ({rhythm, actionSchedules}) => {
+  if (!Array.isArray(rhythm?.shots)
+    || !Array.isArray(actionSchedules?.schedules)
+    || actionSchedules.contract_version !== 'action-state-schedule-set-v1'
+    || actionSchedules.schedule_count !== actionSchedules.schedules.length) {
+    throw new Error('fresh visual queue initialization lacks approved rhythm/action authority');
+  }
+  const rhythmByShot = new Map(rhythm.shots.map((shot) => [shot.shot_id, shot]));
+  const expectedScheduledShotIds = rhythm.shots
+    .filter((shot) => ['stateful', 'hero_pose'].includes(shot.motion_tier))
+    .map((shot) => shot.shot_id);
+  const scheduledShotIds = actionSchedules.schedules.map((entry) => entry.shot_id);
+  if (JSON.stringify(scheduledShotIds) !== JSON.stringify(expectedScheduledShotIds)) {
+    throw new Error('fresh visual queue action schedules do not exactly cover stateful and hero-pose shots');
+  }
+  for (const entry of actionSchedules.schedules) {
+    const rhythmShot = rhythmByShot.get(entry.shot_id);
+    const expectedVersion = rhythm.contract_version === 'storyboard-visual-rhythm-v2'
+      ? 'action-state-schedule-v4'
+      : 'action-state-schedule-v3';
+    if (!rhythmShot || entry.schedule?.contract_version !== expectedVersion) {
+      throw new Error(`fresh visual queue ${entry.shot_id} action schedule version is stale`);
+    }
+    const validation = validateActionStateSchedule(entry.schedule, {
+      totalFrames: rhythmShot.end_frame - rhythmShot.start_frame,
+      fps: 30,
+      densityMode: expectedVersion === 'action-state-schedule-v4' ? rhythm.density_mode : null,
+      densitySelectionSha256: expectedVersion === 'action-state-schedule-v4'
+        ? rhythm.visual_density_selection_sha256
+        : null,
+    });
+    if (validation.result !== 'pass'
+      || entry.shot_start_frame !== rhythmShot.start_frame
+      || entry.shot_end_frame !== rhythmShot.end_frame
+      || entry.state_plan_sha256 !== buildActionStatePlanSha256(entry.schedule)) {
+      throw new Error(`fresh visual queue ${entry.shot_id} action schedule binding is stale`);
+    }
+  }
 };
 
 const cleanPendingItem = (item) => {
@@ -218,16 +326,19 @@ const preservedRebindAssetIds = ({state, review}) => {
 
 const assertPreservedVisualContract = ({item, row, summaryRow, timing, count, actionSchedule}) => {
   if (isFlipbookRow(item) !== isFlipbookRow(row)
-      || (isFlipbookRow(row)
-        && canonicalJson(item.static_spread) !== canonicalJson(row.static_spread))) {
+    || (isFlipbookRow(row) && canonicalJson(item.static_spread) !== canonicalJson(row.static_spread))) {
     throw new Error(`${item.asset_id} static spread contract changed`);
   }
+  const heroPoseBackground = actionSchedule?.schedule?.contract_version === 'action-state-schedule-v4'
+    && actionSchedule.schedule.motion_tier === 'hero_pose'
+    && item.role === 'base/master'
+    && item.state_index === null;
   const expected = {
     visual_generation_route: row.user_selection.visual_generation_route,
     scene_class: row.scene_class,
     visual_structure_id: row.user_selection.visual_structure_id,
     treatment_profile_id: row.user_selection.treatment_profile_id,
-    white_cat_present: row.user_selection.white_cat_present,
+    white_cat_present: heroPoseBackground ? false : row.user_selection.white_cat_present,
     white_cat_visual_style_id: row.user_selection.white_cat_visual_style_id ?? null,
     white_cat_visual_style_selection_sha256:
       row.user_selection.white_cat_visual_style_selection_sha256 ?? null,
@@ -248,16 +359,79 @@ const assertPreservedVisualContract = ({item, row, summaryRow, timing, count, ac
     }
   }
   if (actionSchedule) {
+    if (heroPoseBackground) {
+      if (item.schedule_background_asset_id !== actionSchedule.schedule.background_asset_id
+        || item.motion_tier !== actionSchedule.schedule.motion_tier
+        || item.action_state_schedule_contract_version !== actionSchedule.schedule.contract_version
+        || item.action_state_plan_sha256 !== actionSchedule.state_plan_sha256) {
+        throw new Error(`${item.asset_id} preserved hero-pose background binding changed`);
+      }
+      return;
+    }
     const occurrence = actionSchedule.schedule?.occurrences?.[item.state_index];
     if (!occurrence
       || item.schedule_state_id !== occurrence.state_id
       || item.semantic_state !== occurrence.semantic_state
+      || (actionSchedule.schedule.contract_version === 'action-state-schedule-v4'
+        && actionSchedule.schedule.motion_tier === 'hero_pose'
+        && item.schedule_background_asset_id !== actionSchedule.schedule.background_asset_id)
       || item.motion_tier !== actionSchedule.schedule.motion_tier
       || item.action_state_schedule_contract_version !== actionSchedule.schedule.contract_version
       || item.action_state_plan_sha256 !== actionSchedule.state_plan_sha256) {
       throw new Error(`${item.asset_id} preserved action-state binding changed`);
     }
   }
+};
+
+export const inspectVisualContractChange = (values) => {
+  try {
+    assertPreservedVisualContract(values);
+    return null;
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
+};
+
+export const hasUnchangedVisualContract = (values) => inspectVisualContractChange(values) === null;
+
+export const hasPassingReusableEvidence = (item) => {
+  const ordinaryPass = [
+    'approved',
+    'qa_passed_pending_batch_review',
+    'qa_passed_pending_final_review',
+  ].includes(item.status)
+    && item.technical_qa?.result === 'pass'
+    && item.semantic_qa?.result === 'pass'
+    && item.visible_text_qa?.result === 'pass'
+    && item.visual_qa?.result === 'pass';
+  const releasedMechanicalFailure = item.status
+      === 'qa_failed_but_waived_once_pending_final_review'
+    && item.user_mechanical_gate_override_result === 'pass_with_user_override';
+  return ordinaryPass || releasedMechanicalFailure;
+};
+
+export const preserveReusableMechanicalOverrideBlockers = ({blockers, activeQueue}) => {
+  const carriedOverrideHashes = new Set(
+    activeQueue
+      .filter((item) => item.status === 'qa_failed_but_waived_once_pending_final_review'
+        && hasPassingReusableEvidence(item))
+      .map((item) => item.user_mechanical_gate_override_sha256
+        ?? item.user_mechanical_gate_override?.override_sha256)
+      .filter((value) => SHA256.test(value ?? '')),
+  );
+  return (Array.isArray(blockers) ? blockers : [])
+    .filter((blocker) => carriedOverrideHashes.has(
+      blocker?.user_mechanical_gate_override_sha256,
+    ))
+    .map((blocker) => structuredClone(blocker));
+};
+
+const verifyReusableEvidence = (item) => {
+  verifyPreservedFile(item, `${item.asset_id} preserved asset`);
+  verifyPreservedFile({
+    path: item.qa_evidence_path,
+    checksum_sha256: item.qa_evidence_checksum_sha256,
+  }, `${item.asset_id} preserved QA evidence`);
 };
 
 const preserveExactItem = (item) => {
@@ -327,7 +501,9 @@ const bindItem = ({
   scene_class: row.scene_class,
   visual_structure_id: row.user_selection.visual_structure_id,
   treatment_profile_id: row.user_selection.treatment_profile_id,
-  white_cat_present: row.user_selection.white_cat_present,
+  white_cat_present: Object.hasOwn(item, 'white_cat_present')
+    ? item.white_cat_present
+    : row.user_selection.white_cat_present,
   white_cat_visual_style_id: row.user_selection.white_cat_visual_style_id ?? null,
   white_cat_visual_style_selection_sha256:
     row.user_selection.white_cat_visual_style_selection_sha256 ?? null,
@@ -395,7 +571,9 @@ export const buildReconciledState = ({
   const policySha256 = state.one_click_approval_policy?.policy_sha256;
   const styleBinding = direction.white_cat_visual_style_binding ?? null;
   if (styleBinding !== null) {
-    const styleSelection = state.white_cat_visual_style_selection;
+    const styleSelection = loadBoundWhiteCatVisualStyleSelection(
+      state.white_cat_visual_style_selection,
+    );
     const styleValidation = validateWhiteCatVisualStyleSelection(styleSelection, {
       gate2ScriptSha256: styleSelection?.gate2_script_sha256,
     });
@@ -451,9 +629,9 @@ export const buildReconciledState = ({
   }
   if (initializing && (
     rhythm?.status !== expectedAuthorityStatus
-    || actionSchedules?.qa?.all_schedules_validated !== true
     || !Array.isArray(rhythm.shots)
-    || !Array.isArray(actionSchedules.schedules)
+    || !Array.isArray(actionSchedules?.schedules)
+    || actionSchedules?.contract_version !== 'action-state-schedule-set-v1'
     || actionSchedules.schedule_count !== actionSchedules.schedules.length
   )) {
     throw new Error('fresh visual queue initialization lacks approved rhythm/action authority');
@@ -474,24 +652,7 @@ export const buildReconciledState = ({
     validateStoryboardVisualRhythm(rhythm, {
       shotIds: direction.rows.map((row) => row.shot_id),
     });
-    const rhythmByShotForValidation = new Map(rhythm.shots.map((shot) => [shot.shot_id, shot]));
-    for (const entry of actionSchedules.schedules) {
-      const rhythmShot = rhythmByShotForValidation.get(entry.shot_id);
-      const expectedVersion = rhythm.contract_version === 'storyboard-visual-rhythm-v2'
-        ? 'action-state-schedule-v4'
-        : 'action-state-schedule-v3';
-      if (!rhythmShot || entry.schedule?.contract_version !== expectedVersion) {
-        throw new Error(`fresh visual queue ${entry.shot_id} action schedule version is stale`);
-      }
-      validateActionStateSchedule(entry.schedule, {
-        totalFrames: rhythmShot.end_frame - rhythmShot.start_frame,
-        fps: 30,
-        densityMode: expectedVersion === 'action-state-schedule-v4' ? rhythm.density_mode : null,
-        densitySelectionSha256: expectedVersion === 'action-state-schedule-v4'
-          ? rhythm.visual_density_selection_sha256
-          : null,
-      });
-    }
+    validateFreshActionScheduleSet({rhythm, actionSchedules});
   }
   const summaryById = new Map(summary.map((row) => [row.shot_id, row]));
   const rhythmById = new Map((rhythm?.shots ?? []).map((shot) => [shot.shot_id, shot]));
@@ -506,6 +667,7 @@ export const buildReconciledState = ({
   const priorByShot = Map.groupBy(rebindCandidates, (item) => item.shot_id);
   const activeQueueInStoryboardOrder = [];
   const replacedShots = new Set();
+  const requeuedShotReasons = new Map();
   for (const row of direction.rows) {
     const shotId = row.shot_id;
     const priorItems = priorByShot.get(shotId) ?? [];
@@ -523,11 +685,41 @@ export const buildReconciledState = ({
         })
       : null;
     const count = stateCountFor(section, row, priorItems, rhythmById.get(shotId) ?? null, actionSchedule);
+    const queueItemCount = queueItemCountFor(count, actionSchedule);
     const preservingExactBytes = priorItems.length > 0
       && priorItems.every((item) => preservedRebindIds.has(item.asset_id));
+    const contractChangeReasons = priorItems.map((item) => inspectVisualContractChange({
+          item,
+          row,
+          summaryRow,
+          timing,
+          count,
+          actionSchedule,
+        })).filter(Boolean);
+    const unchangedExistingContract = priorItems.length === queueItemCount
+      && priorItems.every((item) => (
+        item.visual_generation_route === row.user_selection.visual_generation_route
+        && hasPassingReusableEvidence(item)
+      ))
+      && contractChangeReasons.length === 0;
+    if (priorItems.length > 0 && !preservingExactBytes && !unchangedExistingContract) {
+      replacedShots.add(shotId);
+      requeuedShotReasons.set(shotId, [
+        ...(priorItems.length === queueItemCount ? [] : [
+          `asset count changed from ${priorItems.length} to ${queueItemCount}`,
+        ]),
+        ...priorItems
+          .filter((item) => item.visual_generation_route !== row.user_selection.visual_generation_route)
+          .map((item) => `${item.asset_id} route changed`),
+        ...priorItems
+          .filter((item) => !hasPassingReusableEvidence(item))
+          .map((item) => `${item.asset_id} has no reusable passing evidence`),
+        ...contractChangeReasons,
+      ]);
+    }
     let items;
     if (preservingExactBytes) {
-      if (priorItems.length !== count
+      if (priorItems.length !== queueItemCount
         || priorItems.some((item) => item.visual_generation_route !== row.user_selection.visual_generation_route)) {
         throw new Error(`${shotId} preserved queue cannot be safely rebound`);
       }
@@ -541,6 +733,14 @@ export const buildReconciledState = ({
           actionSchedule,
         });
       }
+      items = priorItems.map(preserveExactItem);
+    } else if (unchangedExistingContract
+      && !isFlipbookRow(row) && row.user_selection.visual_generation_route === 'ian-handdrawn-ppt') {
+      // Ian pixels remain reusable, but the package manifest is checksum-bound to
+      // storyboard/direction authority and must be deterministically rebuilt.
+      items = priorItems.map(cleanPendingItem);
+    } else if (unchangedExistingContract) {
+      priorItems.forEach(verifyReusableEvidence);
       items = priorItems.map(preserveExactItem);
     } else if (row.user_selection.visual_generation_route === 'ink-doodle-knowledge-card') {
       items = buildInkItems(shotId, count);
@@ -566,7 +766,7 @@ export const buildReconciledState = ({
           nextShotAssetVersion(shotId, review.queue),
         );
         replacedShots.add(shotId);
-      } else if (priorItems.length !== count || priorItems.some((item) => item.visual_generation_route !== row.user_selection.visual_generation_route)) {
+      } else if (priorItems.length !== queueItemCount || priorItems.some((item) => item.visual_generation_route !== row.user_selection.visual_generation_route)) {
         throw new Error(`${shotId} prior queue cannot be safely rebound`);
       } else {
         items = priorItems.map(cleanPendingItem);
@@ -610,13 +810,15 @@ export const buildReconciledState = ({
     'approved',
     'qa_passed_pending_batch_review',
     'qa_passed_pending_final_review',
+    'qa_failed_but_waived_once_pending_final_review',
   ]);
-  const currentItem = preservedRebindIds.size === 0
-    ? activeQueue[0]
-    : activeQueue.find((item) => !completedQueueStatuses.has(item.status));
+  const currentItem = activeQueue.find((item) => !completedQueueStatuses.has(item.status));
   nextState.phase = 'visual_production';
   nextState.current_phase = 'visual_production';
-  nextState.blockers = [];
+  nextState.blockers = preserveReusableMechanicalOverrideBlockers({
+    blockers: state.blockers,
+    activeQueue,
+  });
   nextState.visual_asset_review = {
     ...review,
     status: 'in_progress',
@@ -641,6 +843,7 @@ export const buildReconciledState = ({
         .filter((item) => replacedShots.has(item.shot_id)).length,
       historical_asset_count: historical.length,
       changed_shots: [...replacedShots],
+      requeued_shot_reasons: Object.fromEntries(requeuedShotReasons),
       initialization_mode: initializing ? 'fresh_from_approved_storyboard_v1' : 'reconcile_existing_queue_v1',
     },
   };
@@ -707,6 +910,7 @@ if (isCli) {
       state_checksum_sha256: sha256(artifacts.bytes),
       active_asset_count: active.length,
       current_asset_id: artifacts.nextState.visual_asset_review.current_asset_id,
+      reconciliation: artifacts.nextState.visual_asset_review.reconciliation,
     }, null, 2)}\n`);
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));

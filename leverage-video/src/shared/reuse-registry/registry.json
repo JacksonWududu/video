@@ -104,9 +104,15 @@
       "required_for_new_episode_script": false
     },
     {
+      "module_id": "user-gate-override",
+      "path": "leverage-video/src/shared/user-gate-override",
+      "use_when": "Validating and consuming one-time explicit user mechanical gate overrides with exact episode, scope, gate, artifact checksum, and transition bindings.",
+      "required_for_new_episode_script": false
+    },
+    {
       "module_id": "video-scenes",
       "path": "leverage-video/src/shared/video-scenes",
-      "use_when": "Composing narration, imagegen, Ink GraphicScene, IanLayeredScene, WhiteboardScene, LocalVideoScene, generic SoundEffectTrack cues, and Ian-owned cues with one shared SFX bus; DoodleScene and ComicScene remain historical read-only.",
+      "use_when": "Composing narration, imagegen, optional data-bound transparent-subject entrances, Ink GraphicScene, IanLayeredScene, WhiteboardScene, LocalVideoScene, generic SoundEffectTrack cues, and Ian-owned cues with one shared SFX bus; DoodleScene and ComicScene remain historical read-only.",
       "required_for_new_episode_script": true
     },
     {

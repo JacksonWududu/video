@@ -38,7 +38,11 @@ const escapeXml = (value) => value
 
 const labelTextSvg = (label) => {
   const lines = label.lines ?? [label.text];
-  if (lines.join('') !== label.text) throw new Error(`label lines do not reproduce exact text: ${label.text}`);
+  if (lines.join('') !== label.text
+      && lines.join('\n') !== label.text
+      && lines.join('\r\n') !== label.text) {
+    throw new Error(`label lines do not reproduce exact text: ${label.text}`);
+  }
   const lineHeight = Math.round(label.font_size * 1.24);
   const blockHeight = lineHeight * lines.length;
   const startY = label.y + ((label.height - blockHeight) / 2) + Math.round(label.font_size * 0.88);

@@ -46,18 +46,17 @@ Before the general structure audit, record the first complete sentence:
 
 Check that the script contains one recognizable situation, one central question, one primary knowledge point, no more than two necessary supporting points, an important limit or counterexample, and one useful closing judgment question.
 
-Use this 100–240 second structure as an audit reference, not as permission to rewrite the script or estimate final timing:
+Apply `$discover-video-topics` `knowledge-video-duration-policy-v1`. Gate 2 has no fixed duration or character-count threshold. When the user supplies a target, use this proportional structure as an audit reference, not as permission to rewrite the script or claim final timing:
 
-| Time | Content | Purpose |
+| Share of target duration | Content | Purpose |
 |---|---|---|
-| 0–8 s | Counterintuitive question or conflict | Stop the viewer |
-| 8–35 s | Concrete situation and rising problem | Establish recognition |
-| 35–100 s | Primary knowledge point | Explain why |
-| 100–160 s | Necessary mechanism or example | Add required depth |
-| 160–205 s | Counterexample, boundary, or alternative | Avoid false certainty |
-| 205–240 s | Reflection question and conclusion | Leave a usable idea |
+| 0–10% | Counterintuitive question or conflict | Stop the viewer |
+| 10–30% | Concrete situation and rising problem | Establish recognition |
+| 30–65% | Primary knowledge point and mechanism | Explain why |
+| 65–85% | Counterexample, boundary, or alternative | Avoid false certainty |
+| 85–100% | Reflection question and conclusion | Leave a usable idea |
 
-A shorter episode may merge the supporting-point and boundary sections. Even a longer episode must remain centered on one question. Treat roughly 400–1000 Chinese characters only as a review signal; the validated narration audio remains the sole timing authority.
+A short episode may merge sections, but it may not omit the core mechanism or important limit merely to hit the target. Character count and reading-rate estimates are review signals only; the validated narration audio remains the sole timing authority. Block on missing substance or unsafe compression, never on duration alone.
 
 ## Language and communication audit
 
@@ -72,6 +71,14 @@ A shorter episode may merge the supporting-point and boundary sections. Even a l
 - Prefer a useful closing judgment question over generic encouragement.
 
 Check that the conflict is understandable in the first three seconds, the viewer can recognize the relevant experience within fifteen seconds, the story still works without jargon, the episode has one conclusion, and the ending is worth retaining or sharing.
+
+### Modifier discipline
+
+- When writing narration edit proposals or making explicitly authorized source revisions, enforce: **禁止使用无意义的、装饰性的状语、补语。** Include this check in the language audit; it does not authorize fallback script generation.
+- Test each modifier in context: if removing it preserves the facts, meaning, logical relations, and grammatical clarity, and it only adds emphasis, atmosphere, or verbal padding, delete it or state the meaning directly. Do not replace one empty flourish with another.
+- Preserve modifiers that carry time, conditions, causality, scope, degree, negation, uncertainty, attribution, or an actual action result. Expressions such as “可能”“仅”“尚未” and meaningful complements such as “解释清楚” are not blanket bans. Never delete by part of speech or keyword alone, or make a qualified claim absolute to shorten it.
+- Reread the whole revision before returning it. Remove remaining empty modifiers while preserving referents, transitions, grammatical completeness, and natural spoken flow; concision must not change the original claim or its evidence boundary.
+- During audit, identify the exact passage and proposed correction without silently rewriting the candidate. An output-only revision remains proposed text and must not write the source, replace the locked script, or enter downstream production. Source edits and subsequent candidate refresh/reapproval follow [Candidate provenance](#candidate-provenance); this language rule never authorizes changing an approved lock or a completed episode.
 
 ## Factual and platform-risk audit
 

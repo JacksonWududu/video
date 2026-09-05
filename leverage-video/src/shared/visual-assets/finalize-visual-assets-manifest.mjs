@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import crypto from 'node:crypto';
-import {FLIPBOOK_STYLE_ID, isFlipbookRow} from '../flipbook-video/profile.mjs';
+import {isFlipbookRow} from '../flipbook-video/profile.mjs';
 import {inspectStaticSpreadAsset} from './static-spread-contract.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -36,6 +36,7 @@ import {
   inspectIanLayeredScenePackage,
 } from '../ian-layered-scene/contract.mjs';
 import {validateWhiteCatVisualStyleSelection} from '../workflow-approval/contract.mjs';
+import {validateOneTimeUserGateOverride} from '../user-gate-override/contract.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const REPOSITORY_ROOT = path.resolve(HERE, '../../../..');
@@ -46,6 +47,16 @@ const NORMALIZATION_METHOD = 'sharp-lanczos3-scale-to-cover-centered-minimal-cro
 const SUPPORTED_ROUTES = new Set(['imagegen', 'ian-handdrawn-ppt']);
 const VISUAL_MANIFEST_CONTRACT = 'visual-assets-manifest-v1';
 const DIRECT_FIRST_SHOT_CONTRACT = 'direct-first-shot-v1';
+const LEGACY_OPENING_COVER_CONTRACT = 'cover-only-v1';
+const PROMPT_FIXED_MARKER_QA_VERSION = 'white-cat-prompt-fixed-marker-qa-v1';
+const P2_PROMPT_FIXED_MARKER = 'WHITE-CAT SATCHEL STRAP LOCK:';
+const HERO_POSE_PROMPT_FIXED_MARKER =
+  'HERO-POSE ASSET: full-canvas transparent RGBA with fixed registration anchors.';
+const P0_AMBIGUOUS_TRACE = 'P0_AMBIGUOUS_TRACE';
+const P0_FORWARD_REVERSE_MISMATCH = 'P0_FORWARD_REVERSE_MISMATCH';
+const P2_SATCHEL_TOPOLOGY = 'P2_SATCHEL_TOPOLOGY';
+const BOTTOM_SUBTITLE_SAFE_AREA = 'BOTTOM_SUBTITLE_SAFE_AREA';
+const FORWARD_REVERSE_MAPPING_QA_VERSION = 'white-cat-forward-reverse-mapping-qa-v1';
 const VISUAL_LOCK_FILE = '.visual-assets-finalizer.lock';
 const VISUAL_BUILD_PHASES = ['visual_production', 'visual_assets_locked'];
 const VISUAL_VALIDATION_PHASES = [
@@ -249,13 +260,22 @@ const sourceApprovalLock = (review, queue) => {
     assets: queue.map((item) => ({
       asset_id: item.asset_id,
       checksum_sha256: item.approved_checksum_sha256,
+      ...(item.user_mechanical_gate_override_result === 'pass_with_user_override' ? {
+        mechanical_qa_result: item.mechanical_qa_result,
+        user_mechanical_gate_override_result: item.user_mechanical_gate_override_result,
+        user_mechanical_gate_override_sha256:
+          item.user_mechanical_gate_override?.override_sha256,
+      } : {}),
     })),
   };
+  const hasOverride = queue.some(
+    (item) => item.user_mechanical_gate_override_result === 'pass_with_user_override',
+  );
   return {
     ...payload,
     active_asset_count: queue.length,
     verification_sha256: sha256Canonical(payload),
-    result: 'pass',
+    result: hasOverride ? 'pass_with_user_override' : 'pass',
   };
 };
 
@@ -286,7 +306,22 @@ const inspectAuthority = (
   };
 };
 
-export const parseStoryboardSourceTexts = (markdown, {flipbookPresentation = false} = {}) => {
+const resolveTimelineOpeningContract = (state) => {
+  const declarations = [
+    state.storyboard_timing?.direct_first_shot_contract,
+    state.storyboard_draft?.direct_first_shot_contract,
+  ].filter((value) => value !== undefined && value !== null);
+  if (declarations.some((value) => value !== DIRECT_FIRST_SHOT_CONTRACT)) {
+    fail('storyboard direct-first-shot contract declaration is unsupported');
+  }
+  if (declarations.length > 0) return DIRECT_FIRST_SHOT_CONTRACT;
+  if (state.opening_cover?.contract_version === LEGACY_OPENING_COVER_CONTRACT) {
+    return LEGACY_OPENING_COVER_CONTRACT;
+  }
+  fail('episode lacks an explicit direct-first-shot or historical opening-cover contract');
+};
+
+const parseStoryboardSourceTexts = (markdown, openingContract) => {
   const matches = [...markdown.matchAll(/^## (OPEN-00|S\d+)\n([\s\S]*?)(?=^## |(?![\s\S]))/gm)];
   const sections = new Map();
   for (const match of matches) {
@@ -296,31 +331,14 @@ export const parseStoryboardSourceTexts = (markdown, {flipbookPresentation = fal
     sections.set(match[1], source[1]);
   }
   const shotIds = [...sections.keys()];
-  if (flipbookPresentation) {
+  if (openingContract === DIRECT_FIRST_SHOT_CONTRACT) {
     if (sections.has('OPEN-00') || shotIds[0] !== 'S01') {
-      fail('flipbook storyboard must begin with S01 and contain no OPEN-00');
+      fail('direct-first-shot-v1 storyboard must begin with S01 and contain no OPEN-00');
     }
   } else if (!sections.has('OPEN-00')) {
-    fail('storyboard lacks OPEN-00 source_text');
+    fail('historical cover-only-v1 storyboard lacks OPEN-00 source_text');
   }
   return sections;
-};
-
-export const resolveVisualManifestTimelineOpening = (state) => {
-  const styleSelection = state?.white_cat_visual_style_selection;
-  const flipbookPresentation = styleSelection?.style_id === FLIPBOOK_STYLE_ID
-    && styleSelection?.style_source === 'builtin_flipbook';
-  if (!flipbookPresentation) return null;
-  if (state.storyboard_draft?.direct_first_shot_contract !== DIRECT_FIRST_SHOT_CONTRACT) {
-    fail('flipbook visual manifest requires direct-first-shot-v1');
-  }
-  return {
-    contract_version: DIRECT_FIRST_SHOT_CONTRACT,
-    first_shot_id: 'S01',
-    start_frame: 0,
-    fixed_opening_cover: false,
-    publishing_cover_included: false,
-  };
 };
 
 const inspectRootOrExternalReference = ({repositoryRoot, pathValue, checksum, label}) => {
@@ -401,9 +419,40 @@ const assertPassingQa = (item, qa) => {
       if (qa[field] !== undefined) requireSameJson(qa[field], item[field], `asset ${item.asset_id} ${field}`);
     }
   }
+  if (item.asset_kind === 'hero_pose_background'
+      && (item.qa_contract_version !== 'ordinary-imagegen-hero-pose-background-qa-v1'
+        || qa.contract_version !== item.qa_contract_version)) {
+    fail(`asset ${item.asset_id} hero_pose background QA contract is invalid`);
+  }
+  if (item.asset_kind === 'hero_pose') {
+    const expectedTransparentPoseQa = {
+      result: 'pass',
+      source_checksum_sha256: item.checksum_sha256,
+      full_canvas_rgba: true,
+      transparent_background: true,
+      registration_anchor_policy: 'fixed-full-canvas-v1',
+    };
+    const {measured_alpha: measuredAlpha, ...recordedTransparentPoseQa} =
+      item.transparent_pose_qa ?? {};
+    requireSameJson(
+      recordedTransparentPoseQa,
+      expectedTransparentPoseQa,
+      `asset ${item.asset_id} hero_pose transparent registration QA`,
+    );
+    if (!measuredAlpha || typeof measuredAlpha !== 'object') {
+      fail(`asset ${item.asset_id} hero_pose measured alpha evidence is missing`);
+    }
+    const {measured_alpha: unusedQaMeasuredAlpha, ...recordedQaTransparentPose} =
+      qa.transparent_pose_qa ?? {};
+    requireSameJson(
+      recordedQaTransparentPose,
+      expectedTransparentPoseQa,
+      `asset ${item.asset_id} transparent_pose_qa`,
+    );
+  }
 };
 
-const inspectQaEvidence = ({repositoryRoot, episodeWorkspace, item}) => {
+const inspectQaEvidence = ({repositoryRoot, episodeWorkspace, item, state}) => {
   const target = requireCurrentFile(
     repositoryRoot,
     item.qa_evidence_path,
@@ -412,8 +461,977 @@ const inspectQaEvidence = ({repositoryRoot, episodeWorkspace, item}) => {
     {episodeWorkspace},
   );
   const record = readJson(target.resolved);
-  assertPassingQa(item, record);
-  return {path: target.relative, checksum_sha256: item.qa_evidence_checksum_sha256, record};
+  const hasOverride = item.mechanical_qa_result !== undefined
+    || item.user_mechanical_gate_override_result !== undefined
+    || item.user_mechanical_gate_override !== undefined;
+  let mechanicalOverride = null;
+  if (hasOverride) {
+    const visibleSymbolGateId = `visual_asset.${item.asset_id}.VISIBLE_SYMBOL_FREE`;
+    const isVisibleSymbolOverride = item.waived_mechanical_gate_ids?.includes(
+      visibleSymbolGateId,
+    );
+    const subtitleGateId = `visual_asset.${item.asset_id}.${BOTTOM_SUBTITLE_SAFE_AREA}`;
+    const isSubtitleOverride = item.waived_mechanical_gate_ids?.includes(
+      subtitleGateId,
+    );
+    const p0AmbiguousGateId = `visual_asset.${item.asset_id}.${P0_AMBIGUOUS_TRACE}`;
+    const isP0AmbiguousOverride = item.waived_mechanical_gate_ids?.includes(
+      p0AmbiguousGateId,
+    );
+    mechanicalOverride = (isVisibleSymbolOverride
+      ? validateVisibleSymbolOverrideEvidence
+      : (isP0AmbiguousOverride
+        ? validateWhiteCatP0AmbiguousTraceOverrideEvidence
+        : validateWhiteCatP2OverrideEvidence))({
+      repositoryRoot,
+      episodeWorkspace,
+      state,
+      item,
+      qa: record,
+    });
+    for (const field of [
+      'technical_qa',
+      'semantic_qa',
+      'visible_text_qa',
+      'style_qa',
+      'continuity_qa',
+      'visual_qa',
+    ]) {
+      if (isVisibleSymbolOverride && field === 'visible_text_qa') {
+        requireSameJson(record[field], item[field], `asset ${item.asset_id} ${field}`);
+        continue;
+      }
+      if (isSubtitleOverride && field === 'visual_qa') {
+        requireSameJson(record[field], item[field], `asset ${item.asset_id} ${field}`);
+        continue;
+      }
+      if (item[field]?.result !== 'pass') {
+        fail(`asset ${item.asset_id} ${field} is not passing outside its waived gate`);
+      }
+      if (record[field] !== undefined) {
+        requireSameJson(record[field], item[field], `asset ${item.asset_id} ${field}`);
+      }
+    }
+  } else {
+    assertPassingQa(item, record);
+  }
+  return {
+    path: target.relative,
+    checksum_sha256: item.qa_evidence_checksum_sha256,
+    record,
+    mechanical_override: mechanicalOverride,
+  };
+};
+
+const consumedTransitionIdCount = (value, transitionId) => {
+  if (Array.isArray(value)) {
+    return value.reduce(
+      (count, entry) => count + consumedTransitionIdCount(entry, transitionId),
+      0,
+    );
+  }
+  if (!value || typeof value !== 'object') return 0;
+  return Object.entries(value).reduce(
+    (count, [key, entry]) => count
+      + (key === 'consumed_transition_id' && entry === transitionId
+        ? 1
+        : consumedTransitionIdCount(entry, transitionId)),
+    0,
+  );
+};
+
+const whiteCatPromptFixedMarkerFailures = (item, promptText) => {
+  const failures = [];
+  if (!promptText.includes(P2_PROMPT_FIXED_MARKER)) {
+    failures.push({
+      gate_id: `visual_asset.${item.asset_id}.P2_PROMPT_FIXED_MARKER`,
+      observed_result: 'fail',
+      reason: `P2_PROMPT_FIXED_MARKER: required literal is missing: ${P2_PROMPT_FIXED_MARKER}`,
+    });
+  }
+  if (item.asset_kind === 'hero_pose' && !promptText.includes(HERO_POSE_PROMPT_FIXED_MARKER)) {
+    failures.push({
+      gate_id: `visual_asset.${item.asset_id}.HERO_POSE_PROMPT_FIXED_MARKER`,
+      observed_result: 'fail',
+      reason: `HERO_POSE_PROMPT_FIXED_MARKER: required literal is missing: ${HERO_POSE_PROMPT_FIXED_MARKER}`,
+    });
+  }
+  return failures;
+};
+
+const validatePromptFixedMarkerSupplement = ({item, override, failures, label}) => {
+  const supplements = override.decision?.supplemental_exact_user_messages;
+  if (failures.length === 0) {
+    if (supplements !== undefined) {
+      fail(`${label} has an unnecessary supplemental prompt-marker release`);
+    }
+    return;
+  }
+  const expectedGateIds = failures.map((failure) => failure.gate_id);
+  if (!Array.isArray(supplements) || supplements.length !== 1) {
+    fail(`${label} supplemental prompt-marker release is missing`);
+  }
+  const supplement = supplements[0];
+  if (!supplement || typeof supplement !== 'object' || Array.isArray(supplement)
+      || supplement.disposition !== 'allow_once'
+      || !sameJson(supplement.gate_ids, expectedGateIds)
+      || typeof supplement.decided_at !== 'string'
+      || Number.isNaN(Date.parse(supplement.decided_at))
+      || typeof supplement.exact_user_message !== 'string') {
+    fail(`${label} supplemental prompt-marker release is stale`);
+  }
+  const message = supplement.exact_user_message.toLowerCase();
+  const requiredMarkers = [
+    item.asset_id.toLowerCase(),
+    '提示词',
+    '标记',
+    '保留真实提示词',
+    '失败证据',
+  ];
+  if (requiredMarkers.some((marker) => !message.includes(marker))
+      || !['放行', '接受', '允许'].some((marker) => message.includes(marker))
+      || !['一次', '本次', '仅此一次'].some((marker) => message.includes(marker))
+      || (expectedGateIds.some((gateId) => gateId.endsWith('.P2_PROMPT_FIXED_MARKER'))
+        && !message.includes('p2'))
+      || (expectedGateIds.some((gateId) => gateId.endsWith('.HERO_POSE_PROMPT_FIXED_MARKER'))
+        && !message.includes('hero-pose')
+        && !message.includes('hero pose'))) {
+    fail(`${label} supplemental prompt-marker release is not exact and asset-specific`);
+  }
+};
+
+const expectedForwardReverseMap = (promptText, label) => {
+  const facingLine = promptText.split('\n')
+    .find((line) => line.startsWith('CAT FACING MAP:'))?.trim().toLowerCase() ?? '';
+  let facing;
+  let front;
+  let rear;
+  if (facingLine.includes('three-quarter screen-left')
+      || facingLine.includes('three-quarter-screen-left')) {
+    facing = 'three-quarter-screen-left';
+    front = 'screen-left';
+    rear = 'screen-right';
+  } else if (facingLine.includes('three-quarter screen-right')
+      || facingLine.includes('three-quarter-screen-right')) {
+    facing = 'three-quarter-screen-right';
+    front = 'screen-right';
+    rear = 'screen-left';
+  } else {
+    fail(`${label} P0 forward/reverse mapping QA lacks one exact reversible CAT FACING MAP`);
+  }
+  return {
+    expected_cat_facing_screen_direction: facing,
+    expected_anatomical_front_maps_to_screen: front,
+    expected_anatomical_rear_maps_to_screen: rear,
+    observed_cat_facing_screen_direction: facing === 'three-quarter-screen-left'
+      ? 'three-quarter-screen-right'
+      : 'three-quarter-screen-left',
+    observed_anatomical_front_maps_to_screen: rear,
+    observed_anatomical_rear_maps_to_screen: front,
+  };
+};
+
+const validateForwardReverseMappingFailure = ({identity, promptText, label}) => {
+  const expected = expectedForwardReverseMap(promptText, label);
+  const mapping = identity?.forward_reverse_mapping_qa;
+  if (!mapping || typeof mapping !== 'object' || Array.isArray(mapping)
+      || mapping.contract_version !== FORWARD_REVERSE_MAPPING_QA_VERSION
+      || mapping.result !== 'fail'
+      || mapping.error_code !== P0_FORWARD_REVERSE_MISMATCH
+      || Object.entries(expected).some(([key, value]) => mapping[key] !== value)
+      || typeof mapping.failure_reason !== 'string'
+      || !mapping.failure_reason.startsWith(`${P0_FORWARD_REVERSE_MISMATCH}:`)
+      || identity.cat_facing_screen_direction
+        !== expected.observed_cat_facing_screen_direction
+      || identity.anatomical_front_maps_to_screen
+        !== expected.observed_anatomical_front_maps_to_screen
+      || identity.anatomical_rear_maps_to_screen
+        !== expected.observed_anatomical_rear_maps_to_screen) {
+    fail(`${label} forward/reverse mapping QA is missing or stale`);
+  }
+  return mapping;
+};
+
+export const validateWhiteCatP0AmbiguousTraceOverrideEvidence = ({
+  repositoryRoot,
+  episodeWorkspace,
+  state,
+  item,
+  qa,
+}) => {
+  const label = `asset ${item?.asset_id}`;
+  const expectedQaContract = [
+    'base/master',
+    'white-cat-master',
+    'recurring-character-master',
+  ].includes(item?.role)
+    ? 'ordinary-imagegen-white-cat-master-qa-v2'
+    : 'ordinary-imagegen-white-cat-action-qa-v2';
+  if (item?.visual_generation_route !== 'imagegen'
+      || item.white_cat_present !== true
+      || typeof item.asset_id !== 'string'
+      || typeof item.generation_attempt_scope_id !== 'string'
+      || item.mechanical_qa_result !== 'failed_but_waived_once'
+      || item.user_mechanical_gate_override_result !== 'pass_with_user_override'
+      || !item.user_mechanical_gate_override
+      || qa?.contract_version !== expectedQaContract
+      || qa.result !== 'fail'
+      || qa.asset_id !== item.asset_id) {
+    fail(`${label} P0 ambiguous-trace override disposition is incomplete`);
+  }
+
+  const identity = qa.identity_qa;
+  const anatomy = identity?.anatomy_evidence;
+  if (identity?.result !== 'fail'
+      || identity.cat_count !== 1
+      || identity.foreleg_count !== 2
+      || identity.hindleg_count !== 2
+      || identity.paw_count !== 4
+      || anatomy?.contract_version !== 'white-cat-anatomy-qa-v2'
+      || anatomy.result !== 'fail'
+      || anatomy.error_code !== P0_AMBIGUOUS_TRACE
+      || typeof anatomy.failure_reason !== 'string'
+      || !anatomy.failure_reason.startsWith(`${P0_AMBIGUOUS_TRACE}:`)
+      || !sameJson(anatomy.source_image, {
+        path: item.path,
+        checksum_sha256: item.checksum_sha256,
+      })
+      || identity.accessory_geometry_correct !== true
+      || identity.source_retry_policy_compliant !== true) {
+    fail(`${label} does not preserve the exact P0 ambiguous-trace evidence`);
+  }
+  requireSameJson(identity, item.identity_qa, `${label} failed identity QA`);
+  requireSameJson(qa.selected_source, {
+    path: item.path,
+    checksum_sha256: item.checksum_sha256,
+    ...(qa.selected_source?.dimensions === undefined
+      ? {} : {dimensions: qa.selected_source.dimensions}),
+    ...(qa.selected_source?.relative_aspect_ratio_error === undefined
+      ? {} : {relative_aspect_ratio_error: qa.selected_source.relative_aspect_ratio_error}),
+  }, `${label} selected source`);
+  requireSameJson(qa.selected_prompt, {
+    path: item.prompt_path,
+    checksum_sha256: item.prompt_checksum_sha256,
+  }, `${label} selected prompt`);
+
+  const attemptControl = item.image_generation_attempt_control;
+  const whiteCatControl = item.white_cat_generation_attempt_control;
+  const generationFailures = assertArray(
+    item.image_generation_qa_failures,
+    `${label} generation failures`,
+  );
+  const whiteCatFailures = assertArray(
+    item.white_cat_imagegen_qa_failures,
+    `${label} white-cat failures`,
+  );
+  const failureCount = attemptControl?.rejected_generation_count;
+  const earlyUserAcceptance = [1, 2].includes(failureCount);
+  const expectedRetryStatus = earlyUserAcceptance
+    ? 'stopped_by_explicit_user_acceptance'
+    : 'stopped_user_takeover_required';
+  const selectedWhiteCatFailures = whiteCatFailures.filter((failure) => (
+    failure?.error_code === P0_AMBIGUOUS_TRACE
+    && sameJson(failure?.output, {path: item.path, checksum_sha256: item.checksum_sha256})
+  ));
+  if ((!earlyUserAcceptance && failureCount !== 3)
+      || attemptControl?.contract_version !== 'storyboard-image-generation-attempt-limit-v1'
+      || attemptControl.generation_attempt_scope_id !== item.generation_attempt_scope_id
+      || attemptControl.maximum_automatic_rejected_generations !== 3
+      || attemptControl.automatic_retry_status !== expectedRetryStatus
+      || whiteCatControl?.contract_version !== 'white-cat-imagegen-attempt-limit-v1'
+      || whiteCatControl.maximum_automatic_qa_failures !== 3
+      || whiteCatControl.qa_failed_generation_count !== failureCount
+      || whiteCatControl.automatic_retry_status !== expectedRetryStatus
+      || generationFailures.length !== failureCount
+      || whiteCatFailures.length !== failureCount
+      || !sameJson(
+        generationFailures.map((failure) => failure?.attempt_number),
+        Array.from({length: failureCount}, (_, index) => index + 1),
+      )
+      || !sameJson(
+        whiteCatFailures.map((failure) => failure?.attempt_number),
+        Array.from({length: failureCount}, (_, index) => index + 1),
+      )
+      || new Set(generationFailures.map(
+        (failure) => failure?.output?.checksum_sha256,
+      )).size !== failureCount
+      || selectedWhiteCatFailures.length !== 1
+      || selectedWhiteCatFailures[0].failure_reason !== anatomy.failure_reason) {
+    fail(`${label} P0 attempt/failure history is stale`);
+  }
+  requireSameJson(qa.waivable_mechanical_failures, [{
+    error_code: P0_AMBIGUOUS_TRACE,
+    observed_result: 'fail',
+    reason: anatomy.failure_reason,
+  }], `${label} P0 waivable failure`);
+
+  const inspection = anatomy.inspection_evidence;
+  if (inspection?.methods?.join(',') !== 'full_resolution,numbered_limb_map'
+      || inspection.numbered_limb_map_source_checksum_sha256 !== item.checksum_sha256
+      || !sameJson(inspection.numbered_limb_map_limb_ids, ['F1', 'F2', 'H1', 'H2'])) {
+    fail(`${label} numbered limb-map evidence is stale`);
+  }
+  const requiredArtifacts = [
+    {path: item.path, checksum_sha256: item.checksum_sha256},
+    {path: item.prompt_path, checksum_sha256: item.prompt_checksum_sha256},
+    {path: item.qa_evidence_path, checksum_sha256: item.qa_evidence_checksum_sha256},
+    {
+      path: inspection.numbered_limb_map_path,
+      checksum_sha256: inspection.numbered_limb_map_checksum_sha256,
+    },
+  ];
+  const artifacts = assertArray(item.override_bound_artifacts, `${label} override artifacts`);
+  if (requiredArtifacts.some(
+    (required) => !artifacts.some((artifact) => sameJson(artifact, required)),
+  )) {
+    fail(`${label} override artifacts omit current P0 evidence`);
+  }
+  artifacts.forEach((artifact, index) => requireCurrentFile(
+    repositoryRoot,
+    artifact.path,
+    artifact.checksum_sha256,
+    `${label} override artifact ${index}`,
+    {episodeWorkspace},
+  ));
+
+  const scopeId = item.generation_attempt_scope_id;
+  const attemptGateId = `storyboard-image-generation-attempt-limit:${scopeId}`;
+  const p0GateId = `visual_asset.${item.asset_id}.${P0_AMBIGUOUS_TRACE}`;
+  const gateIds = earlyUserAcceptance ? [p0GateId] : [attemptGateId, p0GateId];
+  requireSameJson(item.waived_mechanical_gate_ids, gateIds, `${label} waived gate IDs`);
+  const override = item.user_mechanical_gate_override;
+  requireSameJson(override.gate_ids, gateIds, `${label} override gate IDs`);
+  requireSameJson(override.bound_artifacts, artifacts, `${label} override artifacts`);
+  const failureByGate = new Map(
+    (override.acknowledged_failures ?? []).map((failure) => [failure?.gate_id, failure]),
+  );
+  if (failureByGate.get(p0GateId)?.observed_result !== 'fail'
+      || failureByGate.get(p0GateId)?.reason !== anatomy.failure_reason
+      || (!earlyUserAcceptance
+        && failureByGate.get(attemptGateId)?.observed_result
+          !== 'stopped_user_takeover_required')) {
+    fail(`${label} override does not preserve the exact P0 failure`);
+  }
+  const message = String(override.decision?.exact_user_message ?? '').toLowerCase();
+  if (!message.includes(item.asset_id.toLowerCase())
+      || !message.includes(P0_AMBIGUOUS_TRACE.toLowerCase())
+      || !['放行', '接受', '允许'].some((marker) => message.includes(marker))
+      || !['一次', '本次', '仅此一次'].some((marker) => message.includes(marker))
+      || (earlyUserAcceptance
+        && (!['停止', '不再'].some((marker) => message.includes(marker))
+          || !message.includes('重试')
+          || !message.includes('保留')
+          || !message.includes('失败证据')))
+      || (!earlyUserAcceptance
+        && !['三次', '3次'].some((marker) => message.includes(marker)))) {
+    fail(`${label} override decision is not exact and P0-specific`);
+  }
+  const result = validateOneTimeUserGateOverride(override, {
+    episodeId: state?.episode_id,
+    requiredScopeId: scopeId,
+    requiredGateIds: gateIds,
+    requiredArtifacts: artifacts,
+    fromPhase: earlyUserAcceptance ? 'visual_production' : 'awaiting_visual_asset_review',
+    toPhase: 'visual_production',
+    requiredStatus: 'consumed',
+  });
+  const blockers = assertArray(state?.blockers, 'episode blockers').filter(
+    (blocker) => blocker?.blocker_id === attemptGateId,
+  );
+  if (earlyUserAcceptance ? blockers.length !== 0 : (
+    blockers.length !== 1
+    || blockers[0].contract_version !== 'storyboard-image-generation-attempt-limit-v1'
+    || blockers[0].asset_id !== item.asset_id
+    || blockers[0].generation_attempt_scope_id !== scopeId
+    || blockers[0].status !== 'failed_but_waived_once'
+    || blockers[0].user_mechanical_gate_override_sha256 !== result.override_sha256
+  )) {
+    fail(`${label} P0 attempt-limit blocker state is stale`);
+  }
+  const transitionId = override.consumption?.consumed_transition_id;
+  if (typeof transitionId !== 'string'
+      || consumedTransitionIdCount(state, transitionId) !== 1) {
+    fail(`${label} override transition ID is missing or reused`);
+  }
+  return {
+    result: 'pass_with_user_override',
+    mechanical_qa_result: item.mechanical_qa_result,
+    override_sha256: result.override_sha256,
+    gate_ids: gateIds,
+    bound_artifacts: artifacts,
+  };
+};
+
+export const validateWhiteCatP2OverrideEvidence = ({
+  repositoryRoot,
+  episodeWorkspace,
+  state,
+  item,
+  qa,
+}) => {
+  const label = `asset ${item?.asset_id}`;
+  if (item?.visual_generation_route !== 'imagegen'
+      || item.white_cat_present !== true
+      || typeof item.asset_id !== 'string'
+      || typeof item.generation_attempt_scope_id !== 'string') {
+    fail(`${label} is not an eligible white-cat ImageGen override target`);
+  }
+  const expectedQaContract = [
+    'base/master',
+    'white-cat-master',
+    'recurring-character-master',
+  ].includes(item.role)
+    ? 'ordinary-imagegen-white-cat-master-qa-v2'
+    : 'ordinary-imagegen-white-cat-action-qa-v2';
+  if (item.mechanical_qa_result !== 'failed_but_waived_once'
+      || item.user_mechanical_gate_override_result !== 'pass_with_user_override'
+      || !item.user_mechanical_gate_override
+      || qa?.contract_version !== expectedQaContract
+      || qa.result !== 'fail'
+      || qa.asset_id !== item.asset_id) {
+    fail(`${label} failed-but-waived QA disposition is incomplete`);
+  }
+  const identity = qa.identity_qa;
+  if (identity?.result !== 'fail'
+      || identity.cat_count !== 1
+      || identity.foreleg_count !== 2
+      || identity.hindleg_count !== 2
+      || identity.paw_count !== 4
+      || identity.anatomy_evidence?.contract_version !== 'white-cat-anatomy-qa-v2'
+      || identity.anatomy_evidence.result !== 'pass'
+      || identity.accessory_geometry_correct !== false
+      || typeof identity.front_strap_attached_to_forward_bag_end !== 'boolean'
+      || typeof identity.rear_strap_attached_to_rear_bag_end !== 'boolean'
+      || identity.front_strap_attached_to_forward_bag_end
+        === identity.rear_strap_attached_to_rear_bag_end
+      || identity.bag_end_attachment_count !== 1
+      || identity.both_bag_end_anchors_visibly_traceable !== false
+      || identity.source_retry_policy_compliant !== false) {
+    fail(`${label} does not preserve the exact limb-topology/P2-fail identity evidence`);
+  }
+  requireSameJson(identity, item.identity_qa, `${label} failed identity QA`);
+  if (item.asset_kind === 'hero_pose') {
+    const expectedTransparentPoseQa = {
+      result: 'pass',
+      source_checksum_sha256: item.checksum_sha256,
+      full_canvas_rgba: true,
+      transparent_background: true,
+      registration_anchor_policy: 'fixed-full-canvas-v1',
+    };
+    const {measured_alpha: measuredAlpha, ...recordedTransparentPoseQa} =
+      item.transparent_pose_qa ?? {};
+    requireSameJson(
+      recordedTransparentPoseQa,
+      expectedTransparentPoseQa,
+      `${label} transparent pose QA`,
+    );
+    const {measured_alpha: unusedQaMeasuredAlpha, ...recordedQaTransparentPose} =
+      qa.transparent_pose_qa ?? {};
+    requireSameJson(
+      recordedQaTransparentPose,
+      expectedTransparentPoseQa,
+      `${label} QA-file transparent pose QA`,
+    );
+    if (!measuredAlpha || typeof measuredAlpha !== 'object') {
+      fail(`${label} measured alpha evidence is missing`);
+    }
+  }
+  requireSameJson(qa.selected_source, {
+    path: item.path,
+    checksum_sha256: item.checksum_sha256,
+    ...(qa.selected_source?.dimensions === undefined
+      ? {} : {dimensions: qa.selected_source.dimensions}),
+    ...(qa.selected_source?.relative_aspect_ratio_error === undefined
+      ? {} : {relative_aspect_ratio_error: qa.selected_source.relative_aspect_ratio_error}),
+  }, `${label} selected source`);
+  requireSameJson(qa.selected_prompt, {
+    path: item.prompt_path,
+    checksum_sha256: item.prompt_checksum_sha256,
+  }, `${label} selected prompt`);
+  const promptTarget = requireCurrentFile(
+    repositoryRoot,
+    item.prompt_path,
+    item.prompt_checksum_sha256,
+    `${label} selected prompt`,
+    {episodeWorkspace},
+  );
+  const promptText = fs.readFileSync(promptTarget.resolved, 'utf8');
+  const hasForwardReverseOverride = qa.waivable_mechanical_failures?.some(
+    (failure) => failure?.error_code === P0_FORWARD_REVERSE_MISMATCH,
+  ) === true;
+  const forwardReverseMapping = hasForwardReverseOverride
+    ? validateForwardReverseMappingFailure({identity, promptText, label})
+    : null;
+  if (!hasForwardReverseOverride && identity.forward_reverse_mapping_qa !== undefined) {
+    fail(`${label} P2-only override has unexpected forward/reverse mapping QA`);
+  }
+  const promptMarkerFailures = whiteCatPromptFixedMarkerFailures(
+    item,
+    promptText,
+  );
+  const expectedPromptContractQa = promptMarkerFailures.length > 0 ? {
+    contract_version: PROMPT_FIXED_MARKER_QA_VERSION,
+    result: 'failed_but_waived_once',
+    prompt: {
+      path: item.prompt_path,
+      checksum_sha256: item.prompt_checksum_sha256,
+    },
+    failures: promptMarkerFailures,
+  } : undefined;
+  if (expectedPromptContractQa === undefined) {
+    if (item.prompt_contract_qa !== undefined) {
+      fail(`${label} prompt fixed-marker QA is stale`);
+    }
+  } else {
+    requireSameJson(
+      item.prompt_contract_qa,
+      expectedPromptContractQa,
+      `${label} prompt fixed-marker QA`,
+    );
+  }
+
+  const attemptControl = item.image_generation_attempt_control;
+  const whiteCatControl = item.white_cat_generation_attempt_control;
+  const generationFailures = assertArray(
+    item.image_generation_qa_failures,
+    `${label} generation failures`,
+  );
+  const whiteCatFailures = assertArray(
+    item.white_cat_imagegen_qa_failures,
+    `${label} white-cat failures`,
+  );
+  const scopeId = item.generation_attempt_scope_id;
+  const expectedLatestErrorCode = hasForwardReverseOverride
+    ? P0_FORWARD_REVERSE_MISMATCH
+    : P2_SATCHEL_TOPOLOGY;
+  const failureCount = attemptControl?.rejected_generation_count;
+  const earlyUserAcceptance = [1, 2].includes(failureCount)
+    && attemptControl?.automatic_retry_status === 'stopped_by_explicit_user_acceptance'
+    && whiteCatControl?.qa_failed_generation_count === failureCount
+    && whiteCatControl?.automatic_retry_status === 'stopped_by_explicit_user_acceptance';
+  const expectedFailureCount = earlyUserAcceptance ? failureCount : 3;
+  const expectedRetryStatus = earlyUserAcceptance
+    ? 'stopped_by_explicit_user_acceptance'
+    : 'stopped_user_takeover_required';
+  if (attemptControl?.contract_version !== 'storyboard-image-generation-attempt-limit-v1'
+      || attemptControl.generation_attempt_scope_id !== scopeId
+      || attemptControl.maximum_automatic_rejected_generations !== 3
+      || attemptControl.rejected_generation_count !== expectedFailureCount
+      || attemptControl.automatic_retry_status !== expectedRetryStatus
+      || whiteCatControl?.contract_version !== 'white-cat-imagegen-attempt-limit-v1'
+      || whiteCatControl.maximum_automatic_qa_failures !== 3
+      || whiteCatControl.qa_failed_generation_count !== expectedFailureCount
+      || whiteCatControl.automatic_retry_status !== expectedRetryStatus
+      || generationFailures.length !== expectedFailureCount
+      || whiteCatFailures.length !== expectedFailureCount
+      || !sameJson(
+        generationFailures.map((failure) => failure?.attempt_number),
+        Array.from({length: expectedFailureCount}, (_, index) => index + 1),
+      )
+      || !sameJson(
+        whiteCatFailures.map((failure) => failure?.attempt_number),
+        Array.from({length: expectedFailureCount}, (_, index) => index + 1),
+      )
+      || new Set(generationFailures.map(
+        (failure) => failure?.output?.checksum_sha256,
+      )).size !== expectedFailureCount
+      || whiteCatFailures.at(-1)?.error_code !== expectedLatestErrorCode
+      || (earlyUserAcceptance && hasForwardReverseOverride)) {
+    fail(`${label} attempt-limit/white-cat failure history is stale`);
+  }
+  const latestWhiteCatFailure = whiteCatFailures.at(-1);
+  const visualQa = qa.visual_qa;
+  const hasSubtitleOverride = earlyUserAcceptance
+    && visualQa?.result === 'fail'
+    && visualQa.bottom_subtitle_safe_area_result === 'fail'
+    && visualQa.bottom_subtitle_safe_area_readable === false;
+  const expectedWaivableFailures = hasForwardReverseOverride ? [
+    {
+      error_code: P0_FORWARD_REVERSE_MISMATCH,
+      observed_result: 'fail',
+      reason: latestWhiteCatFailure.failure_reason,
+    },
+    {
+      error_code: P2_SATCHEL_TOPOLOGY,
+      observed_result: 'fail',
+      reason: latestWhiteCatFailure.failure_reason,
+    },
+  ] : earlyUserAcceptance ? [
+    {
+      error_code: P2_SATCHEL_TOPOLOGY,
+      observed_result: 'fail',
+      reason: latestWhiteCatFailure.failure_reason,
+    },
+    ...(hasSubtitleOverride ? [{
+      error_code: BOTTOM_SUBTITLE_SAFE_AREA,
+      observed_result: 'fail',
+      reason: latestWhiteCatFailure.failure_reason,
+    }] : []),
+  ] : undefined;
+  if (hasForwardReverseOverride) {
+    requireSameJson(
+      qa.waivable_mechanical_failures,
+      expectedWaivableFailures,
+      `${label} combined P0/P2 failures`,
+    );
+    if (forwardReverseMapping.failure_reason !== latestWhiteCatFailure.failure_reason) {
+      fail(`${label} forward/reverse mapping QA does not preserve the latest failure`);
+    }
+  } else if (earlyUserAcceptance) {
+    requireSameJson(
+      qa.waivable_mechanical_failures,
+      expectedWaivableFailures,
+      `${label} early-acceptance failures`,
+    );
+  }
+  const inspection = identity.anatomy_evidence.inspection_evidence;
+  if (inspection?.methods?.join(',') !== 'full_resolution,numbered_limb_map'
+      || inspection.numbered_limb_map_source_checksum_sha256 !== item.checksum_sha256
+      || !sameJson(inspection.numbered_limb_map_limb_ids, ['F1', 'F2', 'H1', 'H2'])) {
+    fail(`${label} numbered limb-map evidence is stale`);
+  }
+  const artifacts = [
+    {path: item.path, checksum_sha256: item.checksum_sha256},
+    {path: item.prompt_path, checksum_sha256: item.prompt_checksum_sha256},
+    {path: item.qa_evidence_path, checksum_sha256: item.qa_evidence_checksum_sha256},
+    {
+      path: inspection.numbered_limb_map_path,
+      checksum_sha256: inspection.numbered_limb_map_checksum_sha256,
+    },
+  ];
+  const sourceBinding = artifacts[0];
+  const promptBinding = artifacts[1];
+  const latestGenerationFailure = generationFailures.at(-1);
+  if (earlyUserAcceptance
+      && (!sameJson(latestWhiteCatFailure.output, sourceBinding)
+        || !sameJson(latestWhiteCatFailure.prompt, promptBinding)
+        || !sameJson(latestGenerationFailure.output, sourceBinding)
+        || !sameJson(latestGenerationFailure.prompt, promptBinding)
+        || latestGenerationFailure.failure_reason !== latestWhiteCatFailure.failure_reason)) {
+    fail(`${label} source is not the exact accepted failed output`);
+  }
+  const artifactFailures = earlyUserAcceptance
+    ? generationFailures
+    : [latestWhiteCatFailure];
+  for (const failure of artifactFailures) {
+    for (const binding of [failure.output, failure.prompt]) {
+      if (!binding || typeof binding !== 'object') fail(`${label} failed artifact binding is missing`);
+      if (!artifacts.some((artifact) => sameJson(artifact, binding))) {
+        artifacts.push({path: binding.path, checksum_sha256: binding.checksum_sha256});
+      }
+    }
+  }
+  const selectionBinding = item.user_source_selection_evidence;
+  if (earlyUserAcceptance) {
+    if (!selectionBinding || typeof selectionBinding !== 'object') {
+      fail(`${label} early-acceptance selection evidence is missing`);
+    }
+    if (!artifacts.some((artifact) => sameJson(artifact, selectionBinding))) {
+      artifacts.push(selectionBinding);
+    }
+  }
+  artifacts.forEach((artifact, index) => requireCurrentFile(
+    repositoryRoot,
+    artifact.path,
+    artifact.checksum_sha256,
+    `${label} override artifact ${index}`,
+    {episodeWorkspace},
+  ));
+  requireSameJson(item.override_bound_artifacts, artifacts, `${label} override artifacts`);
+
+  const attemptGateId = `storyboard-image-generation-attempt-limit:${scopeId}`;
+  const p0GateId = `visual_asset.${item.asset_id}.P0_FORWARD_REVERSE_MISMATCH`;
+  const p2GateId = `visual_asset.${item.asset_id}.P2_SATCHEL_TOPOLOGY`;
+  const subtitleGateId = `visual_asset.${item.asset_id}.${BOTTOM_SUBTITLE_SAFE_AREA}`;
+  const gateIds = earlyUserAcceptance
+    ? [
+      p2GateId,
+      ...(hasSubtitleOverride ? [subtitleGateId] : []),
+      ...promptMarkerFailures.map((failure) => failure.gate_id),
+    ]
+    : [
+      attemptGateId,
+      ...(hasForwardReverseOverride ? [p0GateId] : []),
+      p2GateId,
+      ...promptMarkerFailures.map((failure) => failure.gate_id),
+    ];
+  requireSameJson(item.waived_mechanical_gate_ids, gateIds, `${label} waived gate IDs`);
+  const override = item.user_mechanical_gate_override;
+  requireSameJson(override.gate_ids, gateIds, `${label} override gate IDs`);
+  const failureByGate = new Map(
+    (override.acknowledged_failures ?? []).map((failure) => [failure?.gate_id, failure]),
+  );
+  if ((!earlyUserAcceptance
+        && failureByGate.get(attemptGateId)?.observed_result
+          !== 'stopped_user_takeover_required')
+      || (hasForwardReverseOverride
+        && failureByGate.get(p0GateId)?.reason
+          !== latestWhiteCatFailure.failure_reason)
+      || failureByGate.get(p2GateId)?.reason
+        !== latestWhiteCatFailure.failure_reason
+      || (hasSubtitleOverride
+        && failureByGate.get(subtitleGateId)?.reason
+          !== latestWhiteCatFailure.failure_reason)
+      || promptMarkerFailures.some(
+        (failure) => !sameJson(failureByGate.get(failure.gate_id), failure),
+      )) {
+    fail(`${label} override does not preserve the exact failed results`);
+  }
+  const message = String(override.decision?.exact_user_message ?? '').toLowerCase();
+  const ordinalMarkers = expectedFailureCount === 1
+    ? ['第一次', '第1次', 'attempt 1']
+    : ['第二次', '第2次', 'attempt 2'];
+  if (!message.includes(item.asset_id.toLowerCase())
+      || !['p2', '背带', '挎包'].some((marker) => message.includes(marker))
+      || (hasForwardReverseOverride
+        && !['p0', '朝向', '前后'].some((marker) => message.includes(marker)))
+      || !(earlyUserAcceptance
+        ? (['停止', '不再'].some((marker) => message.includes(marker))
+          && message.includes('重试')
+          && ordinalMarkers.some((marker) => message.includes(marker)))
+        : ['三次', '3次', '重试', 'attempt'].some((marker) => message.includes(marker)))
+      || !['放行', '接受', '允许'].some((marker) => message.includes(marker))
+      || (earlyUserAcceptance
+        && !['一次', '本次', '仅此一次'].some((marker) => message.includes(marker)))
+      || (earlyUserAcceptance && !message.includes('保留'))
+      || (earlyUserAcceptance && !message.includes('失败证据'))
+      || (hasSubtitleOverride
+        && !['字幕', '底部18%'].some((marker) => message.includes(marker)))) {
+    fail(`${label} override decision is not asset/P0/P2/attempt-limit specific`);
+  }
+  if (earlyUserAcceptance) {
+    const selectionTarget = requireCurrentFile(
+      repositoryRoot,
+      selectionBinding.path,
+      selectionBinding.checksum_sha256,
+      `${label} early-acceptance selection evidence`,
+      {episodeWorkspace},
+    );
+    const selection = readJson(selectionTarget.resolved);
+    if (selection.contract_version !== 'visual-asset-user-source-selection-v1'
+        || selection.episode_id !== state?.episode_id
+        || selection.asset_id !== item.asset_id
+        || selection.generation_attempt_scope_id !== scopeId
+        || selection.selected_attempt_number !== expectedFailureCount
+        || !sameJson(selection.selected_generation_source, sourceBinding)
+        || !sameJson(selection.selected_prompt, promptBinding)
+        || selection.preserved_failure?.attempt_number !== expectedFailureCount
+        || selection.preserved_failure?.error_code !== P2_SATCHEL_TOPOLOGY
+        || selection.preserved_failure?.failure_reason
+          !== latestWhiteCatFailure.failure_reason
+        || !sameJson(selection.disclosed_gate_ids, gateIds)
+        || selection.gate_effect?.selection_recorded !== true
+        || selection.gate_effect?.mechanical_gate_override_consumed !== true
+        || !sameJson(selection.gate_effect?.release_decision, override.decision)
+        || selection.gate_effect?.consumed_transition_id
+          !== override.consumption?.consumed_transition_id) {
+      fail(`${label} early-acceptance selection evidence is stale`);
+    }
+  }
+  validatePromptFixedMarkerSupplement({item, override, failures: promptMarkerFailures, label});
+  const result = validateOneTimeUserGateOverride(override, {
+    episodeId: state?.episode_id,
+    requiredScopeId: scopeId,
+    requiredGateIds: gateIds,
+    requiredArtifacts: artifacts,
+    fromPhase: earlyUserAcceptance ? 'visual_production' : 'awaiting_visual_asset_review',
+    toPhase: 'visual_production',
+    requiredStatus: 'consumed',
+  });
+  const blockers = assertArray(state?.blockers, 'episode blockers').filter(
+    (blocker) => blocker?.blocker_id === attemptGateId,
+  );
+  if (earlyUserAcceptance && blockers.length !== 0) {
+    fail(`${label} early acceptance has an attempt-limit blocker`);
+  }
+  if (!earlyUserAcceptance && (blockers.length !== 1
+      || blockers[0].contract_version !== 'storyboard-image-generation-attempt-limit-v1'
+      || blockers[0].asset_id !== item.asset_id
+      || blockers[0].generation_attempt_scope_id !== scopeId
+      || blockers[0].status !== 'failed_but_waived_once'
+      || blockers[0].user_mechanical_gate_override_sha256 !== result.override_sha256)) {
+    fail(`${label} attempt-limit blocker does not preserve the consumed override`);
+  }
+  const transitionId = override.consumption?.consumed_transition_id;
+  if (typeof transitionId !== 'string'
+      || consumedTransitionIdCount(state, transitionId) !== 1) {
+    fail(`${label} override transition ID is missing or reused`);
+  }
+  return {
+    result: 'pass_with_user_override',
+    mechanical_qa_result: item.mechanical_qa_result,
+    override_sha256: result.override_sha256,
+    gate_ids: gateIds,
+    bound_artifacts: artifacts,
+    ...(expectedPromptContractQa === undefined ? {} : {
+      prompt_contract_qa: structuredClone(expectedPromptContractQa),
+    }),
+  };
+};
+
+export const validateVisibleSymbolOverrideEvidence = ({
+  repositoryRoot,
+  episodeWorkspace,
+  state,
+  item,
+  qa,
+}) => {
+  const label = `asset ${item?.asset_id}`;
+  if (item?.visual_generation_route !== 'imagegen'
+      || item.white_cat_present !== true
+      || typeof item.asset_id !== 'string'
+      || typeof item.generation_attempt_scope_id !== 'string') {
+    fail(`${label} is not an eligible visible-symbol override target`);
+  }
+  if (item.mechanical_qa_result !== 'failed_but_waived_once'
+      || item.user_mechanical_gate_override_result !== 'pass_with_user_override'
+      || !item.user_mechanical_gate_override
+      || qa?.contract_version !== 'ordinary-imagegen-white-cat-action-qa-v2'
+      || qa.result !== 'fail'
+      || qa.asset_id !== item.asset_id
+      || qa.identity_qa?.result !== 'pass') {
+    fail(`${label} visible-symbol failed-but-waived disposition is incomplete`);
+  }
+  requireSameJson(qa.identity_qa, item.identity_qa, `${label} passing identity QA`);
+  const visible = qa.visible_text_qa;
+  if (visible?.result !== 'fail'
+      || visible.no_visible_text !== true
+      || visible.no_pseudotext !== true
+      || visible.no_decorative_symbols !== false) {
+    fail(`${label} does not preserve the exact visible-symbol failure`);
+  }
+  requireSameJson(visible, item.visible_text_qa, `${label} visible-symbol QA`);
+  requireSameJson(qa.selected_source, {
+    path: item.path,
+    checksum_sha256: item.checksum_sha256,
+    ...(qa.selected_source?.dimensions === undefined
+      ? {} : {dimensions: qa.selected_source.dimensions}),
+    ...(qa.selected_source?.relative_aspect_ratio_error === undefined
+      ? {} : {relative_aspect_ratio_error: qa.selected_source.relative_aspect_ratio_error}),
+  }, `${label} selected source`);
+  requireSameJson(qa.selected_prompt, {
+    path: item.prompt_path,
+    checksum_sha256: item.prompt_checksum_sha256,
+  }, `${label} selected prompt`);
+
+  const scopeId = item.generation_attempt_scope_id;
+  const attemptControl = item.image_generation_attempt_control;
+  const generationFailures = assertArray(
+    item.image_generation_qa_failures,
+    `${label} generation failures`,
+  );
+  if (attemptControl?.contract_version !== 'storyboard-image-generation-attempt-limit-v1'
+      || attemptControl.generation_attempt_scope_id !== scopeId
+      || attemptControl.maximum_automatic_rejected_generations !== 3
+      || attemptControl.rejected_generation_count !== 3
+      || attemptControl.automatic_retry_status !== 'stopped_user_takeover_required'
+      || generationFailures.length !== 3
+      || new Set(generationFailures.map((failure) => failure?.output?.checksum_sha256)).size !== 3) {
+    fail(`${label} visible-symbol attempt-limit history is stale`);
+  }
+  const latestFailure = generationFailures[2];
+  if (!sameJson(latestFailure?.output, {
+    path: item.path,
+    checksum_sha256: item.checksum_sha256,
+  }) || !sameJson(latestFailure?.prompt, {
+    path: item.prompt_path,
+    checksum_sha256: item.prompt_checksum_sha256,
+  })) {
+    fail(`${label} selected source is not the exact third failed output`);
+  }
+  const expectedWaivableFailures = [{
+    error_code: 'VISIBLE_SYMBOL_FREE',
+    observed_result: 'fail',
+    reason: latestFailure.failure_reason,
+  }];
+  requireSameJson(
+    qa.waivable_mechanical_failures,
+    expectedWaivableFailures,
+    `${label} visible-symbol failure`,
+  );
+  const inspection = qa.identity_qa?.anatomy_evidence?.inspection_evidence;
+  if (inspection?.methods?.join(',') !== 'full_resolution,numbered_limb_map'
+      || inspection.numbered_limb_map_source_checksum_sha256 !== item.checksum_sha256
+      || !sameJson(inspection.numbered_limb_map_limb_ids, ['F1', 'F2', 'H1', 'H2'])) {
+    fail(`${label} numbered limb-map evidence is stale`);
+  }
+  const artifacts = [
+    {path: item.path, checksum_sha256: item.checksum_sha256},
+    {path: item.prompt_path, checksum_sha256: item.prompt_checksum_sha256},
+    {path: item.qa_evidence_path, checksum_sha256: item.qa_evidence_checksum_sha256},
+    {
+      path: inspection.numbered_limb_map_path,
+      checksum_sha256: inspection.numbered_limb_map_checksum_sha256,
+    },
+  ];
+  for (const binding of [latestFailure.output, latestFailure.prompt]) {
+    if (!binding || typeof binding !== 'object') fail(`${label} failed artifact binding is missing`);
+    if (!artifacts.some((artifact) => sameJson(artifact, binding))) {
+      artifacts.push({path: binding.path, checksum_sha256: binding.checksum_sha256});
+    }
+  }
+  artifacts.forEach((artifact, index) => requireCurrentFile(
+    repositoryRoot,
+    artifact.path,
+    artifact.checksum_sha256,
+    `${label} override artifact ${index}`,
+    {episodeWorkspace},
+  ));
+  requireSameJson(item.override_bound_artifacts, artifacts, `${label} override artifacts`);
+
+  const attemptGateId = `storyboard-image-generation-attempt-limit:${scopeId}`;
+  const visibleSymbolGateId = `visual_asset.${item.asset_id}.VISIBLE_SYMBOL_FREE`;
+  const gateIds = [attemptGateId, visibleSymbolGateId];
+  requireSameJson(item.waived_mechanical_gate_ids, gateIds, `${label} waived gate IDs`);
+  const override = item.user_mechanical_gate_override;
+  requireSameJson(override.gate_ids, gateIds, `${label} override gate IDs`);
+  const failureByGate = new Map(
+    (override.acknowledged_failures ?? []).map((failure) => [failure?.gate_id, failure]),
+  );
+  if (failureByGate.get(attemptGateId)?.observed_result
+        !== 'stopped_user_takeover_required'
+      || failureByGate.get(visibleSymbolGateId)?.reason !== latestFailure.failure_reason) {
+    fail(`${label} override does not preserve the exact failed results`);
+  }
+  const message = String(override.decision?.exact_user_message ?? '').toLowerCase();
+  if (!message.includes(item.asset_id.toLowerCase())
+      || !['可见符号', '符号', '图案', '浮雕'].some((marker) => message.includes(marker))
+      || !['三次', '3次', '重试', 'attempt'].some((marker) => message.includes(marker))
+      || !['放行', '接受', '允许'].some((marker) => message.includes(marker))) {
+    fail(`${label} override decision is not asset/visible-symbol/attempt-limit specific`);
+  }
+  const result = validateOneTimeUserGateOverride(override, {
+    episodeId: state?.episode_id,
+    requiredScopeId: scopeId,
+    requiredGateIds: gateIds,
+    requiredArtifacts: artifacts,
+    fromPhase: 'awaiting_visual_asset_review',
+    toPhase: 'visual_production',
+    requiredStatus: 'consumed',
+  });
+  const blockers = assertArray(state?.blockers, 'episode blockers').filter(
+    (blocker) => blocker?.blocker_id === attemptGateId,
+  );
+  if (blockers.length !== 1
+      || blockers[0].contract_version !== 'storyboard-image-generation-attempt-limit-v1'
+      || blockers[0].asset_id !== item.asset_id
+      || blockers[0].generation_attempt_scope_id !== scopeId
+      || blockers[0].status !== 'failed_but_waived_once'
+      || blockers[0].user_mechanical_gate_override_sha256 !== result.override_sha256) {
+    fail(`${label} attempt-limit blocker does not preserve the consumed override`);
+  }
+  const transitionId = override.consumption?.consumed_transition_id;
+  if (typeof transitionId !== 'string'
+      || consumedTransitionIdCount(state, transitionId) !== 1) {
+    fail(`${label} override transition ID is missing or reused`);
+  }
+  return {
+    result: 'pass_with_user_override',
+    mechanical_qa_result: item.mechanical_qa_result,
+    override_sha256: result.override_sha256,
+    gate_ids: gateIds,
+    bound_artifacts: artifacts,
+  };
 };
 
 const batchPayload = (assets) => ({
@@ -554,11 +1572,27 @@ const assertReviewReady = (state) => {
     }
     const pendingAssets = finalAssets.map((asset, index) => {
       const item = queue[index];
+      const itemWasWaived = item?.mechanical_qa_result === 'failed_but_waived_once'
+        || item?.user_mechanical_gate_override_result === 'pass_with_user_override'
+        || item?.user_mechanical_gate_override !== undefined;
+      const preapprovalQaStatus = asset?.preapproval_qa_status
+        ?? (itemWasWaived ? null : 'qa_passed_pending_final_review');
+      const expectedOverrideSha256 = item?.user_mechanical_gate_override?.override_sha256;
       if (!item
           || asset?.asset_id !== item.asset_id
           || asset.path !== item.path
           || asset.checksum_sha256 !== item.checksum_sha256
           || asset.qa_status !== 'approved'
+          || (itemWasWaived
+            ? (preapprovalQaStatus !== 'qa_failed_but_waived_once_pending_final_review'
+              || asset.mechanical_qa_result !== 'failed_but_waived_once'
+              || asset.user_mechanical_gate_override_result !== 'pass_with_user_override'
+              || asset.user_mechanical_gate_override_sha256 !== expectedOverrideSha256
+              || !SHA256.test(expectedOverrideSha256 ?? ''))
+            : (preapprovalQaStatus !== 'qa_passed_pending_final_review'
+              || asset.mechanical_qa_result !== undefined
+              || asset.user_mechanical_gate_override_result !== undefined
+              || asset.user_mechanical_gate_override_sha256 !== undefined))
           || item.presented_checksum_sha256 !== item.checksum_sha256
           || item.approved_checksum_sha256 !== item.checksum_sha256
           || item.decision_message !== finalReview.decision_message
@@ -569,7 +1603,12 @@ const assertReviewReady = (state) => {
         asset_id: asset.asset_id,
         path: asset.path,
         checksum_sha256: asset.checksum_sha256,
-        qa_status: 'qa_passed_pending_final_review',
+        qa_status: preapprovalQaStatus,
+        ...(itemWasWaived ? {
+          mechanical_qa_result: asset.mechanical_qa_result,
+          user_mechanical_gate_override_result: asset.user_mechanical_gate_override_result,
+          user_mechanical_gate_override_sha256: asset.user_mechanical_gate_override_sha256,
+        } : {}),
         ...(asset.white_cat_anatomy_review === undefined
           ? {}
           : {white_cat_anatomy_review: structuredClone(asset.white_cat_anatomy_review)}),
@@ -778,6 +1817,7 @@ const inspectIanEvidence = async ({
 const inspectQueueEvidence = async ({
   repositoryRoot,
   episodeWorkspace,
+  state,
   item,
   storyboard,
   storyboardSourceText,
@@ -826,7 +1866,7 @@ const inspectQueueEvidence = async ({
       }),
     }),
   );
-  const qa = inspectQaEvidence({repositoryRoot, episodeWorkspace, item});
+  const qa = inspectQaEvidence({repositoryRoot, episodeWorkspace, item, state});
   const batchManifest = reviewMode === 'one_click_final_review_v1'
     ? null
     : inspectBatchBinding({item, batchIndex});
@@ -1005,6 +2045,39 @@ const inspectApprovedSource = async (repositoryRoot, episodeWorkspace, item, {on
   );
   const metadata = await rasterMetadata(source.resolved, `${label} source`);
   if (metadata.format !== 'png') fail(`${label} source must decode as PNG`);
+  if (item.asset_kind === 'hero_pose') {
+    if (metadata.hasAlpha !== true) {
+      fail(`${label} hero_pose source must be a full-canvas transparent PNG`);
+    }
+    const {data, info} = await sharp(source.resolved, {failOn: 'error'})
+      .ensureAlpha()
+      .raw()
+      .toBuffer({resolveWithObject: true});
+    let minAlpha = 255;
+    let maxAlpha = 0;
+    let transparentPixelCount = 0;
+    let nontransparentPixelCount = 0;
+    for (let offset = info.channels - 1; offset < data.length; offset += info.channels) {
+      const alpha = data[offset];
+      minAlpha = Math.min(minAlpha, alpha);
+      maxAlpha = Math.max(maxAlpha, alpha);
+      if (alpha === 0) transparentPixelCount += 1;
+      else nontransparentPixelCount += 1;
+    }
+    const measuredAlpha = {
+      width: info.width,
+      height: info.height,
+      min_alpha: minAlpha,
+      max_alpha: maxAlpha,
+      transparent_pixel_count: transparentPixelCount,
+      nontransparent_pixel_count: nontransparentPixelCount,
+    };
+    if (minAlpha !== 0 || maxAlpha <= 0
+        || transparentPixelCount < 1 || nontransparentPixelCount < 1
+        || !sameJson(item.transparent_pose_qa?.measured_alpha, measuredAlpha)) {
+      fail(`${label} hero_pose alpha pixels differ from its measured transparent-subject evidence`);
+    }
+  }
   const measuredDimensions = [metadata.width, metadata.height];
   if (!sameJson(measuredDimensions, item.measured_dimensions)
       || (!oneClick && !sameJson(measuredDimensions, item.approval_disk_measured_dimensions))) {
@@ -1049,7 +2122,10 @@ const inspectProductionAsset = async ({
     asset_id: item.asset_id,
     shot_id: item.shot_id,
     role: item.role,
-    state_index: item.state_index ?? 0,
+    asset_kind: item.asset_kind ?? null,
+    state_index: item.asset_kind === 'hero_pose_background'
+      ? null
+      : (item.state_index ?? 0),
     schedule_state_id: item.schedule_state_id ?? null,
     depends_on: item.depends_on ?? [],
     visual_generation_route: item.visual_generation_route,
@@ -1105,24 +2181,17 @@ const inspectProductionAsset = async ({
       approval_disk_verified_at: item.approval_disk_verified_at,
     },
     review_evidence: reviewEvidence,
+    ...(reviewEvidence.qa_evidence.mechanical_override === null ? {} : {
+      mechanical_qa: structuredClone(reviewEvidence.qa_evidence.mechanical_override),
+    }),
   };
 
   if (isFlipbookRow(item)) {
-    return {
-      ...common,
-      presentation_mode: item.presentation_mode,
-      static_spread: structuredClone(item.static_spread),
+    return {...common, presentation_mode: item.presentation_mode, static_spread: structuredClone(item.static_spread),
       static_spread_review: reviewEvidence.static_spread,
-      production: {
-        path: source.source.relative,
-        checksum_sha256: source.approved,
-        dimensions: source.measuredDimensions,
-        fit: 'contain',
-      },
-      normalization_evidence: null,
-    };
+      production: {path: source.source.relative, checksum_sha256: source.approved, dimensions: source.measuredDimensions, fit: 'contain'},
+      normalization_evidence: null};
   }
-
   if (item.visual_generation_route === 'ian-handdrawn-ppt') {
     return {
       ...common,
@@ -1395,19 +2464,43 @@ export const buildScenes = ({
         || selected?.status !== expectedDirectionStatus) {
       fail(`shot ${shotId} is missing authorized direction, rhythm, or assets`);
     }
-    shotQueue.sort((left, right) => (left.state_index ?? 0) - (right.state_index ?? 0));
-    const stateIndexes = shotQueue.map((item) => item.state_index ?? 0);
+    const heroBackgroundItems = shotQueue.filter(
+      (item) => item.asset_kind === 'hero_pose_background',
+    );
+    const stateQueue = shotQueue.filter(
+      (item) => item.asset_kind !== 'hero_pose_background',
+    );
+    const isHeroPose = rhythmShot.motion_tier === 'hero_pose';
+    if (isHeroPose ? heroBackgroundItems.length !== 1 : heroBackgroundItems.length !== 0) {
+      fail(`shot ${shotId} hero_pose background coverage is incomplete or misplaced`);
+    }
+    const heroBackgroundItem = heroBackgroundItems[0] ?? null;
+    if (heroBackgroundItem !== null && (
+      heroBackgroundItem.role !== 'base/master'
+      || heroBackgroundItem.state_index !== null
+      || heroBackgroundItem.white_cat_present !== false
+      || heroBackgroundItem.strict_review !== true
+      || heroBackgroundItem.has_downstream_action_variants !== true
+      || !sameJson(heroBackgroundItem.depends_on, [])
+      || heroBackgroundItem.qa_contract_version
+        !== 'ordinary-imagegen-hero-pose-background-qa-v1'
+    )) {
+      fail(`shot ${shotId} hero_pose background queue contract is invalid`);
+    }
+    stateQueue.sort((left, right) => (left.state_index ?? 0) - (right.state_index ?? 0));
+    const stateIndexes = stateQueue.map((item) => item.state_index ?? 0);
     requireSameJson(stateIndexes, stateIndexes.map((_, index) => index), `shot ${shotId} state indexes`);
     for (const item of shotQueue) {
       if (isFlipbookRow(row) !== isFlipbookRow(item)
-          || (isFlipbookRow(row) && !sameJson(item.static_spread, row.static_spread))) {
+        || (isFlipbookRow(row) && !sameJson(item.static_spread, row.static_spread))) {
         fail(`shot ${shotId} static spread queue binding is stale`);
       }
+      const isHeroBackground = item === heroBackgroundItem;
       if (item.scene_class !== row.scene_class
           || item.visual_generation_route !== selected.visual_generation_route
           || item.visual_structure_id !== selected.visual_structure_id
           || item.treatment_profile_id !== selected.treatment_profile_id
-          || item.white_cat_present !== selected.white_cat_present
+          || item.white_cat_present !== (isHeroBackground ? false : selected.white_cat_present)
           || (item.white_cat_visual_style_id ?? null)
             !== (selected.white_cat_visual_style_id ?? null)
           || (item.white_cat_visual_style_selection_sha256 ?? null)
@@ -1423,7 +2516,15 @@ export const buildScenes = ({
         fail(`shot ${shotId} queue item ${item.asset_id} conflicts with approved direction or rhythm`);
       }
     }
-    const imageSequence = shotQueue.map((item) => {
+    if (isHeroPose && stateQueue.some((item, index) => (
+      item.asset_kind !== 'hero_pose'
+      || item.role !== `action-${String(index + 1).padStart(2, '0')}`
+      || item.strict_review !== false
+      || !sameJson(item.depends_on, [heroBackgroundItem.asset_id])
+    ))) {
+      fail(`shot ${shotId} hero_pose occurrence queue contract is invalid`);
+    }
+    const imageSequence = stateQueue.map((item) => {
       const asset = assetById.get(item.asset_id);
       if (!asset) fail(`shot ${shotId} is missing production asset ${item.asset_id}`);
       return {
@@ -1472,6 +2573,12 @@ export const buildScenes = ({
           || schedule.fps !== 30
           || schedule.source_text !== storyboardSourceTexts.get(shotId)
           || schedule.motion_tier !== rhythmShot.motion_tier
+          || (isHeroPose
+            && (schedule.background_asset_id !== heroBackgroundItem.schedule_background_asset_id
+              || heroBackgroundItem.motion_tier !== 'hero_pose'
+              || heroBackgroundItem.action_state_schedule_contract_version
+                !== schedule.contract_version
+              || heroBackgroundItem.action_state_plan_sha256 !== statePlanSha256))
           || scheduleRecord.state_plan_sha256 !== statePlanSha256) {
         fail(`shot ${shotId} action-state schedule does not match scene assets`);
       }
@@ -1486,7 +2593,7 @@ export const buildScenes = ({
         `shot ${shotId} schedule/rhythm transition plan`,
       );
       const occurrences = schedule.occurrences.map((occurrence, index) => {
-        const item = shotQueue[index];
+        const item = stateQueue[index];
         if (occurrence.state_index !== index
             || occurrence.state_id !== item.schedule_state_id
             || item.motion_tier !== schedule.motion_tier
@@ -1498,8 +2605,8 @@ export const buildScenes = ({
         return {...occurrence, asset_id: item.asset_id};
       });
       intraShotTransitions = schedule.intra_shot_transitions.map((transition, index) => {
-        const from = shotQueue[index];
-        const to = shotQueue[index + 1];
+        const from = stateQueue[index];
+        const to = stateQueue[index + 1];
         const bound = {
           ...transition,
           schedule_contract_version: schedule.contract_version,
@@ -1527,7 +2634,7 @@ export const buildScenes = ({
 
     let ianLayeredScene = null;
     if (!isFlipbookRow(row) && selected.visual_generation_route === 'ian-handdrawn-ppt') {
-      const productionAsset = assetById.get(shotQueue[0].asset_id);
+      const productionAsset = assetById.get(stateQueue[0].asset_id);
       if (imageSequence.length !== 1
           || productionAsset?.ian_layered_scene?.contract_version
             !== 'ian-static-layered-scene-v1') {
@@ -1536,6 +2643,19 @@ export const buildScenes = ({
       ianLayeredScene = structuredClone(productionAsset.ian_layered_scene);
     } else if (shotQueue.some((item) => assetById.get(item.asset_id)?.ian_layered_scene != null)) {
       fail(`shot ${shotId} non-Ian route carries an Ian layered-scene package`);
+    }
+
+    let heroPoseBackground = null;
+    if (heroBackgroundItem !== null) {
+      const productionAsset = assetById.get(heroBackgroundItem.asset_id);
+      if (!productionAsset) fail(`shot ${shotId} lacks its hero_pose background production asset`);
+      heroPoseBackground = {
+        asset_id: productionAsset.asset_id,
+        schedule_background_asset_id: heroBackgroundItem.schedule_background_asset_id,
+        asset: productionAsset.production.path,
+        checksum_sha256: productionAsset.production.checksum_sha256,
+        visual_generation_route: selected.visual_generation_route,
+      };
     }
 
     return {
@@ -1561,6 +2681,7 @@ export const buildScenes = ({
         row: structuredClone(rhythmShot),
       },
       image_sequence: imageSequence,
+      ...(heroPoseBackground === null ? {} : {hero_pose_background: heroPoseBackground}),
       ian_layered_scene: ianLayeredScene,
       action_state_schedule: actionStateSchedule,
       intra_shot_transitions: intraShotTransitions,
@@ -1655,8 +2776,8 @@ const loadBuildContext = async ({
   assertRegularFile(stateTarget.resolved, {nonEmpty: true});
   const stateChecksum = sha256File(stateTarget.resolved);
   const state = readJson(stateTarget.resolved);
-  const timelineOpening = resolveVisualManifestTimelineOpening(state);
-  const flipbookPresentation = timelineOpening !== null;
+  const openingContract = resolveTimelineOpeningContract(state);
+  const directFirst = openingContract === DIRECT_FIRST_SHOT_CONTRACT;
   if (state.workspace_path && state.workspace_path !== workspace) fail('episode state workspace_path mismatch');
   const oneClickCaptionBuild = state.current_phase === 'awaiting_caption_delivery_choice'
     && (state.phase ?? state.current_phase) === 'awaiting_caption_delivery_choice'
@@ -1677,7 +2798,7 @@ const loadBuildContext = async ({
     'visual manifest path',
     {allowMissingFinal: true},
   );
-  const coverEvidence = flipbookPresentation ? null : normalizeRootRelative(
+  const coverEvidence = directFirst ? null : normalizeRootRelative(
     coverEvidenceRelative ?? defaults.coverEvidence,
     'cover evidence path',
   );
@@ -1685,7 +2806,7 @@ const loadBuildContext = async ({
     normalizationDirectory ?? defaults.normalizationDirectory,
     'normalization directory',
   );
-  if (!flipbookPresentation) {
+  if (coverEvidence !== null) {
     resolveEpisodeRelative(
       repositoryRoot,
       workspace,
@@ -1743,7 +2864,7 @@ const loadBuildContext = async ({
   );
   const storyboardSourceTexts = parseStoryboardSourceTexts(
     fs.readFileSync(storyboard.resolved, 'utf8'),
-    {flipbookPresentation},
+    openingContract,
   );
   const direction = inspectAuthority(
     repositoryRoot,
@@ -1757,10 +2878,6 @@ const loadBuildContext = async ({
       || direction.value.status !== expectedMappingStatus
       || state.visual_direction_review.presented_map_sha256 !== direction.value.presented_map_sha256) {
     fail('visual direction review is not authorized');
-  }
-  if (isFlipbookRow(direction.value) !== flipbookPresentation
-      || direction.value.rows.some((row) => isFlipbookRow(row) !== flipbookPresentation)) {
-    fail('visual direction flipbook presentation binding is stale');
   }
   const styleBinding = direction.value.white_cat_visual_style_binding ?? null;
   if (styleBinding !== null) {
@@ -1924,6 +3041,7 @@ const loadBuildContext = async ({
     const reviewEvidence = await inspectQueueEvidence({
       repositoryRoot,
       episodeWorkspace: workspace,
+      state,
       item,
       storyboard: {
         path: storyboard.relative,
@@ -1951,7 +3069,7 @@ const loadBuildContext = async ({
       lockedAt,
     }));
   }
-  const cover = flipbookPresentation ? null : await inspectCover({
+  const cover = directFirst ? null : await inspectCover({
     repositoryRoot,
     episodeWorkspace: workspace,
     coverEvidenceRelative: coverEvidence,
@@ -1966,11 +3084,9 @@ const loadBuildContext = async ({
     storyboardSourceTexts,
     expectedDirectionStatus: expectedMappingStatus,
   });
-  if (flipbookPresentation && (
-    scenes[0]?.shot_id !== 'S01'
-    || scenes[0]?.visual_rhythm?.row?.start_frame !== 0
-  )) {
-    fail('flipbook visual manifest must begin with S01 at frame zero');
+  if (directFirst && (scenes[0]?.shot_id !== 'S01'
+      || scenes[0]?.visual_rhythm?.row?.start_frame !== 0)) {
+    fail('direct-first-shot-v1 requires S01 to begin at frame zero');
   }
   const sceneTransitions = inspectSceneTransitions(
     transitions.value,
@@ -1978,10 +3094,23 @@ const loadBuildContext = async ({
     {oneClick, policySha256},
   );
   const approvalLock = sourceApprovalLock(review, queue);
+  const waivedBlockerIds = new Set(
+    assets
+      .map((asset) => asset.mechanical_qa?.gate_ids?.[0] ?? null)
+      .filter((gateId) => gateId?.startsWith('storyboard-image-generation-attempt-limit:')),
+  );
+  const stateBlockers = assertArray(state.blockers ?? [], 'episode blockers');
+  if (stateBlockers.length !== waivedBlockerIds.size
+      || stateBlockers.some((blocker) => (
+        !waivedBlockerIds.has(blocker?.blocker_id)
+        || blocker.status !== 'failed_but_waived_once'
+      ))) {
+    fail('episode blockers contain unresolved or unbound visual failures');
+  }
 
   const value = {
     contract_version: VISUAL_MANIFEST_CONTRACT,
-    result: 'pass',
+    result: approvalLock.result,
     episode_workspace: workspace,
     locked_at: lockedAt,
     canvas: {aspect: '16:9', width: 1920, height: 1080, fps: 30, orientation: 'landscape'},
@@ -2057,7 +3186,15 @@ const loadBuildContext = async ({
       },
     },
     approval_lock: approvalLock,
-    ...(flipbookPresentation ? {timeline_opening: timelineOpening} : {cover}),
+    ...(directFirst ? {
+      timeline_opening: {
+        contract_version: DIRECT_FIRST_SHOT_CONTRACT,
+        first_shot_id: 'S01',
+        start_frame: 0,
+        fixed_opening_cover: false,
+        publishing_cover_included: false,
+      },
+    } : {cover}),
     counts: {
       scene_count: scenes.length,
       active_asset_count: assets.length,
@@ -2124,8 +3261,17 @@ const assertLockedStateBindings = ({context, manifest, manifestChecksum}) => {
       || stateLock.manifest_checksum_sha256 !== manifestChecksum) {
     fail('visual_assets_lock manifest binding is stale');
   }
+  const waivedBlockerIds = new Set(
+    manifest.assets
+      .map((asset) => asset.mechanical_qa?.gate_ids?.[0] ?? null)
+      .filter((gateId) => gateId?.startsWith('storyboard-image-generation-attempt-limit:')),
+  );
   if (state.visual_asset_review?.status !== 'locked' || !Array.isArray(state.blockers)
-      || state.blockers.length !== 0) {
+      || state.blockers.length !== waivedBlockerIds.size
+      || state.blockers.some((blocker) => (
+        !waivedBlockerIds.has(blocker?.blocker_id)
+        || blocker.status !== 'failed_but_waived_once'
+      ))) {
     fail('locked visual state is incomplete');
   }
 };
@@ -2151,7 +3297,7 @@ export const validateVisualAssetsManifest = async ({
   assertRegularFile(manifestTarget.resolved, {nonEmpty: true});
   const manifest = readJson(manifestTarget.resolved);
   if (manifest.contract_version !== VISUAL_MANIFEST_CONTRACT
-      || manifest.result !== 'pass') {
+      || !['pass', 'pass_with_user_override'].includes(manifest.result)) {
     fail('visual manifest is not a passing visual-assets-manifest-v1');
   }
   const context = await loadBuildContext({
@@ -2168,15 +3314,15 @@ export const validateVisualAssetsManifest = async ({
   assertLockedStateBindings({context, manifest, manifestChecksum});
   return {
     contract_version: 'visual-assets-manifest-validation-v1',
-    result: 'pass',
+    result: manifest.result,
     manifest_path: selectedManifest,
     manifest_checksum_sha256: manifestChecksum,
     active_asset_count: manifest.counts.active_asset_count,
     scene_count: manifest.counts.scene_count,
     intra_shot_transition_count: manifest.counts.intra_shot_transition_count,
     ordinary_scene_transition_count: manifest.counts.ordinary_scene_transition_count,
-    ...(manifest.timeline_opening?.contract_version === 'direct-first-shot-v1' ? {
-      direct_first_shot_contract: 'direct-first-shot-v1',
+    ...(manifest.timeline_opening?.contract_version === DIRECT_FIRST_SHOT_CONTRACT ? {
+      direct_first_shot_contract: DIRECT_FIRST_SHOT_CONTRACT,
       publishing_cover_included: false,
     } : {
       cover_deterministic_rerun_identical: manifest.cover.deterministic_rerun_identical,
@@ -2411,7 +3557,9 @@ export const lockVisualAssets = async ({
         input_storyboard_path: context.value.provenance.approved_storyboard.path,
         input_storyboard_checksum_sha256: context.value.provenance.approved_storyboard.checksum_sha256,
         narration_master_checksum_sha256: context.value.provenance.narration_master.checksum_sha256,
-        qa_result: 'pass_current_approved_bytes_and_production_rasters',
+        qa_result: context.value.result === 'pass_with_user_override'
+          ? 'pass_with_user_override'
+          : 'pass_current_approved_bytes_and_production_rasters',
         locked_at: lockedAt,
       };
       nextState.visual_assets_lock = {
@@ -2432,7 +3580,14 @@ export const lockVisualAssets = async ({
         nextState.phase = 'visual_assets_locked';
         nextState.current_phase = 'visual_assets_locked';
       }
-      nextState.blockers = [];
+      const waivedBlockerIds = new Set(
+        context.value.assets
+          .map((asset) => asset.mechanical_qa?.gate_ids?.[0] ?? null)
+          .filter((gateId) => gateId?.startsWith('storyboard-image-generation-attempt-limit:')),
+      );
+      nextState.blockers = (nextState.blockers ?? []).filter(
+        (blocker) => waivedBlockerIds.has(blocker?.blocker_id),
+      );
       const nextStateBytes = jsonBytes(nextState);
       nextStateChecksum = sha256Bytes(nextStateBytes);
       atomicReplaceIfChecksum(
@@ -2510,7 +3665,7 @@ if (isCli) {
       writeNewManifest(context.manifestPath, context.value);
       result = {
         contract_version: 'visual-assets-manifest-build-v1',
-        result: 'pass',
+        result: context.value.result,
         manifest_path: context.manifestRelative,
         manifest_checksum_sha256: sha256File(context.manifestPath),
         active_asset_count: context.value.counts.active_asset_count,

@@ -5,6 +5,7 @@ import {
   IAN_LAYERED_ENTRY_EFFECTS_POLICY_SHA256,
   buildIanLayeredEntryEffectsMapSha256,
 } from '../../../../leverage-video/src/shared/ian-layered-entry-effects/contract.mjs';
+import {buildActionStateScheduleV4} from '../../../../leverage-video/src/shared/action-state-schedule/contract.mjs';
 
 const transition = (kind = 'slide') => ({
   contract_version: 'scene-transition-v2',
@@ -128,6 +129,27 @@ assert.throws(
   () => validateSceneTransitions({plan: unboundPolicyDirectionPlan, source: goodSource}),
   /visual direction review/i,
 );
+const oneClickTransitionPlan = structuredClone(oneClickDirectionPlan);
+oneClickTransitionPlan.qa_contract.transition_selection_review.status = 'policy_authorized';
+Object.assign(oneClickTransitionPlan.scenes[0].transition.user_selection, {
+  status: 'policy_authorized',
+  policy_sha256: 'f'.repeat(64),
+  deterministic_recommendation_selected: true,
+  user_has_reviewed_specific_map: false,
+  exact_message: null,
+  decided_at: null,
+  authorized_at: '2026-08-22T10:02:00+08:00',
+});
+assert.equal(
+  validateSceneTransitions({plan: oneClickTransitionPlan, source: goodSource}).source_binding,
+  'pass',
+);
+const unboundPolicyTransitionPlan = structuredClone(oneClickTransitionPlan);
+delete unboundPolicyTransitionPlan.qa_contract.workflow_approval;
+assert.throws(
+  () => validateSceneTransitions({plan: unboundPolicyTransitionPlan, source: goodSource}),
+  /transition selection review/i,
+);
 
 const v3Plan = structuredClone(goodPlan);
 v3Plan.schema_version = 'knowledge-video-assembly-plan-v3';
@@ -217,6 +239,61 @@ assert.deepEqual(validateSceneTransitions({plan: v3Plan, source: goodSource}), {
   opening_contract_version: 'direct-first-shot-v1',
   opening_hard_cut_exceptions: [],
 });
+
+const mappedActionPlan = structuredClone(v3Plan);
+const densitySha256 = '9'.repeat(64);
+mappedActionPlan.qa_contract.storyboard_visual_rhythm.contract_version =
+  'storyboard-visual-rhythm-v2';
+mappedActionPlan.qa_contract.workflow_approval = {
+  result: 'pass',
+  density_mode: 'standard',
+  approval_mode: 'manual',
+};
+mappedActionPlan.scenes.forEach((scene) => {
+  scene.density_mode = 'standard';
+  scene.visual_density_selection_sha256 = densitySha256;
+});
+const mappedScene = mappedActionPlan.scenes[0];
+mappedScene.motion_tier = 'stateful';
+mappedScene.image_sequence = [
+  {asset_id: 'S01-production-1', asset: 'S01-production-1.png', from: 0, duration_in_frames: 100},
+  {asset_id: 'S01-production-2', asset: 'S01-production-2.png', from: 100, duration_in_frames: 100},
+];
+mappedScene.action_state_schedule = buildActionStateScheduleV4({
+  totalFrames: 200,
+  fps: 30,
+  sourceText: '甲乙',
+  motionTier: 'stateful',
+  densityMode: 'standard',
+  visualDensitySelectionSha256: densitySha256,
+  states: [
+    {
+      state_id: 'S01-state-1', semantic_state: '建立', narration_byte_start: 0,
+      narration_byte_end: 3, narration_text: '甲', at_frame: 0,
+      semantic_hold_reason: '承载独立语义节点。',
+    },
+    {
+      state_id: 'S01-state-2', semantic_state: '结果', narration_byte_start: 3,
+      narration_byte_end: 6, narration_text: '乙', at_frame: 100,
+      semantic_hold_reason: '承载独立语义节点。',
+    },
+  ],
+});
+mappedScene.action_state_schedule.occurrence_asset_bindings =
+  mappedScene.action_state_schedule.occurrences.map((occurrence, index) => ({
+    ...structuredClone(occurrence),
+    asset_id: mappedScene.image_sequence[index].asset_id,
+  }));
+mappedScene.intra_shot_transitions = mappedScene.action_state_schedule.intra_shot_transitions
+  .map((transition) => ({
+    ...transition,
+    from_asset_id: 'S01-production-1',
+    to_asset_id: 'S01-production-2',
+  }));
+assert.equal(
+  validateSceneTransitions({plan: mappedActionPlan, source: goodSource}).source_binding,
+  'pass',
+);
 
 const ianPlan = structuredClone(v3Plan);
 ianPlan.scenes.forEach((scene) => {

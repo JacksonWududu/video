@@ -8,7 +8,7 @@
 
 Retained upstream files before local adaptation:
 
-- `assets/drawing-hand.png`: `978ee3ca979e0bf3f0b6187926828c30464adafbb0a6bbb61c9dbe327d3bfd61`
+- `assets/drawing-hand.png`: `978ee3ca979e0bf3f0b6187926828c30464adafbb0a6bbb61c9dbe327d3bfd61`（仅保留为上游历史溯源；活动渲染器禁止加载或叠加）
 - `scripts/stream_render.py`: `6544d58593642eb9e7056170212dc22ed88b652f5fb7666830b58c8114c5fad0`
 - `scripts/render_stream_whiteboard.py`: `a476483d5fcd149f685e61963573f081e11e6aff0517f916c44929504534079e`; vendored as `scripts/region_stream_renderer.py`.
 

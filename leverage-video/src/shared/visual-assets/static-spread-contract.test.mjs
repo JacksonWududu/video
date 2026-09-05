@@ -13,12 +13,7 @@ import {buildPendingVisibleTextBatchReview, approveVisibleTextBatchReview, build
 import {ACTIVE_ROUTE_IDS, CATALOG_CHECKSUM_SHA256, buildPresentedMapSha256, authorizeVisualDirectionRecommendationsOneClick} from '../visual-generation-routes/contract.mjs';
 import {VISUAL_LANGUAGE_CATALOG_CHECKSUM_SHA256} from '../visual-language/contract.mjs';
 import {buildStandardItems} from './reconcile-approved-storyboard.mjs';
-import {resolveFinalReviewTimelineOpening} from './build-final-production-asset-review.mjs';
-import {
-  buildScenes,
-  parseStoryboardSourceTexts,
-  resolveVisualManifestTimelineOpening,
-} from './finalize-visual-assets-manifest.mjs';
+import {buildScenes} from './finalize-visual-assets-manifest.mjs';
 import {inspectStaticSpreadAsset, buildStaticSpreadReadabilityPreview, STATIC_SPREAD_PROMPT_MARKERS, STATIC_SPREAD_QA_CONTRACT} from './static-spread-contract.mjs';
 
 const sha = (bytes) => crypto.createHash('sha256').update(bytes).digest('hex');
@@ -173,36 +168,6 @@ test('static scenes consume one source and never infer Ian layers or action sche
     f.item.static_spread = buildStaticSpread('改写后的文案。');
     assert.throws(() => buildScenes(params), /static spread queue binding/);
   }
-});
-
-test('flipbook alone uses direct-first opening while ordinary stories retain OPEN-00', () => {
-  const flipbookState = {
-    white_cat_visual_style_selection: {style_id: 'illustrated-flipbook', style_source: 'builtin_flipbook'},
-    storyboard_draft: {direct_first_shot_contract: 'direct-first-shot-v1'},
-  };
-  const flipbookQueue = [{shot_id: 'S01', shot_start_frame: 0, presentation_mode: 'illustrated-flipbook'}];
-  assert.deepEqual(resolveFinalReviewTimelineOpening({activeQueue: flipbookQueue, state: flipbookState}), {
-    contract_version: 'direct-first-shot-v1', first_shot_id: 'S01', start_frame: 0,
-    fixed_opening_cover: false, publishing_cover_included: false,
-  });
-  assert.deepEqual(resolveVisualManifestTimelineOpening(flipbookState), {
-    contract_version: 'direct-first-shot-v1', first_shot_id: 'S01', start_frame: 0,
-    fixed_opening_cover: false, publishing_cover_included: false,
-  });
-  assert.throws(
-    () => resolveFinalReviewTimelineOpening({activeQueue: [{...flipbookQueue[0], shot_start_frame: 1}], state: flipbookState}),
-    /frame zero/,
-  );
-  assert.throws(
-    () => resolveVisualManifestTimelineOpening({...flipbookState, storyboard_draft: {}}),
-    /direct-first-shot-v1/,
-  );
-
-  const directStoryboard = '## S01\n- 锁稿原文 source_text：\n```text\n正文\n```\n';
-  assert.equal(parseStoryboardSourceTexts(directStoryboard, {flipbookPresentation: true}).get('S01'), '正文');
-  assert.throws(() => parseStoryboardSourceTexts(directStoryboard), /lacks OPEN-00/);
-  assert.equal(resolveFinalReviewTimelineOpening({activeQueue: [{shot_id: 'OPEN-00'}], state: {}}), null);
-  assert.equal(resolveVisualManifestTimelineOpening({}), null);
 });
 
 

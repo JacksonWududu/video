@@ -14,11 +14,21 @@ from typing import Any
 REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
 GATE_PATH = REPOSITORY_ROOT / ".agents/skills/run-knowledge-video/scripts/validate_visual_approval_state.py"
 VALIDATOR_PATH = REPOSITORY_ROOT / ".agents/skills/ian-handdrawn-ppt/scripts/validate_knowledge_video_layered_scene.mjs"
+OVERRIDE_BRIDGE_PATH = (
+    REPOSITORY_ROOT
+    / "leverage-video/src/shared/user-gate-override/consume-override.mjs"
+)
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 IAN_CANONICAL_STYLE_ANCHOR_PATH = (
     ".agents/skills/ian-handdrawn-ppt/assets/"
     "reference-handdrawn-article-illustration-style.png"
 )
+VISIBLE_TEXT_SEGMENT_SEPARATOR_RE = re.compile(r"\r\n|\n|｜")
+IAN_STOPPED_LAYOUT_REPAIR_SOURCE_GATE = (
+    "IAN_STOPPED_LAYOUT_REPAIR_SOURCE_MUST_BE_THIRD_REJECTED_GENERATION"
+)
+IAN_LAYOUT_REPAIR_DISPOSITION = "ian-generation-layout-repair-disposition-v1"
+REPAIR_REQUIRED_STATUS = "deterministic_layout_repair_required"
 
 
 def sha256_file(file: Path) -> str:
@@ -63,12 +73,445 @@ def checksum_bound_file(binding: dict[str, Any], label: str) -> Path:
     return file
 
 
+def exact_visible_text_segments(value: str) -> list[str]:
+    return VISIBLE_TEXT_SEGMENT_SEPARATOR_RE.split(value)
+
+
+def labels_reproduce_exact_visible_text(
+    labels: Any,
+    exact_visible_text: Any,
+) -> bool:
+    if (
+        not isinstance(labels, list)
+        or not labels
+        or not isinstance(exact_visible_text, str)
+        or not exact_visible_text
+    ):
+        return False
+    texts = [label.get("text") if isinstance(label, dict) else None for label in labels]
+    if any(not isinstance(text, str) or not text for text in texts):
+        return False
+    if len(texts) == 1 and texts[0] == exact_visible_text:
+        return True
+    segments = exact_visible_text_segments(exact_visible_text)
+    return all(segments) and texts == segments
+
+
 def is_strict_revision_candidate(item: dict[str, Any] | None) -> bool:
     return bool(
         item
         and item.get("strict_review") is True
         and item.get("is_revision") is True
         and item.get("status") in {"changes_requested", "awaiting_user_approval"}
+    )
+
+
+def next_generation_target(
+    queue: list[dict[str, Any]],
+    generation_unlocking_statuses: set[str],
+) -> dict[str, Any] | None:
+    return next(
+        (
+            item
+            for item in queue
+            if item.get("active_for_current_storyboard") is not False
+            and item.get("status") != "superseded"
+            and item.get("status") not in generation_unlocking_statuses
+        ),
+        None,
+    )
+
+
+def is_stopped_layout_repair_takeover_target(
+    state: dict[str, Any],
+    item: dict[str, Any] | None,
+    asset_id: str,
+) -> bool:
+    review = state.get("visual_asset_review", {})
+    control = item.get("image_generation_attempt_control", {}) if item else {}
+    return bool(
+        item
+        and item.get("status") == "pending_generation"
+        and review.get("user_takeover_required") is True
+        and review.get("user_takeover_asset_id") == asset_id
+        and review.get("user_takeover_scope_id")
+        == item.get("generation_attempt_scope_id")
+        and review.get("current_asset_id") == asset_id
+        and review.get("queue_generation_allowed") is False
+        and control.get("automatic_retry_status")
+        == "stopped_user_takeover_required"
+        and control.get("rejected_generation_count") == 3
+    )
+
+
+def is_repairable_layout_target(
+    state: dict[str, Any],
+    item: dict[str, Any] | None,
+    asset_id: str,
+) -> bool:
+    review = state.get("visual_asset_review", {})
+    control = item.get("image_generation_attempt_control", {}) if item else {}
+    disposition = item.get("ian_layout_repair_disposition", {}) if item else {}
+    findings = item.get("image_generation_repairable_findings", []) if item else []
+    return bool(
+        item
+        and item.get("status") == "pending_generation"
+        and item.get("visual_generation_route") == "ian-handdrawn-ppt"
+        and review.get("current_asset_id") == asset_id
+        and review.get("queue_generation_allowed") is False
+        and review.get("ian_layout_repair_required") is True
+        and review.get("ian_layout_repair_asset_id") == asset_id
+        and review.get("ian_layout_repair_scope_id")
+        == item.get("generation_attempt_scope_id")
+        and control.get("automatic_retry_status") == REPAIR_REQUIRED_STATUS
+        and disposition.get("contract_version") == IAN_LAYOUT_REPAIR_DISPOSITION
+        and disposition.get("status") == "repair_required"
+        and disposition.get("generation_attempt_scope_id")
+        == item.get("generation_attempt_scope_id")
+        and isinstance(findings, list)
+        and bool(findings)
+        and disposition.get("source_finding") == findings[-1]
+    )
+
+
+def canonical_sha256(value: Any) -> str:
+    encoded = json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def consumed_transition_ids(value: object) -> set[str]:
+    found: set[str] = set()
+    if isinstance(value, dict):
+        for key, nested in value.items():
+            if key == "consumed_transition_id" and isinstance(nested, str):
+                found.add(nested)
+            else:
+                found.update(consumed_transition_ids(nested))
+    elif isinstance(value, list):
+        for nested in value:
+            found.update(consumed_transition_ids(nested))
+    return found
+
+
+def generation_failure_projection(value: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "attempt_number": value.get("attempt_number"),
+        "prompt": value.get("prompt"),
+        "output": value.get("output"),
+        "failure_reason": value.get("failure_reason"),
+    }
+
+
+def layout_repair_override_artifacts(
+    failures: list[dict[str, Any]],
+) -> list[dict[str, str]]:
+    artifacts: list[dict[str, str]] = []
+    for failure in failures:
+        for key in ("prompt", "output"):
+            binding = failure.get(key)
+            if not isinstance(binding, dict):
+                raise ValueError("Ian layout-repair failure artifact binding is missing")
+            normalized = {
+                "path": binding.get("path"),
+                "checksum_sha256": binding.get("checksum_sha256"),
+            }
+            checksum_bound_file(normalized, f"Ian layout-repair {key} artifact")
+            artifacts.append(normalized)
+    return artifacts
+
+
+def consume_user_gate_override(
+    override: dict[str, Any],
+    *,
+    episode_id: str,
+    scope_id: str,
+    gate_ids: list[str],
+    artifacts: list[dict[str, str]],
+    transition_id: str,
+    consumed_at: str,
+) -> dict[str, Any]:
+    payload = {
+        "operation": "consume",
+        "override": override,
+        "bindings": {
+            "episodeId": episode_id,
+            "requiredScopeId": scope_id,
+            "requiredGateIds": gate_ids,
+            "requiredArtifacts": artifacts,
+            "fromPhase": "awaiting_visual_asset_review",
+            "toPhase": "visual_production",
+        },
+        "consumed_transition_id": transition_id,
+        "consumed_at": consumed_at,
+    }
+    try:
+        command = subprocess.run(
+            ["node", str(OVERRIDE_BRIDGE_PATH)],
+            input=json.dumps(payload, ensure_ascii=False),
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+    except OSError as error:
+        raise ValueError("one-time user gate override validator is unavailable") from error
+    if command.returncode != 0:
+        detail = command.stderr.strip() or "validation failed"
+        raise ValueError(f"one-time user gate override: {detail}")
+    try:
+        consumed = json.loads(command.stdout)
+    except json.JSONDecodeError as error:
+        raise ValueError(
+            "one-time user gate override validator returned invalid JSON"
+        ) from error
+    if not isinstance(consumed, dict):
+        raise ValueError("one-time user gate override validator returned an invalid record")
+    return consumed
+
+
+def consume_non_third_layout_repair_source_override(
+    *,
+    state: dict[str, Any],
+    item: dict[str, Any],
+    repair: dict[str, Any],
+    exact_user_message: str | None,
+    decided_at: str | None,
+    transition_id: str | None,
+    consumed_at: str | None,
+) -> dict[str, Any] | None:
+    failures = item.get("image_generation_qa_failures")
+    if not isinstance(failures, list) or len(failures) != 3:
+        raise ValueError("Ian layout-repair source override lacks three preserved failures")
+    projections = [generation_failure_projection(failure) for failure in failures]
+    source_failure = repair.get("source_failure")
+    if source_failure == projections[-1]:
+        return None
+    if source_failure not in projections[:-1]:
+        raise ValueError("Ian layout repair source is not one of the preserved failures")
+    if not isinstance(exact_user_message, str) or not exact_user_message.strip():
+        raise ValueError("Ian non-third layout-repair source requires an exact gate release")
+    normalized_message = exact_user_message.lower()
+    if (
+        str(item.get("asset_id", "")).lower() not in normalized_message
+        or not any(marker in normalized_message for marker in ("第二", "第2", "attempt 2"))
+        or not any(marker in normalized_message for marker in ("第三", "第3", "attempt 3"))
+        or "布局修复源" not in normalized_message
+        or not any(marker in normalized_message for marker in ("放行", "接受", "允许"))
+    ):
+        raise ValueError(
+            "Ian source override message must name the asset, second/third failure, layout-repair source gate, and one-time release"
+        )
+    if (
+        not isinstance(transition_id, str)
+        or not transition_id.strip()
+        or transition_id in consumed_transition_ids(state)
+    ):
+        raise ValueError("Ian source override transition ID is missing or reused")
+    episode_id = state.get("episode_id")
+    generation_scope = item.get("generation_attempt_scope_id")
+    if not isinstance(episode_id, str) or not episode_id.strip():
+        raise ValueError("Ian source override episode id is missing")
+    if not isinstance(generation_scope, str) or not generation_scope.strip():
+        raise ValueError("Ian source override generation scope is missing")
+    scope_id = f"{generation_scope}:ian-layout-repair-source-selection"
+    gate_id = f"visual_asset.{item['asset_id']}.{IAN_STOPPED_LAYOUT_REPAIR_SOURCE_GATE}"
+    artifacts = layout_repair_override_artifacts(failures)
+    source_attempt = source_failure.get("attempt_number")
+    required_attempt = projections[-1].get("attempt_number")
+    pending = {
+        "contract_version": "one-time-explicit-user-mechanical-gate-override-v1",
+        "episode_id": episode_id,
+        "scope_id": scope_id,
+        "gate_ids": [gate_id],
+        "acknowledged_failures": [
+            {
+                "gate_id": gate_id,
+                "observed_result": "fail",
+                "reason": (
+                    "Selected Ian stopped-takeover layout-repair source is preserved "
+                    f"attempt {source_attempt}; the default contract requires preserved "
+                    f"attempt {required_attempt}."
+                ),
+            }
+        ],
+        "bound_artifacts": artifacts,
+        "decision": {
+            "exact_user_message": exact_user_message,
+            "decided_at": decided_at,
+            "disposition": "allow_once",
+        },
+        "consumption": {
+            "from_phase": "awaiting_visual_asset_review",
+            "to_phase": "visual_production",
+            "status": "available",
+        },
+        "reuse_forbidden": True,
+    }
+    pending["override_sha256"] = canonical_sha256(pending)
+    return consume_user_gate_override(
+        pending,
+        episode_id=episode_id,
+        scope_id=scope_id,
+        gate_ids=[gate_id],
+        artifacts=artifacts,
+        transition_id=transition_id,
+        consumed_at=consumed_at or "",
+    )
+
+
+def validate_layout_repair_evidence(
+    *,
+    manifest: dict[str, Any],
+    validation: dict[str, Any],
+    item: dict[str, Any],
+    qa: dict[str, Any],
+    exact_user_message: str | None,
+    takeover_target: bool,
+    allow_non_third_source: bool = False,
+    repairable_target: bool = False,
+) -> dict[str, Any] | None:
+    repair = manifest.get("split_spec", {}).get("layout_repair")
+    if repair is None:
+        if exact_user_message is not None:
+            raise ValueError("layout-repair user message was supplied without a repair")
+        if takeover_target or repairable_target:
+            raise ValueError("Ian layout-repair target requires an authorized layout repair")
+        return None
+    authorization = repair.get("authorization", {})
+    if (
+        repair.get("contract_version") != "ian-pre-split-layout-repair-v1"
+        or authorization.get("asset_id") != item.get("asset_id")
+        or not isinstance(exact_user_message, str)
+        or not exact_user_message
+        or authorization.get("exact_user_message") != exact_user_message
+    ):
+        raise ValueError("Ian layout repair lacks the exact user authorization")
+    edge_pixels = validation.get("layout_repair_source_edge_visible_pixels")
+    source_limit = repair.get("source_outside_union_max_visible_pixels")
+    source_outside = validation.get(
+        "layout_repair_source_outside_union_visible_pixels"
+    )
+    if (
+        validation.get("deterministic_pre_split_layout_repair_match") is not True
+        or not isinstance(source_outside, int)
+        or not isinstance(source_limit, int)
+        or source_outside > source_limit
+        or not isinstance(edge_pixels, list)
+        or len(edge_pixels) != len(repair.get("layers", []))
+        or any(row.get("visible_pixels") != 0 for row in edge_pixels)
+    ):
+        raise ValueError("Ian layout repair replay or intact-source evidence is incomplete")
+    if repairable_target:
+        findings = item.get("image_generation_repairable_findings")
+        disposition = item.get("ian_layout_repair_disposition", {})
+        if (
+            not isinstance(findings, list)
+            or not findings
+            or disposition.get("contract_version") != IAN_LAYOUT_REPAIR_DISPOSITION
+            or disposition.get("status") != "repair_required"
+            or disposition.get("source_finding") != findings[-1]
+            or repair.get("source_failure")
+            != generation_failure_projection(findings[-1])
+        ):
+            raise ValueError("Ian layout repair does not bind the repairable geometry finding")
+        return repair
+    if not takeover_target:
+        return repair
+
+    failures = item.get("image_generation_qa_failures")
+    control = item.get("image_generation_attempt_control", {})
+    if (
+        not isinstance(failures, list)
+        or len(failures) != 3
+        or control.get("rejected_generation_count") != len(failures)
+        or control.get("maximum_automatic_rejected_generations") != 3
+    ):
+        raise ValueError("Ian layout-repair takeover lacks the preserved three failures")
+    expected_failure = generation_failure_projection(failures[-1])
+    if (
+        repair.get("source_failure") != expected_failure
+        and not allow_non_third_source
+    ):
+        raise ValueError("Ian layout repair does not bind the third rejected generation")
+    if repair.get("source_failure") not in [
+        generation_failure_projection(failure) for failure in failures
+    ]:
+        raise ValueError("Ian layout repair source is not one of the preserved failures")
+    if qa.get("rejected_attempts") != [failure.get("output") for failure in failures]:
+        raise ValueError("Ian layout repair does not preserve every rejected output")
+    return repair
+
+
+def clear_active_takeover(review: dict[str, Any]) -> None:
+    for key in (
+        "user_takeover_required",
+        "user_takeover_asset_id",
+        "user_takeover_scope_id",
+        "user_takeover_message",
+    ):
+        review.pop(key, None)
+
+
+def clear_active_layout_repair(review: dict[str, Any]) -> None:
+    for key in (
+        "ian_layout_repair_required",
+        "ian_layout_repair_asset_id",
+        "ian_layout_repair_scope_id",
+        "ian_layout_repair_message",
+    ):
+        review.pop(key, None)
+    review["queue_generation_allowed"] = True
+
+
+def mark_layout_repair_takeover_resolution(
+    item: dict[str, Any],
+    repair: dict[str, Any],
+    resolved_at: str,
+) -> None:
+    control = item.get("image_generation_attempt_control", {})
+    if control.get("automatic_retry_status") != "stopped_user_takeover_required":
+        raise ValueError("Ian layout-repair takeover control is not stopped")
+    control["automatic_retry_status"] = (
+        "resolved_by_user_directed_deterministic_layout_repair_qa_pass"
+    )
+    control["resolution"] = (
+        "user-directed-deterministic-layout-repair-passed-full-qa"
+    )
+    control["resolved_at"] = resolved_at
+    item["user_takeover_disposition"] = {
+        "contract_version": "ian-pre-split-layout-repair-takeover-v1",
+        "exact_user_message": repair["authorization"]["exact_user_message"],
+        "resolved_at": resolved_at,
+        "source_failure": repair["source_failure"],
+    }
+
+
+def mark_repairable_layout_resolution(
+    item: dict[str, Any],
+    repair: dict[str, Any],
+    resolved_at: str,
+) -> None:
+    control = item.get("image_generation_attempt_control", {})
+    disposition = item.get("ian_layout_repair_disposition", {})
+    if (
+        control.get("automatic_retry_status") != REPAIR_REQUIRED_STATUS
+        or disposition.get("contract_version") != IAN_LAYOUT_REPAIR_DISPOSITION
+        or disposition.get("status") != "repair_required"
+    ):
+        raise ValueError("Ian repairable-layout disposition is not active")
+    control["automatic_retry_status"] = (
+        "resolved_by_deterministic_layout_repair_qa_pass"
+    )
+    control["resolution"] = "deterministic-layout-repair-passed-full-qa"
+    control["resolved_at"] = resolved_at
+    disposition.update(
+        status="resolved_qa_pass",
+        resolved_at=resolved_at,
+        layout_repair=repair,
     )
 
 
@@ -263,7 +706,7 @@ def validate_layer_text_containment_evidence(
         or containment.get("raster") != final_projection
     ):
         raise ValueError("Ian containment does not bind the v2 final composite and owning layers")
-    if "｜".join(label.get("text", "") for label in labels) != exact_visible_text:
+    if not labels_reproduce_exact_visible_text(labels, exact_visible_text):
         raise ValueError("Ian containment labels do not equal the approved visible text")
     layer_ids = {layer.get("layer_id") for layer in manifest.get("layers", [])}
     if any(label.get("layer_id") not in layer_ids for label in labels):
@@ -309,9 +752,21 @@ def record(args: argparse.Namespace) -> dict[str, Any]:
         None,
     )
     strict_revision = is_strict_revision_candidate(candidate) and not one_click
+    takeover_target = is_stopped_layout_repair_takeover_target(
+        state,
+        candidate,
+        args.asset_id,
+    )
+    repairable_target = is_repairable_layout_target(
+        state,
+        candidate,
+        args.asset_id,
+    )
     if strict_revision:
         if review.get("current_asset_id") != args.asset_id:
             raise ValueError("strict revision is not the current visual asset")
+        item = candidate
+    elif takeover_target or repairable_target:
         item = candidate
     else:
         item = gate.require_generation_allowed(state, args.asset_id)
@@ -371,12 +826,40 @@ def record(args: argparse.Namespace) -> dict[str, Any]:
         or manifest.get("scene_plan") != item.get("ian_scene_plan")
         or manifest.get("scene_plan_sha256") != item.get("ian_scene_plan_sha256")
         or text_overlay.get("mode") != expected_text_mode
-        or "｜".join(label.get("text", "") for label in overlay_labels)
-        != expected_overlay_text
+        or (
+            expected_text_mode == "required"
+            and not labels_reproduce_exact_visible_text(
+                overlay_labels,
+                expected_overlay_text,
+            )
+        )
+        or (expected_text_mode == "none" and overlay_labels != [])
         or manifest.get("verified_visible_text") != expected_visible_text
         or validation.get("member_count") != 4 + (2 * len(manifest.get("layers", [])))
     ):
         raise ValueError("Ian layered-scene manifest does not match the queue item")
+    repair_value = manifest.get("split_spec", {}).get("layout_repair")
+    source_selection_override = None
+    if takeover_target and isinstance(repair_value, dict):
+        source_selection_override = consume_non_third_layout_repair_source_override(
+            state=state,
+            item=item,
+            repair=repair_value,
+            exact_user_message=getattr(args, "layout_repair_user_message", None),
+            decided_at=getattr(args, "layout_repair_source_override_decided_at", None),
+            transition_id=getattr(args, "layout_repair_source_override_transition_id", None),
+            consumed_at=getattr(args, "layout_repair_source_override_consumed_at", None),
+        )
+    layout_repair = validate_layout_repair_evidence(
+        manifest=manifest,
+        validation=validation,
+        item=item,
+        qa=qa,
+        exact_user_message=getattr(args, "layout_repair_user_message", None),
+        takeover_target=takeover_target,
+        allow_non_third_source=source_selection_override is not None,
+        repairable_target=repairable_target,
+    )
 
     if qa.get("prompt") != manifest.get("master_generation", {}).get("prompt"):
         raise ValueError("production prompt is not the selected complete-master prompt")
@@ -391,7 +874,7 @@ def record(args: argparse.Namespace) -> dict[str, Any]:
     ):
         raise ValueError("production prompt lacks an explicit text-free master phrase")
     for label in expected_visible_text:
-        for segment in label.split("｜"):
+        for segment in exact_visible_text_segments(label):
             if segment and segment in prompt_text:
                 raise ValueError("text-free complete-master prompt includes approved visible text")
 
@@ -500,6 +983,9 @@ def record(args: argparse.Namespace) -> dict[str, Any]:
             "deterministic_master_normalization_match": validation[
                 "deterministic_master_normalization_match"
             ],
+            "deterministic_pre_split_layout_repair_match": validation[
+                "deterministic_pre_split_layout_repair_match"
+            ],
             "deterministic_semantic_split_match": validation[
                 "deterministic_semantic_split_match"
             ],
@@ -508,6 +994,12 @@ def record(args: argparse.Namespace) -> dict[str, Any]:
             ],
             "deterministic_composite_match": validation[
                 "deterministic_composite_match"
+            ],
+            "layout_repair_source_outside_union_visible_pixels": validation[
+                "layout_repair_source_outside_union_visible_pixels"
+            ],
+            "layout_repair_source_edge_visible_pixels": validation[
+                "layout_repair_source_edge_visible_pixels"
             ],
         },
         semantic_qa=qa["semantic_qa"],
@@ -532,25 +1024,61 @@ def record(args: argparse.Namespace) -> dict[str, Any]:
         )
         pause_for_strict_revision(state, args.asset_id)
     else:
-        gate.record_hybrid_qa_pass(state, args.asset_id, args.qa_time)
-        active = [
-            queued
-            for queued in state["visual_asset_review"]["queue"]
-            if queued.get("active_for_current_storyboard") is not False
-            and queued.get("status") != "superseded"
-        ]
-        next_item = next(
-            (
-                queued
-                for queued in active
-                if queued.get("status")
-                not in {
-                    "approved",
-                    "qa_passed_pending_batch_review",
-                    "qa_passed_pending_final_review",
+        if takeover_target:
+            mark_layout_repair_takeover_resolution(item, layout_repair, args.qa_time)
+            matching_blockers = [
+                blocker
+                for blocker in state.get("blockers", [])
+                if blocker.get("asset_id") == item.get("asset_id")
+                and blocker.get("generation_attempt_scope_id")
+                == item.get("generation_attempt_scope_id")
+                and blocker.get("contract_version")
+                == "storyboard-image-generation-attempt-limit-v1"
+            ]
+            if len(matching_blockers) != 1:
+                raise ValueError("Ian layout-repair takeover blocker is missing or ambiguous")
+            matching_blockers[0].update(
+                status=(
+                    "resolved_by_user_directed_deterministic_layout_repair_qa_pass"
+                ),
+                resolution="user-directed-deterministic-layout-repair-passed-full-qa",
+                resolved_at=args.qa_time,
+            )
+            if source_selection_override is not None:
+                failures = item["image_generation_qa_failures"]
+                source_selection = {
+                    "contract_version": (
+                        "ian-stopped-layout-repair-source-selection-v1"
+                    ),
+                    "result": "pass_with_user_override",
+                    "selected_source_failure": layout_repair["source_failure"],
+                    "default_required_source_failure": (
+                        generation_failure_projection(failures[-1])
+                    ),
+                    "user_mechanical_gate_override": source_selection_override,
                 }
-            ),
-            None,
+                item["ian_layout_repair_source_selection"] = source_selection
+                item["user_takeover_disposition"].update(
+                    source_selection_result="pass_with_user_override",
+                    source_selection_override_sha256=source_selection_override[
+                        "override_sha256"
+                    ],
+                )
+                matching_blockers[0].update(
+                    layout_repair_source_selection_result="pass_with_user_override",
+                    layout_repair_source_override_sha256=source_selection_override[
+                        "override_sha256"
+                    ],
+                )
+        if repairable_target:
+            mark_repairable_layout_resolution(item, layout_repair, args.qa_time)
+            clear_active_layout_repair(review)
+        gate.record_hybrid_qa_pass(state, args.asset_id, args.qa_time)
+        if takeover_target:
+            clear_active_takeover(review)
+        next_item = next_generation_target(
+            state["visual_asset_review"]["queue"],
+            gate.GENERATION_UNLOCKING_STATUSES,
         )
         state["visual_asset_review"]["current_asset_id"] = (
             next_item.get("asset_id") if next_item else None
@@ -564,7 +1092,11 @@ def record(args: argparse.Namespace) -> dict[str, Any]:
     )
     temporary.replace(state_file)
     return {
-        "result": "pass",
+        "result": (
+            "pass_with_user_override"
+            if source_selection_override is not None
+            else "pass"
+        ),
         "asset_id": args.asset_id,
         "status": item["status"],
         "package_manifest_checksum_sha256": item[
@@ -581,6 +1113,10 @@ def main() -> None:
     parser.add_argument("asset_id")
     parser.add_argument("qa_path")
     parser.add_argument("qa_time")
+    parser.add_argument("--layout-repair-user-message")
+    parser.add_argument("--layout-repair-source-override-decided-at")
+    parser.add_argument("--layout-repair-source-override-transition-id")
+    parser.add_argument("--layout-repair-source-override-consumed-at")
     args = parser.parse_args()
     if not re.fullmatch(
         r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}", args.qa_time

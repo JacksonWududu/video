@@ -32,7 +32,6 @@ const draft = `# 《习得性无助》知识视频分镜草案 v4
 
 | 镜头 | 时长（秒） | 画面 | 白猫 | 分镜生成方式 | 可见文字 | 锁稿原文 |
 |---|---|---|---|---|---|---|
-| OPEN-00 | 1.000 | 固定封面 | 不适用 | 固定封面（cover-only-v1） | 无 | 片头首句。 |
 | S01 | 1.000 | 第一镜 | false | imagegen | 无 | 第一镜口播。 |
 | S02 | 1.000 | 第二镜 | false | imagegen | 无 | 第二镜口播。 |
 
@@ -59,11 +58,31 @@ assert.match(finalized, /动态：锁定 Ian 全幅遮罩扫入/);
 assert.match(finalized, /均已明确批准；等待本文件的 Storyboard Review/);
 assert.match(finalized, /## 锁定 scene-transition-v3 映射/);
 assert.ok(!finalized.includes('待逐边界审核'));
+assert.ok(!finalized.includes('OPEN-00'));
 assert.throws(() => finalizeStoryboardMarkdown({draftMarkdown: draft, transitionRows: []}), /more pending/);
 assert.throws(() => finalizeStoryboardMarkdown({
   draftMarkdown: draft.replace('习得性无助', ''),
   transitionRows: [row],
 }), /draft title is unexpected/);
+
+const currentDraftShape = draft
+  .replace(/^- 当前状态：.*\n\n/m, '')
+  .replace(
+    '- 出场转场：待逐边界审核。',
+    '- 出场边界：待 scene-transition-v3 整批提案；不得以 none 或渲染器回退代替。',
+  )
+  .replace(
+    '- 出场转场：终端干净保持，无出场转场。',
+    '- 出场边界：待 scene-transition-v3 整批提案；终端干净保持，无出场转场。',
+  );
+const currentShapeFinalized = finalizeStoryboardMarkdown({
+  draftMarkdown: currentDraftShape,
+  transitionRows: [row],
+  authorizationMode: 'one_click',
+});
+assert.match(currentShapeFinalized, /均已按一键策略授权/);
+assert.match(currentShapeFinalized, /映射键 `S01→S02`，`paper-wipe` \/ 12 帧/);
+assert.ok(!currentShapeFinalized.includes('待 scene-transition-v3 整批提案'));
 
 const authoritativeTitleFinalized = finalizeStoryboardMarkdown({
   draftMarkdown: draft.replace('习得性无助', '酒神 vs 日神'),
@@ -256,14 +275,14 @@ try {
         user_has_reviewed_complete_map: true,
         row_by_row_approval_performed: false,
       } : null,
-      active_storyboard: {
+      storyboard_draft: {
+        status: 'direction_locked_visible_text_pending',
         path: draftRelative,
         checksum_sha256: sha256(draftBytes),
-        prior_approved_storyboard: null,
+        direct_first_shot_contract: 'direct-first-shot-v1',
       },
-      storyboard_construction: {draft_checksum_sha256: sha256(draftBytes)},
-      storyboard_review: null,
-      storyboard_qa: null,
+      active_storyboard: null,
+      storyboard_construction: {},
       blockers: [],
     };
     fs.writeFileSync(statePath, jsonBytes(state));
@@ -348,6 +367,8 @@ try {
   assert.equal(builtProposal.presentation.presented_at, null);
   assert.equal(builtProposal.presentation.exact_message, null);
   assert.equal(builtProposal.presentation.user_has_reviewed_specific_map, false);
+  assert.equal(Object.hasOwn(builtProposal.fixed_exemptions, 'opening'), false);
+  assert.equal(builtProposal.fixed_exemptions.terminal.source_shot_id, 'S02');
   assert.equal(builtState.transition_review.presented_at, null);
   assert.equal(builtState.transition_review.exact_presentation_message, null);
   assert.equal(builtState.transition_review.user_has_reviewed_specific_map, false);

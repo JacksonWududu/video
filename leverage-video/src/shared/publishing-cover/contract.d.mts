@@ -9,6 +9,8 @@ export function validatePublishingCoverPackage(
     gate1TopicSha256: string;
     gate1ExactThemeWords: string;
     gate2ScriptSha256: string;
+    episodeId?: string;
+    overrideToPhase?: 'awaiting_video_style_selection' | 'awaiting_post_cover_selection_batch';
     canonicalWhiteCatReferencePath: string;
     canonicalWhiteCatReferenceSha256: string;
   },

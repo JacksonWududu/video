@@ -9,7 +9,7 @@ import {
 const bindingInput = () => ({
   shotId: 'S03',
   selectedSourcePath: '/Users/jackson/Videos/source.mp4',
-  archivedAsset: 'leverage-video/src/topic9/assets/video/user-source/s03-local-source-v01.mp4',
+  archivedAsset: 'leverage-video/src/episode-test/assets/video/user-source/s03-local-source-v01.mp4',
   checksumSha256: 'a'.repeat(64),
   media: {
     video_streams: 1,

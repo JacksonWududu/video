@@ -137,6 +137,7 @@ class RendererIntegrationTests(unittest.TestCase):
             )
             evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
             self.assertEqual(evidence["contract_version"], "whiteboard-render-evidence-v1")
+            self.assertEqual(evidence["drawing_overlay_policy"], "canvas-only-no-hand-pen-cursor-v1")
             self.assertEqual(evidence["media"]["width"], 1920)
             self.assertEqual(evidence["media"]["height"], 1080)
             self.assertEqual(evidence["media"]["fps"], 30)

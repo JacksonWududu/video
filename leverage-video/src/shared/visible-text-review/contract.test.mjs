@@ -14,11 +14,11 @@ const SHA = (character) => character.repeat(64);
 
 const buildFixture = () => {
   const storyboard = {
-    path: 'leverage-video/src/topic8/assets/narration/storyboard-draft-v1.md',
+    path: 'leverage-video/src/episode-test/assets/narration/storyboard-draft-v1.md',
     checksum_sha256: SHA('a'),
   };
   const visualDirectionReviewBinding = {
-    path: 'leverage-video/src/topic8/schema/per-shot-visual-direction-review-v3.json',
+    path: 'leverage-video/src/episode-test/schema/per-shot-visual-direction-review-v3.json',
     checksum_sha256: SHA('b'),
     presented_map_sha256: SHA('c'),
   };
@@ -91,7 +91,7 @@ test('concise-summary policy accepts compact conclusions and rejects spoken pros
 test('pending review covers the complete visible-text map once, without row approvals', () => {
   const fixture = buildFixture();
   const review = buildPendingVisibleTextBatchReview({
-    episodeWorkspace: 'leverage-video/src/topic8',
+    episodeWorkspace: 'leverage-video/src/episode-test',
     ...fixture,
     presentedAt: '2026-08-24T14:00:00+08:00',
     exactMessage: '以下为全部镜头的可见文字，请整批审核。',
@@ -109,7 +109,7 @@ test('pending review covers the complete visible-text map once, without row appr
 test('one explicit decision approves the whole checksum-bound map', () => {
   const fixture = buildFixture();
   const pending = buildPendingVisibleTextBatchReview({
-    episodeWorkspace: 'leverage-video/src/topic8',
+    episodeWorkspace: 'leverage-video/src/episode-test',
     ...fixture,
     presentedAt: '2026-08-24T14:00:00+08:00',
     exactMessage: '以下为全部镜头的可见文字，请整批审核。',
@@ -125,7 +125,7 @@ test('one explicit decision approves the whole checksum-bound map', () => {
   assert.equal(approved.approval.exact_message, '批准全部可见文字');
   assert.ok(approved.rows.every((row) => !Object.hasOwn(row, 'approval')));
   assert.equal(validateVisibleTextBatchReview(approved, {
-    episodeWorkspace: 'leverage-video/src/topic8',
+    episodeWorkspace: 'leverage-video/src/episode-test',
     ...fixture,
     requireApproved: true,
   }).result, 'pass');
@@ -134,7 +134,7 @@ test('one explicit decision approves the whole checksum-bound map', () => {
 test('stale, partial, generic, or changed visible-text maps fail closed', () => {
   const fixture = buildFixture();
   const pending = buildPendingVisibleTextBatchReview({
-    episodeWorkspace: 'leverage-video/src/topic8',
+    episodeWorkspace: 'leverage-video/src/episode-test',
     ...fixture,
     presentedAt: '2026-08-24T14:00:00+08:00',
     exactMessage: '以下为全部镜头的可见文字，请整批审核。',
@@ -160,7 +160,7 @@ test('stale, partial, generic, or changed visible-text maps fail closed', () => 
   partial.presented_map_sha256 = buildVisibleTextBatchMapSha256(partial);
   assert.throws(
     () => validateVisibleTextBatchReview(partial, {
-      episodeWorkspace: 'leverage-video/src/topic8',
+      episodeWorkspace: 'leverage-video/src/episode-test',
       ...fixture,
       requireApproved: false,
     }),
@@ -171,7 +171,7 @@ test('stale, partial, generic, or changed visible-text maps fail closed', () => 
   changed.presented_map_sha256 = buildVisibleTextBatchMapSha256(changed);
   assert.throws(
     () => validateVisibleTextBatchReview(changed, {
-      episodeWorkspace: 'leverage-video/src/topic8',
+      episodeWorkspace: 'leverage-video/src/episode-test',
       ...fixture,
       requireApproved: false,
     }),
@@ -182,14 +182,14 @@ test('stale, partial, generic, or changed visible-text maps fail closed', () => 
 test('policy-authorized visual direction cannot substitute for batch text approval', () => {
   const fixture = buildFixture();
   const pending = buildPendingVisibleTextBatchReview({
-    episodeWorkspace: 'leverage-video/src/topic8',
+    episodeWorkspace: 'leverage-video/src/episode-test',
     ...fixture,
     presentedAt: '2026-08-24T14:00:00+08:00',
     exactMessage: '以下为全部镜头的可见文字，请整批审核。',
   });
   assert.throws(
     () => validateVisibleTextBatchReview(pending, {
-      episodeWorkspace: 'leverage-video/src/topic8',
+      episodeWorkspace: 'leverage-video/src/episode-test',
       ...fixture,
       requireApproved: true,
     }),

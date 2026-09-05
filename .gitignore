@@ -3,5 +3,7 @@
 /.codegraph/
 /.venv-edge-tts/
 /.venv-audio-validation/
+/.superpowers/
 /.cache/
 /work/
+/deliverables/

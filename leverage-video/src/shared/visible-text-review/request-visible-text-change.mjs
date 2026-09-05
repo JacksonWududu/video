@@ -12,6 +12,7 @@ import {
   buildStoryboardVisualRhythmMapSha256,
   validateStoryboardVisualRhythm,
 } from '../storyboard-visual-rhythm/contract.mjs';
+import {validateConciseSummaryVisibleText} from './contract.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPOSITORY_ROOT = path.resolve(HERE, '../../../..');
@@ -48,7 +49,24 @@ const nextNumberedPath = ({directory, pattern, format}) => {
   return format((numbers.length === 0 ? 0 : Math.max(...numbers)) + 1);
 };
 
-export const reviseStoryboardVisibleTextToNone = (markdown, shotId, nextDraftVersion) => {
+export const reviseStoryboardVisibleText = (
+  markdown,
+  shotId,
+  nextDraftVersion,
+  {mode = 'none', exactVisibleText = null, visibleTextPlacement = null} = {},
+) => {
+  if (!['none', 'required'].includes(mode)) fail('visible text mode must be none or required');
+  if (mode === 'none') {
+    if (exactVisibleText !== null || visibleTextPlacement !== null) {
+      fail('visible text none requires null exact copy and placement');
+    }
+  } else {
+    validateConciseSummaryVisibleText(exactVisibleText, {shotId});
+    if (typeof visibleTextPlacement !== 'string' || visibleTextPlacement.trim() === '') {
+      fail('required visible text placement is empty');
+    }
+    if (exactVisibleText.includes('|')) fail('visible text must not contain a Markdown table separator');
+  }
   const lines = markdown.split('\n');
   const matchingSummaryRows = lines
     .map((line, index) => ({line, index}))
@@ -57,7 +75,9 @@ export const reviseStoryboardVisibleTextToNone = (markdown, shotId, nextDraftVer
   const summary = matchingSummaryRows[0];
   const cells = summary.line.split('|');
   if (cells.length !== 9) fail(`${shotId} Summary row must contain seven columns`);
-  cells[6] = ' 无 ';
+  cells[6] = mode === 'none'
+    ? ' 无 '
+    : ` ${exactVisibleText.replaceAll('\n', '<br>')} `;
   lines[summary.index] = cells.join('|');
 
   let next = lines.join('\n');
@@ -66,16 +86,26 @@ export const reviseStoryboardVisibleTextToNone = (markdown, shotId, nextDraftVer
   const followingSection = next.indexOf('\n## ', sectionStart + 4);
   const sectionEnd = followingSection < 0 ? next.length : followingSection;
   const section = next.slice(sectionStart, sectionEnd);
-  const matches = section.match(/^- 可见文字：[\s\S]*?(?=^- 本地视频源：)/gm) ?? [];
+  const matches = section.match(/^- 可见文字：[\s\S]*?(?=^- )/gm) ?? [];
   if (matches.length !== 1) fail(`${shotId} detailed visible-text projection must appear exactly once`);
+  const placementSuffix = mode === 'required'
+    ? `${visibleTextPlacement.trim()}${/[。！？!?]$/u.test(visibleTextPlacement.trim()) ? '' : '。'}`
+    : null;
+  const revisedProjection = mode === 'none'
+    ? '- 可见文字：`none`\n'
+    : `- 可见文字：\`required\`；\`${exactVisibleText}\`；${placementSuffix}\n`;
   const revisedSection = section.replace(
-    /^- 可见文字：[\s\S]*?(?=^- 本地视频源：)/m,
-    '- 可见文字：`none`\n',
+    /^- 可见文字：[\s\S]*?(?=^- )/m,
+    revisedProjection,
   );
   next = `${next.slice(0, sectionStart)}${revisedSection}${next.slice(sectionEnd)}`;
   next = next.replace(/^(# .+分镜草案 v)\d+$/m, `$1${nextDraftVersion}`);
   return next;
 };
+
+export const reviseStoryboardVisibleTextToNone = (markdown, shotId, nextDraftVersion) => (
+  reviseStoryboardVisibleText(markdown, shotId, nextDraftVersion)
+);
 
 export const buildRevisedDirectionReview = ({
   priorReview,
@@ -84,6 +114,9 @@ export const buildRevisedDirectionReview = ({
   storyboardChecksumSha256,
   policySha256,
   authorizedAt,
+  visibleTextMode = 'none',
+  exactVisibleText = null,
+  visibleTextPlacement = null,
 }) => {
   if (priorReview?.contract_version !== 'per-shot-visual-direction-review-v3'
     || priorReview.status !== 'policy_authorized'
@@ -95,9 +128,20 @@ export const buildRevisedDirectionReview = ({
   const rows = next.rows.filter((row) => row.shot_id === shotId);
   if (rows.length !== 1) fail(`${shotId} visual-direction row must appear exactly once`);
   const row = rows[0];
-  row.visible_text_mode = 'none';
-  row.exact_visible_text = null;
-  row.visible_text_placement = null;
+  if (!['none', 'required'].includes(visibleTextMode)) fail('visible text mode must be none or required');
+  if (visibleTextMode === 'none') {
+    if (exactVisibleText !== null || visibleTextPlacement !== null) {
+      fail('visible text none requires null exact copy and placement');
+    }
+  } else {
+    validateConciseSummaryVisibleText(exactVisibleText, {shotId});
+    if (typeof visibleTextPlacement !== 'string' || visibleTextPlacement.trim() === '') {
+      fail('required visible text placement is empty');
+    }
+  }
+  row.visible_text_mode = visibleTextMode;
+  row.exact_visible_text = exactVisibleText;
+  row.visible_text_placement = visibleTextPlacement;
   next.presented_map_sha256 = buildPresentedMapSha256(next);
   return authorizeVisualDirectionRecommendationsOneClick(next, {policySha256, authorizedAt});
 };
@@ -174,7 +218,14 @@ export const rebindPolicyAuthorizedActionScheduleSet = ({
   return next;
 };
 
-const buildArtifacts = ({episodeWorkspace, shotId, exactMessage, requestedAt}) => {
+const buildArtifacts = ({
+  episodeWorkspace,
+  shotId,
+  exactMessage,
+  requestedAt,
+  exactVisibleText = null,
+  visibleTextPlacement = null,
+}) => {
   if (!/^S\d{2,}$/.test(shotId)) fail('shot ID is invalid');
   if (typeof exactMessage !== 'string' || exactMessage.trim() === '') fail('change request message is empty');
   if (typeof requestedAt !== 'string' || Number.isNaN(Date.parse(requestedAt))) fail('requested time is invalid');
@@ -223,10 +274,12 @@ const buildArtifacts = ({episodeWorkspace, shotId, exactMessage, requestedAt}) =
   });
   const nextDraftVersion = Number(nextDraftName.match(/v(\d+)\.md$/)[1]);
   const nextStoryboardRelative = `${episodeWorkspace}/assets/narration/${nextDraftName}`;
-  const nextStoryboardBytes = Buffer.from(reviseStoryboardVisibleTextToNone(
+  const visibleTextMode = exactVisibleText === null ? 'none' : 'required';
+  const nextStoryboardBytes = Buffer.from(reviseStoryboardVisibleText(
     priorStoryboardBytes.toString('utf8'),
     shotId,
     nextDraftVersion,
+    {mode: visibleTextMode, exactVisibleText, visibleTextPlacement},
   ));
 
   const schemaDirectory = path.join(workspaceDirectory, 'schema');
@@ -243,6 +296,9 @@ const buildArtifacts = ({episodeWorkspace, shotId, exactMessage, requestedAt}) =
     storyboardChecksumSha256: sha256(nextStoryboardBytes),
     policySha256: state.one_click_approval_policy?.policy_sha256,
     authorizedAt: requestedAt,
+    visibleTextMode,
+    exactVisibleText,
+    visibleTextPlacement,
   });
   const nextDirectionBytes = jsonBytes(nextDirection);
 
@@ -295,32 +351,41 @@ const buildArtifacts = ({episodeWorkspace, shotId, exactMessage, requestedAt}) =
   });
   const nextActionScheduleBytes = jsonBytes(nextActionScheduleSet);
 
-  const priorClassificationPath = resolveRootRelative(
-    state.transition_boundary_classification?.path,
-    'transition boundary classification',
-  );
-  const priorClassificationBytes = fs.readFileSync(priorClassificationPath);
-  if (sha256(priorClassificationBytes) !== state.transition_boundary_classification.checksum_sha256) {
-    fail('transition boundary classification checksum is stale');
+  let nextClassification = null;
+  if (state.transition_boundary_classification != null) {
+    const priorClassificationPath = resolveRootRelative(
+      state.transition_boundary_classification.path,
+      'transition boundary classification',
+    );
+    const priorClassificationBytes = fs.readFileSync(priorClassificationPath);
+    if (sha256(priorClassificationBytes) !== state.transition_boundary_classification.checksum_sha256) {
+      fail('transition boundary classification checksum is stale');
+    }
+    const nextClassificationName = nextNumberedPath({
+      directory: schemaDirectory,
+      pattern: /^scene-transition-boundary-classification-v1-revision-(\d+)\.json$/,
+      format: (version) => `scene-transition-boundary-classification-v1-revision-${String(version).padStart(2, '0')}.json`,
+    });
+    const nextClassificationRelative = `${episodeWorkspace}/schema/${nextClassificationName}`;
+    const nextClassificationValue = JSON.parse(priorClassificationBytes);
+    nextClassificationValue.storyboard_checksum_sha256 = sha256(nextStoryboardBytes);
+    nextClassificationValue.visual_direction_review_checksum_sha256 = sha256(nextDirectionBytes);
+    nextClassificationValue.visual_direction_presented_map_sha256 = nextDirection.presented_map_sha256;
+    nextClassification = {
+      path: nextClassificationRelative,
+      bytes: jsonBytes(nextClassificationValue),
+      value: nextClassificationValue,
+    };
   }
-  const nextClassificationName = nextNumberedPath({
-    directory: schemaDirectory,
-    pattern: /^scene-transition-boundary-classification-v1-revision-(\d+)\.json$/,
-    format: (version) => `scene-transition-boundary-classification-v1-revision-${String(version).padStart(2, '0')}.json`,
-  });
-  const nextClassificationRelative = `${episodeWorkspace}/schema/${nextClassificationName}`;
-  const nextClassification = JSON.parse(priorClassificationBytes);
-  nextClassification.storyboard_checksum_sha256 = sha256(nextStoryboardBytes);
-  nextClassification.visual_direction_review_checksum_sha256 = sha256(nextDirectionBytes);
-  nextClassification.visual_direction_presented_map_sha256 = nextDirection.presented_map_sha256;
-  const nextClassificationBytes = jsonBytes(nextClassification);
 
   const nextState = structuredClone(state);
   nextState.superseded_artifacts = [
     ...(nextState.superseded_artifacts ?? []),
     {
       record_type: 'visible_text_candidate_revision',
-      reason: `user_removed_visible_text_from_${shotId}`,
+      reason: visibleTextMode === 'none'
+        ? `user_removed_visible_text_from_${shotId}`
+        : `user_revised_visible_text_for_${shotId}`,
       requested_at: requestedAt,
       exact_user_request: exactMessage.trim(),
       shot_id: shotId,
@@ -364,15 +429,18 @@ const buildArtifacts = ({episodeWorkspace, shotId, exactMessage, requestedAt}) =
   };
   delete nextState.storyboard_construction.final_storyboard_path;
   delete nextState.storyboard_construction.final_storyboard_checksum_sha256;
-  nextState.transition_boundary_classification = {
-    status: 'ready_after_visible_text_approval',
-    contract_version: nextClassification.contract_version,
-    path: nextClassificationRelative,
-    checksum_sha256: sha256(nextClassificationBytes),
-    ordinary_boundary_count: nextClassification.rows.length,
-    storyboard_checksum_sha256: nextClassification.storyboard_checksum_sha256,
-    visual_direction_presented_map_sha256: nextClassification.visual_direction_presented_map_sha256,
-  };
+  nextState.transition_boundary_classification = nextClassification === null
+    ? null
+    : {
+        status: 'ready_after_visible_text_approval',
+        contract_version: nextClassification.value.contract_version,
+        path: nextClassification.path,
+        checksum_sha256: sha256(nextClassification.bytes),
+        ordinary_boundary_count: nextClassification.value.rows.length,
+        storyboard_checksum_sha256: nextClassification.value.storyboard_checksum_sha256,
+        visual_direction_presented_map_sha256:
+          nextClassification.value.visual_direction_presented_map_sha256,
+      };
   nextState.transition_review = null;
   nextState.active_storyboard = buildRevisedDraftActiveStoryboardBinding({
     path: nextStoryboardRelative,
@@ -414,7 +482,7 @@ const buildArtifacts = ({episodeWorkspace, shotId, exactMessage, requestedAt}) =
       bytes: nextActionScheduleBytes,
       value: nextActionScheduleSet,
     },
-    nextClassification: {path: nextClassificationRelative, bytes: nextClassificationBytes},
+    nextClassification,
     nextState: {path: `${episodeWorkspace}/schema/episode-state.json`, bytes: jsonBytes(nextState)},
   };
 };
@@ -426,7 +494,7 @@ const writeArtifacts = (artifacts) => {
     artifacts.nextRhythm,
     artifacts.nextActionSchedule,
     artifacts.nextClassification,
-  ];
+  ].filter(Boolean);
   for (const artifact of newFiles) {
     const target = resolveRootRelative(artifact.path, `${artifact.path} output`, {mustExist: false});
     if (fs.existsSync(target)) fail(`refusing to overwrite ${artifact.path}`);
@@ -454,14 +522,30 @@ const writeArtifacts = (artifacts) => {
 
 const isCli = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (isCli) {
-  const [episodeWorkspace, shotId, exactMessage, requestedAt, mode] = process.argv.slice(2);
+  const [
+    episodeWorkspace,
+    shotId,
+    exactMessage,
+    requestedAt,
+    mode,
+    exactVisibleText,
+    visibleTextPlacement,
+  ] = process.argv.slice(2);
   if (!episodeWorkspace || !shotId || !exactMessage || !requestedAt
-    || !['--dry-run', '--apply'].includes(mode)) {
-    console.error('usage: node request-visible-text-change.mjs <episode-workspace> <shot-id> <exact-message> <ISO-8601> <--dry-run|--apply>');
+    || !['--dry-run', '--apply'].includes(mode)
+    || ((exactVisibleText === undefined) !== (visibleTextPlacement === undefined))) {
+    console.error('usage: node request-visible-text-change.mjs <episode-workspace> <shot-id> <exact-message> <ISO-8601> <--dry-run|--apply> [<exact-visible-text> <visible-text-placement>]');
     process.exit(2);
   }
   try {
-    const artifacts = buildArtifacts({episodeWorkspace, shotId, exactMessage, requestedAt});
+    const artifacts = buildArtifacts({
+      episodeWorkspace,
+      shotId,
+      exactMessage,
+      requestedAt,
+      exactVisibleText: exactVisibleText ?? null,
+      visibleTextPlacement: visibleTextPlacement ?? null,
+    });
     if (mode === '--apply') writeArtifacts(artifacts);
     process.stdout.write(`${JSON.stringify({
       result: artifacts.result,
@@ -482,10 +566,12 @@ if (isCli) {
         path: artifacts.nextActionSchedule.path,
         checksum_sha256: sha256(artifacts.nextActionSchedule.bytes),
       },
-      transition_boundary_classification: {
-        path: artifacts.nextClassification.path,
-        checksum_sha256: sha256(artifacts.nextClassification.bytes),
-      },
+      transition_boundary_classification: artifacts.nextClassification === null
+        ? null
+        : {
+            path: artifacts.nextClassification.path,
+            checksum_sha256: sha256(artifacts.nextClassification.bytes),
+          },
       next_phase: 'visual_direction_review_approved',
     }, null, 2)}\n`);
   } catch (error) {

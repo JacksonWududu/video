@@ -19,6 +19,7 @@ from PIL import Image
 import stream_render as sr
 from region_stream_renderer import RegionStreamRenderer
 from whiteboard_contract import (
+    DRAWING_OVERLAY_POLICY,
     FPS,
     HEIGHT,
     MIN_FINAL_HOLD_FRAMES,
@@ -36,7 +37,6 @@ from whiteboard_contract import (
 
 FFMPEG = Path("/opt/homebrew/bin/ffmpeg")
 FFPROBE = Path("/opt/homebrew/bin/ffprobe")
-DEFAULT_HAND = Path(__file__).resolve().parent.parent / "assets" / "drawing-hand.png"
 
 
 def _path_record(path: Path) -> str:
@@ -63,14 +63,6 @@ def _to_upstream(annotation: dict) -> dict:
                 "durationMs": max(1, round((item["end_frame"] - item["start_frame"]) * 1000 / FPS)),
                 "maskPaddingPx": 0,
                 "protectedRegions": item.get("protected_regions", []),
-            },
-            "handPath": {
-                "start": [item["region"]["x"] + item["region"]["width"] // 2, item["region"]["y"]],
-                "end": [
-                    item["region"]["x"] + item["region"]["width"] // 2,
-                    item["region"]["y"] + item["region"]["height"],
-                ],
-                "easing": "easeInOut",
             },
         })
     return {
@@ -138,9 +130,7 @@ def main() -> int:
     parser.add_argument("--preview", required=True)
     parser.add_argument("--output", required=True)
     parser.add_argument("--evidence", required=True)
-    parser.add_argument("--hand", default=str(DEFAULT_HAND))
     parser.add_argument("--ink-path", choices=("grid", "skeleton"), default="grid")
-    parser.add_argument("--bare-tip", action="store_true")
     args = parser.parse_args()
 
     if not FFMPEG.is_file() or not FFPROBE.is_file():
@@ -171,19 +161,15 @@ def main() -> int:
         fps=FPS,
         cap_long_edge=WIDTH,
         grid_edge=10,
-        target_hand_height=360,
         canvas_hex="#F5EBD7",
         ink_path_mode=args.ink_path,
         color_fill="contour-wipe",
         pause_mode="off",
     )
-    hand = Path(args.hand).resolve(strict=True)
     renderer = RegionStreamRenderer(
         normalized_bgr,
         _to_upstream(annotation),
         config,
-        hand,
-        args.bare_tip,
     )
     if (renderer.out_w, renderer.out_h) != (WIDTH, HEIGHT):
         raise RuntimeError("reviewed renderer did not preserve the exact 1920x1080 canvas")
@@ -224,6 +210,7 @@ def main() -> int:
     evidence = {
         "contract_version": "whiteboard-render-evidence-v1",
         "visual_generation_route": ROUTE_ID,
+        "drawing_overlay_policy": DRAWING_OVERLAY_POLICY,
         "shot_id": annotation["shot_id"],
         "source_image": {"path": _path_record(source), "sha256": sha256_file(source)},
         "normalized_image": {"path": _path_record(normalized), "sha256": sha256_file(normalized)},

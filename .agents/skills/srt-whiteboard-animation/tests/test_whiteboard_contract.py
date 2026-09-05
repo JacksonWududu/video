@@ -67,6 +67,31 @@ def valid_annotation(scene_class="narrative_illustration"):
     }
 
 
+def valid_render_evidence():
+    artifact = {"path": "work/example.bin", "sha256": "a" * 64}
+    return {
+        "contract_version": "whiteboard-render-evidence-v1",
+        "visual_generation_route": "srt-whiteboard-animation",
+        "drawing_overlay_policy": "canvas-only-no-hand-pen-cursor-v1",
+        "total_frames": 45,
+        "source_image": artifact,
+        "normalized_image": artifact,
+        "annotation": artifact,
+        "preview": artifact,
+        "clip": artifact,
+        "media": {
+            "width": 1920,
+            "height": 1080,
+            "fps": 30,
+            "codec": "h264",
+            "audio_streams": 0,
+            "frame_count": 45,
+            "full_frame_hold_verified_frames": 15,
+            "final_frame_verified": True,
+        },
+    }
+
+
 def visual_direction_review(annotation):
     mode = annotation["visible_text_mode"]
     exact = annotation["approved_visible_text"][0] if mode == "required" else None
@@ -118,6 +143,13 @@ def validate_bound(annotation, review=None):
 
 
 class WhiteboardContractTests(unittest.TestCase):
+    def test_render_evidence_requires_canvas_only_overlay_policy(self):
+        evidence = valid_render_evidence()
+        self.assertEqual(CONTRACT.validate_render_evidence(evidence), evidence)
+        evidence.pop("drawing_overlay_policy")
+        with self.assertRaisesRegex(ValueError, "no hand, pen, cursor"):
+            CONTRACT.validate_render_evidence(evidence)
+
     def test_accepts_no_cat_narrative_annotation(self):
         self.assertEqual(validate_bound(valid_annotation())["shot_id"], "S01")
 

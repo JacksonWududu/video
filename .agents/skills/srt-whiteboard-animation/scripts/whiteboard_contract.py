@@ -16,6 +16,7 @@ FPS = 30
 MIN_FINAL_HOLD_FRAMES = 15
 ROUTE_ID = "srt-whiteboard-animation"
 ACTION_FAMILY_REPLACEMENT = "whiteboard-element-sequence-replaces-action-family-v1"
+DRAWING_OVERLAY_POLICY = "canvas-only-no-hand-pen-cursor-v1"
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
 
@@ -314,6 +315,8 @@ def validate_render_evidence(evidence: dict[str, Any]) -> dict[str, Any]:
         raise ContractError("unsupported whiteboard render evidence contract")
     if evidence.get("visual_generation_route") != ROUTE_ID:
         raise ContractError("whiteboard render evidence route mismatch")
+    if evidence.get("drawing_overlay_policy") != DRAWING_OVERLAY_POLICY:
+        raise ContractError("whiteboard render must contain no hand, pen, cursor, or drawing-tip overlay")
     for field in ("source_image", "normalized_image", "annotation", "preview", "clip"):
         item = evidence.get(field)
         if not isinstance(item, dict):

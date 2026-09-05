@@ -12,12 +12,12 @@
 
 | 阶段 | 调用节点 Skill | 主要工作 | 阶段结果 |
 |---|---|---|---|
-| 0. 工程 workspace | `$run-knowledge-video` 编排器 | 先判断是新视频还是恢复任务；新视频按 `topic1` 的目录骨架创建唯一的新 `topic<N>`，恢复任务只复用状态清单唯一匹配的原目录 | 得到隔离、可恢复且目录合规的单集工程 |
+| 0. 工程 workspace | `$run-knowledge-video` 编排器 | 先判断是新视频还是恢复任务；新视频只按本文件与状态机的目录合同创建唯一的新 `topic<N>`，不得读取或复制既有单集；恢复任务只复用状态清单唯一匹配的原目录 | 得到隔离、可恢复且目录合规的单集工程 |
 | 1. 选题与 Gate 1 | `$discover-video-topics` | 从当天或最近一期本地选题文件读取候选，或者只校验用户直接提供的题目；检查范围、证据、安全和白猫视觉可行性；幂等记录已选历史 | 锁定一个选题及其来源信息 |
 | 2. 定位现成口播稿 | `$run-knowledge-video` 编排器 | 按专业术语或主题关键词，在 `script-resource` 中确定唯一真实目录和唯一 `*_口播稿.txt`；拒绝软链接、缺失和歧义；保存同哈希版本化副本 | 得到可审计的口播候选稿 |
 | 3. 口播审计与 Gate 2 | `$validate-video-narration` | 用英文权威资料核验事实、证据边界和平台风险；记录候选稿第一完整句的准确字节范围供片头计时，不检查固定品牌措辞，也不从首句提取主题；展示完整原稿；不静默改写；等待用户明确批准准确文本 | 锁定不可变的最终口播稿及第一完整句 |
-| 4. 生成发布封面并选择视频风格 | `$imagegen-calligraphy-cover`、`$run-knowledge-video` | 先以开放、不受预设限制的方式独立生成 16:9、9:16、4:3 封面；Codex 按用户委托验收并展示，不请求封面批准。随后让用户从当前封面风格、三种核心风格和已注册全局风格中选择；选择当前封面风格时再问仅本期或加入全局 | 锁定发布封面包、不可变单集风格快照与 cohesion |
-| 5. 选择并验证音频来源 | `$validate-video-narration` | 风格、视觉密度与审批模式锁定后，显式选择 `colocated_voice` 或 `edge_tts`。前者只查找已确定主题目录顶层的 `voice.mp3` 或唯一 `voice*.mp3`；后者只用 `zh-CN-YunjianNeural`、`+20%` 生成版本化音频。两条路线均须完整解码、逐字转写对照并锁定真实时长与首句结束帧 | 锁定唯一旁白主音轨、来源证据、真实时长和首句结束帧 |
+| 4. 生成发布封面并批量选择制作配置 | `$imagegen-calligraphy-cover`、`$run-knowledge-video` | 先明确选择叙事白猫或固定居中白猫；再以开放方式独立生成 16:9、9:16、4:3 封面。封面包通过后，一次询问风格、条件性适用范围、视觉密度、审批模式和旁白来源；完整依赖链在内存中校验通过后，仅一次原子写入单集状态 | 锁定白猫模式、发布封面包、风格快照、密度、审批策略与音频授权 |
+| 5. 获取并验证已选音频来源 | `$validate-video-narration` | 按批量选择执行 `colocated_voice` 或 `edge_tts`。前者只查找已确定主题目录顶层的 `voice.mp3` 或唯一 `voice*.mp3`；后者只用 `zh-CN-YunjianNeural`、`+20%` 生成版本化音频。两条路线均须完整解码、逐字转写对照并锁定真实时长与首句结束帧 | 锁定唯一旁白主音轨、来源证据、真实时长和首句结束帧 |
 | 6. 音频定时分镜、视觉方向、整批可见文字、逐边界转场与 Review | `$build-video-storyboard` | 七列分镜表显示每镜精确秒数；v3 将同一风格与 profile/cohesion SHA 写入每镜，白猫仅走对应 ImageGen treatment；Ian 保持自身分层语法，只继承色板、明度与留白；发布封面不得进入任何行；所有可见文字整批批准 | 锁定分镜、视觉方向、整批文字、Ian 分层计划、转场与校验和 |
 | 7. 视觉素材生产 | `$produce-video-visuals` | 按已批路线逐项生产与 QA；ImageGen 消费完整单集风格快照，Ian 等固定路线仅适配色板、明度与留白；发布封面不进入生产队列或统一素材审核页 | 锁定逐项/逐包字节证据与批次清单 |
 | 8. 合成、最终字幕交付选择与交付 | `$assemble-video-master` | Ian 背景与元素固定不动，仅按口播节奏执行已批入场；镜内其他路线按已批映射，镜间 `scene-transition-v3` 独立执行；S01 与旁白从第 0 帧开始 | 按字幕选择完成视频交付事务 |
@@ -53,13 +53,13 @@ Ian 知识视频镜头固定走 `ian-knowledge-video-layered-scene-v2`：无字�
 
 视觉锁定后、episode 脚本与共享复用审计前，自动执行 `knowledge-video-sound-design-v2`：S01 第 0 帧、每个后续入镜边界（合并前镜转出与本镜开场）及全部镜内转场（含 `cut`）必须有声，只有片尾净停留豁免；其余可见事件逐项判定有声/静音，抽象口播与名词本身保持静音。先过语义、路线、材质、方向、能量、同步与遮蔽硬门槛，再按不可变策略排序，记录入选与落选原因；同一物理时刻仅可合并兼容事件为一个 cue group，覆盖事件仍全部有声但只渲染一次。必需结构 cue 不占按片长分级的可选预算；强音效间隔不少于 30 帧、任意 30 帧窗口最多 3 个组起点，平均间隔/长空档/音色多样性仅作 QA 提示。缺失角色只从实时核验的 Mixkit 官方页或 Pixabay 后备取得，授权不清即阻断。旁白增益恒 1，初始统一 SFX bus 为 1.12，首次整片渲染前先跑纯音频预检，超出 -1 dBFS 只降低整条 SFX bus；revoice 保留音效身份、选择、组、裁切、增益、归属与同步偏移，只重算帧位。
 
-Gate 2 后先生成并委托验收三张发布封面，再询问视频风格；之后才选择视觉密度、审批模式与旁白来源。旁白来源选择是限定音频获取方式的权限，不是内容审核 Gate。`colocated_voice` 只允许确定性查找已解析主题目录顶层音频；`edge_tts` 只允许通过固定适配器调用 `edge-tts`，使用 `zh-CN-YunjianNeural` 与 `+20%`，缺失依赖或生成失败时阻断，绝不静默改走本地音频。音频验证后推进视觉方向；方向锁定后，必须先把完整可见文字清单集中展示并一次批准，才可推进逐边界转场；转场锁定后再推进 Storyboard Review。分镜版本获批并完成逐图 QA 后，one-click 必须生成绑定当前完整摘要、包含全部当前正文图片的统一 HTML 审核页；发布封面不得进入该页。任一正文图片改动都让旧页失效。只有当前页获批才推进公共合成与时长锁定，然后必须停在最终字幕交付选择：`1. 无字幕；2. 有字幕；3. 有字幕跟无字幕的视频都有`。未收到明确选择不得渲染。
+Gate 2 后先生成并委托验收三张发布封面，再一次询问视频风格、仅在封面派生风格下必填的适用范围、视觉密度、审批模式与旁白来源。所有子选择复用用户同一条完整回复和时间，先按现有 SHA-256 依赖顺序全部校验，再一次写入 `episode-state.json`；缺失、歧义或失效时不得落入任何部分选择状态。旁白来源选择是限定音频获取方式的权限，不是内容审核 Gate。`colocated_voice` 只允许确定性查找已解析主题目录顶层音频；`edge_tts` 只允许通过固定适配器调用 `edge-tts`，使用 `zh-CN-YunjianNeural` 与 `+20%`，缺失依赖或生成失败时阻断，绝不静默改走本地音频。音频验证后推进视觉方向；方向锁定后，必须先把完整可见文字清单集中展示并一次批准，才可推进逐边界转场；转场锁定后再推进 Storyboard Review。分镜版本获批并完成逐图 QA 后，one-click 必须生成绑定当前完整摘要、包含全部当前正文图片的统一 HTML 审核页；发布封面不得进入该页。任一正文图片改动都让旧页失效。只有当前页获批才推进公共合成与时长锁定，然后必须停在最终字幕交付选择：`1. 无字幕；2. 有字幕；3. 有字幕跟无字幕的视频都有`。未收到明确选择不得渲染。
 
 标准旁白与 revoice 的用户原始音频统一存入 `assets/audio/user-source/` 的版本化文件；旁白母带及派生音频存于 `assets/audio/`。不得创建 episode 顶层 `audio/`。
 
 ## 工程目录约束
 
-每个全新视频必须在 `leverage-video/src` 下创建一个全新的 `topic<N>` workspace；`N` 取现有 `topic数字` 的最大编号加一。`topic1` 只作为目录结构参考，不复制其中的文件，也不把新视频写回 `topic1`。恢复已有视频时，必须根据 `schema/episode-state.json` 唯一定位并复用原 workspace，不因失败或回滚另建目录。
+每个全新视频必须在 `leverage-video/src` 下创建一个全新的 `topic<N>` workspace；`N` 取现有直接子目录名中 `topic数字` 的最大编号加一，没有匹配目录时从 1 开始。只按下列合同创建空目录与本期文件，不得把任何既有单集当模板、读取其内容或复制其文件。恢复已有视频时，必须根据 `schema/episode-state.json` 唯一定位并复用原 workspace，不因失败或回滚另建目录。
 
 该约束适用于本项目中任何 Skill 或普通对话发起的知识视频单集产物操作，不只适用于 `$run-knowledge-video`。单独调用节点 Skill 时，必须明确指定或唯一解析已有单集 workspace；零个或多个匹配都要停止询问，不能猜测或另建便利目录。Skill、`AGENTS.md`、共享 Remotion 基础设施、依赖、复用工具和仓库级文档属于工程维护文件，继续保存在各自所属位置。
 
@@ -75,17 +75,20 @@ leverage-video/src/topic<N>/
 └── docs/            # 其余非代码文档、审计与制作记录
 ```
 
-禁止为了方便在单集工程顶层新增 `work`、`output`、`temp`、`render`、`misc` 等目录。只有工具或明确的素材族确实需要时，才能在上述正确类别内建立用途明确的子目录，并把路径记录到 `schema/episode-state.json`。开始阶段工作前、每次阶段交接时以及声明完成前，都必须运行 `python3 .agents/skills/run-knowledge-video/scripts/validate_episode_workspace.py <episode-workspace>`；非零结果立即阻断，校验器不得自动移动或删除文件。
+禁止为了方便在单集工程顶层新增 `work`、`output`、`temp`、`render`、`misc` 等目录。只有工具或明确的素材族确实需要时，才能在上述正确类别内建立用途明确的子目录，并把路径记录到 `schema/episode-state.json`。开始阶段工作前、每次阶段交接时以及声明完成前，都必须运行 `python3 .agents/skills/run-knowledge-video/scripts/validate_episode_workspace.py <episode-workspace>`；非零结果立即阻断，除非全部当前项目机械违规被状态机规定的、当前且哈希绑定的一次性用户明确放行覆盖，并由对应校验器返回 `pass_with_user_override`。校验器不得自动移动或删除文件。
+
+机械门禁始终先执行并保存真实结果。失败后，用户可明确点名放行当前门禁一次；凭证只绑定当前单集、门禁、文件哈希和一次阶段转换，推进时即消费，后续不可复用。详见状态机 `one-time-explicit-user-mechanical-gate-override-v1`。
 
 ## 核心锁定规则
 
 - 口播稿执行 `local-script-resource-only-v1`：必须来自 `script-resource` 中唯一定位的现成 `*_口播稿.txt`，来源字段固定为 `script_resource`；缺失时不接受聊天中粘贴的终稿绕过查找，也不自行生成或改写。
 - 用户可自行修改已解析原稿；Codex 仅在用户明确要求修改该确切路径并取得所需文件权限后写入。聊天中粘贴的新稿仅是修改建议。未完成 episode 检测到源文件校验和变化时，保存新版本候选并回到 Gate 2，使旧审计、批准、锁稿、音频验证及全部下游依赖失效；已完成 episode 不受后续源文件变化影响。
+- 口播改稿建议、已获授权的源稿修订及 Gate 2 语言审计执行[修饰语约束](../../validate-video-narration/references/script-audit-contract.md#modifier-discipline)：禁止使用无意义的、装饰性的状语、补语；按上下文判断，保留承载事实、逻辑限定和动作结果的表达，不按词性或词表一概删除。只要求输出改稿时，不写源文件、不替换锁稿。
 - 标准流程须先记录 `narration-audio-source-selection-v1`。`colocated_voice` 只检查已解析主题目录顶层，不扫描相邻目录；`edge_tts` 只使用固定 `zh-CN-YunjianNeural`、`+20%` 配置及版本化产物。任何路线失败均阻断，不能静默切换。换音色派生版本仍不调用 TTS。
 - 换音色派生版本只接受用户明确点名并授权的同主题目录顶层 `voice*.mp3`。口述文字变化会退出派生分支，须将新文字写入并唯一定位本地原稿后启动全新 `new_video`；视觉顺序、锁定白猫/路线映射或任何图片字节变化则退出派生分支，转入普通视觉修订流程。
 - 通过验证的旁白主音轨是分镜、字幕、动作状态、转场和成片时长的唯一依据。
 - 口播首句没有固定品牌格式门禁。只保存其准确字节范围与候选校验和，用于旁白校验和片头结束帧；不从首句提取主题。
-- 每期在 Gate 2 后用 `publishing-cover-generation-v1` 生成独立构图的 16:9、9:16、4:3 发布封面。三者只供发布与可选风格派生；不得进入分镜、正文素材队列、统一视觉审核页、Remotion、成片前缀、master 或内部 QA 角色。`direct-first-shot-v1` 让 S01 与旁白从第 0 帧开始；`OPEN-00`、旧共享 `cover.png`、`opening.mp4` 和 `topicCover.png` 仅作完成历史，不得被新流程读取或消费。
+- 每期在 Gate 2 后先用 `publishing-cover-generation-policy-v2` 明确选择 `narrative_adaptive` 或 `fixed_centered_reference`，再用 `publishing-cover-generation-v1` 生成独立构图的 16:9、9:16、4:3 发布封面。固定模式的白猫形态、姿势和配饰不变，按各画幅安全框居中等比缩放。三者只供发布与可选风格派生；不得进入分镜、正文素材队列、统一视觉审核页、Remotion、成片前缀、master 或内部 QA 角色。`direct-first-shot-v1` 让 S01 与旁白从第 0 帧开始；`OPEN-00`、旧共享 `cover.png`、`opening.mp4` 和 `topicCover.png` 仅作完成历史，不得被新流程读取或消费。
 - 锁定口播及分镜中的字幕源文本保持原样；字幕 cue 统一删除所有 Unicode `General_Category=P*` 标点并规范空白，保存 `source_text` 与 `display_text` 两份证据。`caption_free_only` 只把 cue 用作计时/审计数据；`captioned_only` 用唯一版本化字幕组件按真实旁白时间把精确 `display_text` 烧录在底部安全区；`both` 从同一公共合成分别生成两套，除字幕层外的输入、时序、音频、BGM、视觉顺序必须一致。所有 MP4 都保持零字幕流且不交付字幕 sidecar。经分镜批准的数据标签、对比/警示标题和封面文字不属于旁白字幕。
 - Per-Shot Visual Direction Review v3 只记录路线解析后的可见文字候选。`required` 候选须按 `concise-summary-visible-text-v1` 写成简练总结：最多两行、总计不超过 28 个非空白字符，并拒绝口语称呼、填充语、解释性引导和句末口语助词。随后以 `visible-text-batch-review-v1` 把全部镜头一次展示、一次批准；禁止逐镜文字批准，one-click 也必须停。白猫 `imagegen`、宣纸和本地视频仍强制 `none`。视觉阶段及 assembly 不得新建、改写或删除已批文字。
 - Ian 活动生产包为 `ian-knowledge-video-layered-scene-v2`；新/修订装配使用 `ian-layered-entry-effects-renderer-v2`。入场图绑定包、节奏、SVG/WAV 字节与固定策略 SHA。轻落位最多 10 px、末帧归零；边缘不足 12 px 改纯渐显；描边与路径生长共用一种运动语言；每镜最多两种运动语言。多层镜头仅 2–3 个关键层有音效，其余静音；同源单镜最多两次，相邻有声音色不同。`scene-transition-v3` 仍独占镜头边界。旧合同仅供已完成历史项目只读。

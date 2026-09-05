@@ -19,10 +19,12 @@ const REPOSITORY_ROOT = path.resolve(HERE, '../../../..');
 const REVIEW_PHASE = 'awaiting_precomposition_visual_review';
 const REVIEW_CONTRACT = 'final-production-asset-review-package-v1';
 const DIRECT_FIRST_SHOT_CONTRACT = 'direct-first-shot-v1';
+const LEGACY_OPENING_COVER_CONTRACT = 'cover-only-v1';
 const CANVAS_WIDTH = 1920;
 const CANVAS_HEIGHT = 1080;
 const ASSETS_PER_PAGE = 12;
 const SHA256 = /^[a-f0-9]{64}$/;
+const WAIVED_PENDING_FINAL_REVIEW_STATUS = 'qa_failed_but_waived_once_pending_final_review';
 const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp']);
 
 export class FinalProductionAssetReviewError extends Error {
@@ -158,6 +160,38 @@ const inspectImage = async (file, label) => {
 
 const sameJson = (left, right) => canonicalBytes(left).equals(canonicalBytes(right));
 
+const mechanicalOverrideProjection = (asset) => ({
+  ...(asset.mechanical_qa_result === undefined
+    ? {} : {mechanical_qa_result: asset.mechanical_qa_result}),
+  ...(asset.user_mechanical_gate_override_result === undefined
+    ? {} : {user_mechanical_gate_override_result: asset.user_mechanical_gate_override_result}),
+  ...((asset.user_mechanical_gate_override_sha256
+      ?? asset.user_mechanical_gate_override?.override_sha256) === undefined
+    ? {} : {
+      user_mechanical_gate_override_sha256: asset.user_mechanical_gate_override_sha256
+        ?? asset.user_mechanical_gate_override.override_sha256,
+    }),
+});
+
+const validateMechanicalDisposition = (asset, label) => {
+  const evidence = mechanicalOverrideProjection(asset);
+  const hasEvidence = Object.keys(evidence).length > 0;
+  if (asset.qa_status === WAIVED_PENDING_FINAL_REVIEW_STATUS) {
+    if (asset.mechanical_qa_result !== 'failed_but_waived_once'
+        || asset.user_mechanical_gate_override_result !== 'pass_with_user_override'
+        || !SHA256.test(
+          asset.user_mechanical_gate_override_sha256
+            ?? asset.user_mechanical_gate_override?.override_sha256
+            ?? '',
+        )) {
+      fail(`${label} mechanical override evidence is incomplete`);
+    }
+    return true;
+  }
+  if (hasEvidence) fail(`${label} ordinary QA status cannot carry mechanical override evidence`);
+  return false;
+};
+
 const completeFinalReviewProjection = (review) => ({
   contract_version: 'visual-asset-review-v3',
   mode: 'one_click_final_review_v1',
@@ -168,8 +202,8 @@ const completeFinalReviewProjection = (review) => ({
     path: asset.path,
     checksum_sha256: asset.checksum_sha256,
     qa_status: asset.qa_status,
-    ...(asset.static_spread_review === undefined
-      ? {} : {static_spread_review: asset.static_spread_review}),
+    ...mechanicalOverrideProjection(asset),
+    ...(asset.static_spread_review === undefined ? {} : {static_spread_review: asset.static_spread_review}),
     ...(asset.ian_layered_scene_package === undefined
       ? {} : {ian_layered_scene_package: asset.ian_layered_scene_package}),
     ...(asset.white_cat_anatomy_review === undefined
@@ -198,9 +232,13 @@ const validateCompleteFinalVisualReview = (review) => {
     ids.add(asset.asset_id);
     if (typeof asset.path !== 'string' || asset.path.trim() === ''
         || !SHA256.test(asset.checksum_sha256 ?? '')
-        || asset.qa_status !== 'qa_passed_pending_final_review') {
+        || ![
+          'qa_passed_pending_final_review',
+          WAIVED_PENDING_FINAL_REVIEW_STATUS,
+        ].includes(asset.qa_status)) {
       fail(`${asset.asset_id} has incomplete final-review evidence`);
     }
+    validateMechanicalDisposition(asset, asset.asset_id);
   });
   const expected = buildCompleteFinalVisualMapSha256(review);
   if (review.presented_map_sha256 !== expected) fail('one-click complete final visual map checksum is stale');
@@ -291,25 +329,19 @@ const validateCover = async (state) => {
   };
 };
 
-export const resolveFinalReviewTimelineOpening = ({activeQueue, state}) => {
-  if (!Array.isArray(activeQueue)) fail('active final-review queue is missing');
-  const flipbookCount = activeQueue.filter(isFlipbookRow).length;
-  if (flipbookCount !== 0 && flipbookCount !== activeQueue.length) {
-    fail('final review cannot mix flipbook and non-flipbook assets');
+const resolveTimelineOpeningContract = (state) => {
+  const declarations = [
+    state.storyboard_timing?.direct_first_shot_contract,
+    state.storyboard_draft?.direct_first_shot_contract,
+  ].filter((value) => value !== undefined && value !== null);
+  if (declarations.some((value) => value !== DIRECT_FIRST_SHOT_CONTRACT)) {
+    fail('storyboard direct-first-shot contract declaration is unsupported');
   }
-  if (flipbookCount === 0) return null;
-  if (activeQueue[0]?.shot_id !== 'S01'
-      || activeQueue[0]?.shot_start_frame !== 0
-      || state?.storyboard_draft?.direct_first_shot_contract !== DIRECT_FIRST_SHOT_CONTRACT) {
-    fail('flipbook final review must bind direct-first S01 at frame zero');
+  if (declarations.length > 0) return DIRECT_FIRST_SHOT_CONTRACT;
+  if (state.opening_cover?.contract_version === LEGACY_OPENING_COVER_CONTRACT) {
+    return LEGACY_OPENING_COVER_CONTRACT;
   }
-  return {
-    contract_version: DIRECT_FIRST_SHOT_CONTRACT,
-    first_shot_id: 'S01',
-    start_frame: 0,
-    fixed_opening_cover: false,
-    publishing_cover_included: false,
-  };
+  fail('episode lacks an explicit direct-first-shot or historical opening-cover contract');
 };
 
 const selectGrid = (count, fixedColumns = null) => {
@@ -423,7 +455,11 @@ const renderHtml = ({workspace, digest, phase, createdAt, assets, cover, pages, 
   const pageMarkup = pages.map((page, index) => `
     <figure><img src="${escapeHtml(htmlFileLink(page.absolute))}" alt="候选素材总览第 ${index + 1} 页"><figcaption>第 ${index + 1} 页 · ${page.asset_ids.map(escapeHtml).join('、')}</figcaption></figure>`).join('');
   const shotMarkup = [...byShot.entries()].map(([shotId, shotAssets]) => {
-    const cards = shotAssets.map((asset) => `
+    const cards = shotAssets.map((asset) => {
+      const overrideWarning = asset.user_mechanical_gate_override_result === 'pass_with_user_override'
+        ? `<p class="notice"><strong>机械门禁失败已获一次性用户放行。</strong><br>机械结果：${escapeHtml(asset.mechanical_qa_result)}<br>Override SHA-256：<span class="hash">${escapeHtml(asset.user_mechanical_gate_override_sha256)}</span></p>`
+        : '';
+      return `
       <article class="asset" data-final-review-asset="1" data-asset-id="${escapeHtml(asset.asset_id)}">
         <img src="${escapeHtml(htmlFileLink(asset.absolute))}" alt="${escapeHtml(asset.asset_id)}">
         <div class="asset-body">
@@ -431,15 +467,17 @@ const renderHtml = ({workspace, digest, phase, createdAt, assets, cover, pages, 
           <p><span class="badge">${escapeHtml(asset.role)}</span><span class="badge">${escapeHtml(asset.route)}</span><span class="badge ok">${escapeHtml(asset.qa_status)}</span></p>
           <p><strong>原始路径</strong><br><a href="${escapeHtml(htmlFileLink(asset.absolute))}">${escapeHtml(asset.path)}</a></p>
           <p class="hash"><strong>SHA-256</strong><br>${escapeHtml(asset.checksum_sha256)}</p>
+          ${overrideWarning}
           <p>${asset.static_spread_review !== null ? '完整静态图片等比置入书页；已按半页尺寸检查可读性。' : asset.ian === null ? '批准后由此精确源图派生 1920×1080 合成栅格。' : '此图为 final-composite；批准对象是下方完整 Ian 分层包。'}</p>
         </div>
-      </article>`).join('');
+      </article>`;
+    }).join('');
     const ian = shotAssets.find((asset) => asset.ian !== null);
     return `<section class="shot"><h2>${escapeHtml(shotId)}</h2><div class="asset-grid">${cards}</div>${ian ? renderIanDetails(ian, stageOutputs.get(ian.asset_id)) : ''}</section>`;
   }).join('');
   const openingMarkup = cover === null
-    ? '<section class="notice"><strong>时间线开场：</strong><code>direct-first-shot-v1</code>；S01 从第 0 帧开始。发布封面只可由已批准的图文翻书 opening adapter 另行引入。</section>'
-    : `<section class="cover"><h2>固定开场封面</h2><img src="${escapeHtml(htmlFileLink(cover.absolute))}" alt="固定开场封面"><p>此图会进入成片，但依据 <code>cover-only-v1</code> 不属于视觉终审队列。</p><p class="hash">${escapeHtml(cover.path)}<br>${escapeHtml(cover.checksum_sha256)}</p></section>`;
+    ? '<section class="notice"><strong>时间线开场：</strong><code>direct-first-shot-v1</code>；S01 从第 0 帧开始。发布封面不进入视频生产，也不属于本页终审资产。</section>'
+    : `<section class="cover"><h2>固定开场封面</h2><img src="${escapeHtml(htmlFileLink(cover.absolute))}" alt="固定开场封面"><p>此历史项目依据 <code>cover-only-v1</code> 使用该固定开场输入；它不属于视觉终审队列。</p><p class="hash">${escapeHtml(cover.path)}<br>${escapeHtml(cover.checksum_sha256)}</p></section>`;
   return Buffer.from(`<!doctype html>
 <html lang="zh-CN">
 <head>
@@ -553,12 +591,16 @@ export const buildFinalProductionAssetReview = async ({
   }
   const shortDigest = digest.slice(0, 8);
   const source = validateNarrationSource(state);
+  const openingContract = resolveTimelineOpeningContract(state);
+  const directFirst = openingContract === DIRECT_FIRST_SHOT_CONTRACT;
+  const cover = directFirst ? null : await validateCover(state);
   const queue = state.visual_asset_review.queue;
   if (!Array.isArray(queue)) fail('visual_asset_review.queue is missing');
   const activeQueue = queue.filter((item) => item?.active_for_current_storyboard !== false && item?.status !== 'superseded');
-  const timelineOpening = resolveFinalReviewTimelineOpening({activeQueue, state});
-  const directFirst = timelineOpening !== null;
-  const cover = directFirst ? null : await validateCover(state);
+  if (directFirst && (activeQueue[0]?.shot_id !== 'S01'
+      || activeQueue[0]?.shot_start_frame !== 0)) {
+    fail('direct-first-shot-v1 requires S01 to be the first production asset at frame zero');
+  }
   if (activeQueue.length !== finalReview.assets.length) fail('final review does not match active queue length');
 
   const assets = [];
@@ -568,9 +610,24 @@ export const buildFinalProductionAssetReview = async ({
     const queueItem = activeQueue[index];
     if (reviewAsset.asset_id !== queueItem?.asset_id || reviewAsset.path !== queueItem.path
         || reviewAsset.checksum_sha256 !== queueItem.checksum_sha256
-        || reviewAsset.qa_status !== 'qa_passed_pending_final_review'
-        || queueItem.status !== 'qa_passed_pending_final_review') {
+        || reviewAsset.qa_status !== queueItem.status
+        || ![
+          'qa_passed_pending_final_review',
+          WAIVED_PENDING_FINAL_REVIEW_STATUS,
+        ].includes(queueItem.status)) {
       fail(`final review asset ${reviewAsset.asset_id} differs from active queue`);
+    }
+    const reviewWasWaived = validateMechanicalDisposition(reviewAsset, reviewAsset.asset_id);
+    const queueWasWaived = validateMechanicalDisposition(
+      {...queueItem, qa_status: queueItem.status},
+      `${queueItem.asset_id} queue item`,
+    );
+    if (reviewWasWaived !== queueWasWaived
+        || !sameJson(
+          mechanicalOverrideProjection(reviewAsset),
+          mechanicalOverrideProjection(queueItem),
+        )) {
+      fail(`final review asset ${reviewAsset.asset_id} mechanical disposition differs from active queue`);
     }
     const file = resolveEpisodeFile(workspace, reviewAsset.path, reviewAsset.checksum_sha256, reviewAsset.asset_id);
     const dimensions = await inspectImage(file.absolute, reviewAsset.asset_id);
@@ -582,6 +639,7 @@ export const buildFinalProductionAssetReview = async ({
       qa_status: reviewAsset.qa_status,
       path: file.relative,
       checksum_sha256: reviewAsset.checksum_sha256,
+      ...mechanicalOverrideProjection(reviewAsset),
       dimensions,
       absolute: file.absolute,
       ian: null,
@@ -765,7 +823,15 @@ export const buildFinalProductionAssetReview = async ({
       page_count: pageOutputs.length,
       ian_package_count: ianStages.length,
     },
-    ...(directFirst ? {timeline_opening: timelineOpening} : {
+    ...(directFirst ? {
+      timeline_opening: {
+        contract_version: DIRECT_FIRST_SHOT_CONTRACT,
+        first_shot_id: 'S01',
+        start_frame: 0,
+        fixed_opening_cover: false,
+        publishing_cover_included: false,
+      },
+    } : {
       cover: {
         contract_version: cover.contract_version,
         review_scope: cover.review_scope,
@@ -782,12 +848,10 @@ export const buildFinalProductionAssetReview = async ({
       qa_status: asset.qa_status,
       path: asset.path,
       checksum_sha256: asset.checksum_sha256,
+      ...mechanicalOverrideProjection(asset),
       dimensions: asset.dimensions,
-      ...(asset.static_spread_review === null
-        ? {} : {static_spread_review: asset.static_spread_review}),
-      production_behavior: asset.static_spread_review !== null
-        ? 'approved-complete-source-contained-in-one-book-page'
-        : asset.ian === null
+      ...(asset.static_spread_review === null ? {} : {static_spread_review: asset.static_spread_review}),
+      production_behavior: asset.static_spread_review !== null ? 'approved-complete-source-contained-in-one-book-page' : asset.ian === null
         ? 'approved-source-derives-1920x1080-composition-raster-after-lock'
         : 'remotion-consumes-approved-background-plus-ordered-final-semantic-layers',
       ...(asset.ian === null ? {} : {ian_layered_scene_package: asset.ian}),

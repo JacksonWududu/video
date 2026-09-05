@@ -53,6 +53,21 @@ class SkillContractTests(unittest.TestCase):
         self.assertIn("不得使用 Computer Use", text)
         self.assertIn("whiteboard-element-sequence-replaces-action-family-v1", text)
 
+    def test_active_renderers_forbid_drawing_overlays(self):
+        skill = (ROOT / "SKILL.md").read_text(encoding="utf-8")
+        entrypoint = (ROOT / "scripts/render_whiteboard_clip.py").read_text(encoding="utf-8")
+        region_renderer = (ROOT / "scripts/region_stream_renderer.py").read_text(encoding="utf-8")
+        stream_renderer = (ROOT / "scripts/stream_render.py").read_text(encoding="utf-8")
+        schema = (ROOT / "references/whiteboard-render-evidence-v1.schema.json").read_text(encoding="utf-8")
+        self.assertIn("canvas-only-no-hand-pen-cursor-v1", skill)
+        self.assertIn('"drawing_overlay_policy"', schema)
+        for source in (entrypoint, region_renderer, stream_renderer):
+            self.assertNotIn("--hand", source)
+            self.assertNotIn("--bare-tip", source)
+            self.assertNotIn("--pen-image", source)
+            self.assertNotIn("TipOverlay", source)
+            self.assertNotIn("drawing-hand.png", source)
+
 
 if __name__ == "__main__":
     unittest.main()

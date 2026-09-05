@@ -2,7 +2,7 @@
 
 ## Select and preserve the source
 
-- Require `narration-audio-source-selection-v1`, bound to the locked script and workflow approval mode, before any file lookup or provider call. Accept only `colocated_voice` or `edge_tts`; never infer or substitute a source.
+- Require `narration-audio-source-selection-v1`, bound to the locked script and workflow approval mode, before any file lookup or provider call. A checksum-valid `post-cover-selection-batch-v1` may provide this explicit choice together with style, scope, density, and approval mode; do not ask it again. Accept only `colocated_voice` or `edge_tts`; never infer or substitute a source.
 - For `colocated_voice`, record explicit permission, inspect only the already resolved script-resource topic folder, prefer exact top-level `voice.mp3`, and otherwise require exactly one real regular top-level `voice*.mp3`. Never scan sibling folders or select by modification time.
 - For `edge_tts`, require provider `edge-tts`, voice `zh-CN-YunjianNeural`, rate `+20%`, and explicit network authorization. Run only `scripts/synthesize_edge_tts.py` against the exact locked-script file and require its same-request word-boundary JSONL output. Record adapter path/checksum, dependency version, input path/checksum, exact arguments, attempt count, audio/metadata paths and checksums, and the user's selection message/time.
 - Check existing runtimes before installing `edge-tts`; if none is reusable, request installation permission. Missing dependency, network/provider failure, empty output, or exhausted retries blocks. Never silently fall back to another source or provider.

@@ -28,7 +28,7 @@ const shotDurationInFrames = 240;
 
 <Sequence from={120} durationInFrames={shotDurationInFrames}>
   <FullFrameMaskSweep
-    src={staticFile('topic3/assets/image/s15-ian-v01-1920x1080.png')}
+    src={staticFile('episode-assets/image/shot-ian-v01-1920x1080.png')}
     durationInFrames={shotDurationInFrames}
   />
 </Sequence>;

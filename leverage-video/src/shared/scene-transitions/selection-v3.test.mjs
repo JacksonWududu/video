@@ -36,7 +36,7 @@ assert.equal(nextTransitionReviewVersion({
 }), 4);
 assert.equal(nextTransitionReviewVersion({
   existingFilenames: ['per-boundary-transition-review-v1.json'],
-  versionSourcePath: 'leverage-video/src/topic7/schema/per-boundary-transition-review-v2.json',
+  versionSourcePath: 'leverage-video/src/episode-test/schema/per-boundary-transition-review-v2.json',
   replacingOrRefreshing: true,
 }), 3);
 assert.ok(TRANSITION_CATALOG.some((entry) => entry.kind === 'cut'));
@@ -416,6 +416,21 @@ const rendererSource = fs.readFileSync(
 );
 assert.match(rendererSource, /transition\.kind !== 'cut'/);
 assert.match(rendererSource, /transition\?\.kind === 'cut' \? 0/);
+
+const proposalValidatorSource = fs.readFileSync(
+  new URL('./validate-review-proposal.mjs', import.meta.url),
+  'utf8',
+);
+assert.match(
+  proposalValidatorSource,
+  /const whiteCatVisualStyleId = review\.white_cat_visual_style_binding\?\.style_id\s*\?\? 'loose-line-vivid-watercolor'/,
+  'transition proposal validation must read the selected white-cat visual style before the default',
+);
+assert.match(
+  proposalValidatorSource,
+  /nextWhiteCatPresent: row\.next_white_cat_present,\s*whiteCatVisualStyleId,/,
+  'transition proposal validation must preserve the selected white-cat visual style',
+);
 
 const priorPresentedMapSha256 = 'd'.repeat(64);
 const nextPresentedMapSha256 = 'e'.repeat(64);

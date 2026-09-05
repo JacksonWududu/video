@@ -9,6 +9,7 @@ import Ajv2020 from 'ajv/dist/2020.js';
 import sharp from 'sharp';
 
 import {
+  IAN_BOTTOM_SUBTITLE_SAFE_AREA_POLICY,
   IAN_LAYERED_SCENE_PACKAGE_VERSION,
   deriveIanLayeredSceneV2Bytes,
   inspectIanLayeredScenePackage,
@@ -166,7 +167,7 @@ const write = (root, relativePath, bytes) => {
   fs.writeFileSync(target, bytes);
 };
 
-const fixture = async (t, {withText = false} = {}) => {
+const fixture = async (t, {withText = false, withRepair = false} = {}) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ian-layered-v2-'));
   t.after(() => fs.rmSync(root, {recursive: true, force: true}));
   const episode = 'leverage-video/src/topic-test';
@@ -179,7 +180,7 @@ const fixture = async (t, {withText = false} = {}) => {
   const preLayerPaths = [`${assetRoot}/L01-pre.png`, `${assetRoot}/L02-pre.png`];
   const layerPaths = [`${assetRoot}/L01.png`, `${assetRoot}/L02.png`];
   const finalPath = `${assetRoot}/final.png`;
-  const promptBytes = Buffer.from('16:9 landscape composition; no visible text; two separated semantic zones.');
+  const promptBytes = Buffer.from('16:9 landscape composition; no visible text; two separated semantic zones. IAN BOTTOM SUBTITLE SAFE AREA: x=0, y=832, width=1920, height=248.');
   const styleBytes = await sharp({
     create: {width: 1920, height: 1080, channels: 3, background: '#fdfcf9'},
   }).png().toBuffer();
@@ -214,10 +215,43 @@ const fixture = async (t, {withText = false} = {}) => {
     paper_background_rgba: [251, 250, 245, 255],
     minimum_inter_layer_gutter_px: 8,
     outside_union_max_visible_pixels: 1024,
+    subtitle_safe_area: structuredClone(IAN_BOTTOM_SUBTITLE_SAFE_AREA_POLICY),
     layers: [
       {layer_id: 'L01', bbox: {x: 48, y: 144, width: 520, height: 600}},
-      {layer_id: 'L02', bbox: {x: 1200, y: 240, width: 600, height: 600}},
+      {layer_id: 'L02', bbox: {x: 1200, y: 240, width: 600, height: 580}},
     ],
+    ...(withRepair ? {layout_repair: {
+      contract_version: 'ian-pre-split-layout-repair-v1',
+      method: 'matte-alpha-rational-downscale-integer-translate-v1',
+      authorization: {
+        asset_id: 'S17-ian-v02',
+        exact_user_message: '按建议执行确定性布局修复。',
+      },
+      source_failure: {
+        attempt_number: 3,
+        prompt: {path: promptPath, checksum_sha256: checksum(promptBytes)},
+        output: {path: sourcePath, checksum_sha256: checksum(masterBytes)},
+        failure_reason: '完整语义组越出批准区域。',
+      },
+      source_outside_union_max_visible_pixels: 1024,
+      source_bbox_minimum_matte_gutter_px: 8,
+      layers: [
+        {
+          layer_id: 'L01',
+          source_bbox: {x: 70, y: 170, width: 440, height: 520},
+          scale_numerator: 1,
+          scale_denominator: 2,
+          target_bbox: {x: 100, y: 200, width: 220, height: 260},
+        },
+        {
+          layer_id: 'L02',
+          source_bbox: {x: 1220, y: 260, width: 520, height: 500},
+          scale_numerator: 1,
+          scale_denominator: 2,
+          target_bbox: {x: 1300, y: 300, width: 260, height: 250},
+        },
+      ],
+    }} : {}),
   };
   const fontPath = '/System/Library/Fonts/STHeiti Light.ttc';
   const textOverlay = withText ? {
@@ -383,6 +417,42 @@ test('v2 package is master-first, GPT Image 2-bound, deterministically split, an
   assert.equal(inspected.deterministic_composite_match, true);
 });
 
+test('v2 replays an authorized pre-split downscale-and-translate repair without changing layer timing', async (t) => {
+  const {root, manifest} = await fixture(t, {withRepair: true});
+  const schema = JSON.parse(fs.readFileSync(new URL(
+    '../../../../.agents/skills/ian-handdrawn-ppt/references/knowledge-video-layered-scene-v2.schema.json',
+    import.meta.url,
+  )));
+  const validateSchema = new Ajv2020({strict: false}).compile(schema);
+  assert.equal(validateSchema(manifest), true, JSON.stringify(validateSchema.errors));
+  const inspected = await inspectIanLayeredScenePackage(manifest, {
+    repositoryRoot: root,
+    episodeWorkspace: manifest.episode_workspace,
+  });
+  assert.equal(inspected.deterministic_pre_split_layout_repair_match, true);
+  assert.equal(inspected.layout_repair_source_outside_union_visible_pixels, 0);
+  assert.deepEqual(inspected.layout_repair_source_edge_visible_pixels, [
+    {layer_id: 'L01', visible_pixels: 0},
+    {layer_id: 'L02', visible_pixels: 0},
+  ]);
+  assert.deepEqual(inspected.package.scene_plan.layers.map((layer) => layer.entry_frame), [0, 18]);
+
+  const upscale = structuredClone(manifest);
+  upscale.split_spec.layout_repair.layers[0].scale_numerator = 2;
+  upscale.split_spec.layout_repair.layers[0].scale_denominator = 1;
+  upscale.split_spec.layout_repair.layers[0].target_bbox.width = 880;
+  upscale.split_spec.layout_repair.layers[0].target_bbox.height = 1040;
+  assert.throws(() => validateIanLayeredScenePackage(upscale), /may not upscale/);
+
+  const escaped = structuredClone(manifest);
+  escaped.split_spec.layout_repair.layers[0].target_bbox.x = 600;
+  assert.throws(() => validateIanLayeredScenePackage(escaped), /approved semantic region/);
+
+  const staleSource = structuredClone(manifest);
+  staleSource.split_spec.layout_repair.source_failure.output.checksum_sha256 = 'f'.repeat(64);
+  assert.throws(() => validateIanLayeredScenePackage(staleSource), /failed prompt and raw source/);
+});
+
 test('model observation requires a CRC-valid PNG caBX/JUMBF actions assertion', async (t) => {
   const plainPng = await sharp({
     create: {width: 32, height: 18, channels: 3, background: '#fdfcf9'},
@@ -405,24 +475,6 @@ test('model observation requires a CRC-valid PNG caBX/JUMBF actions assertion', 
     () => observeGptImage2SoftwareAgent(corruptedCrc),
     /CRC|PNG|caBX/i,
   );
-});
-
-test('model observation still recognizes both real GPT Image 2 raw PNGs', (t) => {
-  const rawPaths = [
-    new URL('../../../../output/s17-ian-layered-demo-v1/master-imagegen-raw.png', import.meta.url),
-    new URL('../../topic7/assets/image/raw-imagegen/S17-ian-v01-raw.png', import.meta.url),
-  ];
-  const missing = rawPaths.filter((rawPath) => !fs.existsSync(rawPath));
-  if (missing.length > 0) {
-    t.skip('local real-image regression fixtures are unavailable');
-    return;
-  }
-  for (const rawPath of rawPaths) {
-    const observation = observeGptImage2SoftwareAgent(fs.readFileSync(rawPath));
-    assert.equal(observation.software_agent_name, 'gpt-image');
-    assert.equal(observation.software_agent_version, '2.0');
-    assert.equal(observation.evidence_kind, 'observation-not-signature-verification');
-  }
 });
 
 test('v2 requires the canonical Ian PNG style anchor and its current checksum', async (t) => {
@@ -495,6 +547,19 @@ test('v2 rejects overlapping or out-of-bounds semantic regions', async (t) => {
   const outside = structuredClone(manifest);
   outside.split_spec.layers[1].bbox.x = 1800;
   assert.throws(() => validateIanLayeredScenePackage(outside), /bounds/);
+  const safeAreaIntrusion = structuredClone(manifest);
+  safeAreaIntrusion.split_spec.layers[1].bbox.height = 600;
+  assert.throws(
+    () => validateIanLayeredScenePackage(safeAreaIntrusion),
+    /23% bottom subtitle safe area/,
+  );
+  const wrongSafeArea = structuredClone(manifest);
+  wrongSafeArea.split_spec.subtitle_safe_area.safe_area.y = 774;
+  wrongSafeArea.split_spec.subtitle_safe_area.safe_area.height = 306;
+  assert.throws(
+    () => validateIanLayeredScenePackage(wrongSafeArea),
+    /ian-bottom-subtitle-safe-area-v1/,
+  );
 });
 
 test('v2 disk inspection rejects a checksum-current but nondeterministic derived layer', async (t) => {

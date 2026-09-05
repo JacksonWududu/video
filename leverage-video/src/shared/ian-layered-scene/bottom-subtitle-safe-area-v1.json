@@ -1,0 +1,11 @@
+{
+  "contract_version": "ian-bottom-subtitle-safe-area-v1",
+  "target_height_percent": 23,
+  "pixel_rounding": "nearest-integer-v1",
+  "safe_area": {
+    "x": 0,
+    "y": 832,
+    "width": 1920,
+    "height": 248
+  }
+}

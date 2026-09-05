@@ -10,7 +10,7 @@ const gate = 'a'.repeat(64);
 const selection = () => buildFlipbookStyleSelection({
   gate2ScriptSha256: gate,
   profilePath: 'leverage-video/src/topic999/schema/flipbook-style-v1.json',
-  decision: {status: 'selected', exact_message: '选择图文翻书', decided_at: '2026-09-05T00:00:00+08:00'},
+  decision: {status: 'selected', exact_message: '图文翻书，standard，manual，edge_tts', decided_at: '2026-09-05T00:00:00+08:00'},
 });
 test('flipbook selection is an immutable style snapshot in the existing selection chain', () => {
   const value = selection();

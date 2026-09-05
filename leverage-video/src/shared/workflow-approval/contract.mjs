@@ -1,6 +1,9 @@
 import crypto from 'node:crypto';
+import path from 'node:path';
 
-import {FLIPBOOK_PROFILE_SHA256, FLIPBOOK_STYLE_ID} from '../flipbook-video/profile.mjs';
+import {FLIPBOOK_STYLE_ID, FLIPBOOK_PROFILE_SHA256} from '../flipbook-video/profile.mjs';
+
+import {validateCoverStyleScopeSelection} from '../publishing-cover/contract.mjs';
 
 export const WHITE_CAT_VISUAL_STYLE_SELECTION_VERSION = 'white-cat-visual-style-selection-v1';
 export const WHITE_CAT_VISUAL_STYLE_SELECTION_VERSION_V2 = 'white-cat-visual-style-selection-v2';
@@ -8,6 +11,8 @@ export const VISUAL_DENSITY_SELECTION_VERSION = 'visual-density-selection-v1';
 export const WORKFLOW_APPROVAL_MODE_VERSION = 'workflow-approval-mode-v1';
 export const ONE_CLICK_APPROVAL_POLICY_VERSION = 'one-click-approval-policy-v1';
 export const NARRATION_AUDIO_SOURCE_SELECTION_VERSION = 'narration-audio-source-selection-v1';
+export const POST_COVER_SELECTION_BATCH_VERSION = 'post-cover-selection-batch-v1';
+export const POST_COVER_SELECTION_BATCH_PHASE = 'awaiting_post_cover_selection_batch';
 export const ONE_CLICK_VISUAL_REVIEW_VERSION = 'visual-asset-review-v3';
 export const ONE_CLICK_FINAL_REVIEW_MODE = 'one_click_final_review_v1';
 export const ONE_CLICK_FINAL_REVIEW_PHASE = 'awaiting_precomposition_visual_review';
@@ -42,7 +47,7 @@ export const WHITE_CAT_VISUAL_STYLE_OPTIONS = Object.freeze({
 });
 const DENSITY_MODES = new Set(['standard', 'rich']);
 const APPROVAL_MODES = new Set(['manual', 'one_click']);
-const NARRATION_AUDIO_SOURCE_MODES = new Set(['colocated_voice', 'edge_tts']);
+const NARRATION_AUDIO_SOURCE_MODES = new Set(['colocated_voice', 'edge_tts', 'user_media_audio']);
 const DYNAMIC_STYLE_SOURCES = new Set(['episode_cover', 'registered_custom', 'builtin_flipbook']);
 const FLIPBOOK_STYLE_OPTION = Object.freeze({
   style_id: FLIPBOOK_STYLE_ID,
@@ -153,7 +158,7 @@ export const validateWhiteCatVisualStyleSelection = (selection, {gate2ScriptSha2
   } else {
     option = selection.style_source === 'builtin_flipbook' ? FLIPBOOK_STYLE_OPTION : DYNAMIC_STYLE_OPTION;
     if (!DYNAMIC_STYLE_SOURCES.has(selection.style_source)) {
-      throw new Error('white-cat visual style v2 source is unsupported');
+      throw new Error('white-cat visual style v2 source must be episode_cover or registered_custom');
     }
     if (selection.style_id !== option.style_id
       || selection.treatment_profile_id !== option.treatment_profile_id
@@ -299,6 +304,9 @@ const narrationAudioSourceProjection = (selection) => ({
   workflow_approval_mode_selection_sha256: selection.workflow_approval_mode_selection_sha256,
   source_mode: selection.source_mode,
   edge_tts: selection.edge_tts ?? null,
+  ...(selection.source_mode === 'user_media_audio'
+    ? {user_media_audio: selection.user_media_audio}
+    : {}),
   decision: {
     status: selection.decision?.status,
     exact_message: selection.decision?.exact_message,
@@ -324,7 +332,7 @@ export const validateNarrationAudioSourceSelection = (
     throw new Error('narration audio source selection is stale');
   }
   if (!NARRATION_AUDIO_SOURCE_MODES.has(selection.source_mode)) {
-    throw new Error('narration audio source must be colocated_voice or edge_tts');
+    throw new Error('narration audio source must be colocated_voice, edge_tts, or user_media_audio');
   }
   requireDecision(selection.decision, 'narration audio source');
   if (selection.source_mode === 'edge_tts') {
@@ -335,7 +343,23 @@ export const validateNarrationAudioSourceSelection = (
       throw new Error('edge_tts requires edge-tts, zh-CN-YunjianNeural, +20%, and explicit network authorization');
     }
   } else if (selection.edge_tts !== null && selection.edge_tts !== undefined) {
-    throw new Error('colocated_voice must not carry edge_tts settings');
+    throw new Error(`${selection.source_mode} must not carry edge_tts settings`);
+  }
+  if (selection.source_mode === 'user_media_audio') {
+    const media = selection.user_media_audio;
+    if (typeof media?.path !== 'string' || !path.isAbsolute(media.path)
+      || path.normalize(media.path) !== media.path || media.path.includes('\0')) {
+      throw new Error('user-media audio requires an exact normalized absolute media path');
+    }
+    requireSha256(media.checksum_sha256, 'user-media audio source checksum');
+    if (!Number.isSafeInteger(media.audio_stream_index) || media.audio_stream_index < 0
+      || media.extraction_mode !== 'stream_copy'
+      || media.source_access_authorized !== true
+      || media.fallback_allowed !== false) {
+      throw new Error('user-media audio requires an explicit stream index, authorized stream copy, and no fallback');
+    }
+  } else if (selection.user_media_audio !== null && selection.user_media_audio !== undefined) {
+    throw new Error(`${selection.source_mode} must not carry user_media_audio settings`);
   }
   const expected = buildNarrationAudioSourceSelectionSha256(selection);
   if (selection.selection_sha256 !== expected) {
@@ -422,6 +446,109 @@ export const validateApprovalSelectionSequence = ({
   };
 };
 
+const postCoverSelectionBatchProjection = (batch) => ({
+  contract_version: POST_COVER_SELECTION_BATCH_VERSION,
+  gate2_script_sha256: batch.gate2_script_sha256,
+  decision: {
+    status: batch.decision?.status,
+    exact_message: batch.decision?.exact_message,
+    decided_at: batch.decision?.decided_at,
+  },
+  white_cat_visual_style_selection_sha256: batch.white_cat_visual_style_selection_sha256,
+  cover_style_scope_selection_sha256: batch.cover_style_scope_selection_sha256 ?? null,
+  visual_density_selection_sha256: batch.visual_density_selection_sha256,
+  workflow_approval_mode_selection_sha256: batch.workflow_approval_mode_selection_sha256,
+  one_click_approval_policy_sha256: batch.one_click_approval_policy_sha256 ?? null,
+  narration_audio_source_selection_sha256: batch.narration_audio_source_selection_sha256,
+});
+
+export const buildPostCoverSelectionBatchSha256 = (batch) => (
+  sha256(postCoverSelectionBatchProjection(batch))
+);
+
+const requireSameBatchDecision = (decision, expected) => {
+  requireDecision(decision, 'post-cover selection batch member');
+  if (decision.exact_message !== expected.exact_message || decision.decided_at !== expected.decided_at) {
+    throw new Error('post-cover selections must come from one complete user response');
+  }
+};
+
+export const validatePostCoverSelectionBatch = ({
+  batch,
+  gate2ScriptSha256,
+  whiteCatStyle,
+  coverStyleScope = null,
+  coverDerivedStyleProfileSha256 = null,
+  density,
+  mode,
+  policy = null,
+  narrationAudioSource,
+}) => {
+  if (batch?.contract_version !== POST_COVER_SELECTION_BATCH_VERSION) {
+    throw new Error('post-cover selection batch authority mismatch');
+  }
+  requireSha256(gate2ScriptSha256, 'current Gate 2 script checksum');
+  if (batch.gate2_script_sha256 !== gate2ScriptSha256) {
+    throw new Error('post-cover selection batch is stale after Gate 2 change');
+  }
+  requireDecision(batch.decision, 'post-cover selection batch');
+
+  const styleResult = validateWhiteCatVisualStyleSelection(whiteCatStyle, {gate2ScriptSha256});
+  let scopeResult = null;
+  if (styleResult.style_source === 'episode_cover') {
+    requireSha256(coverDerivedStyleProfileSha256, 'cover-derived style profile checksum');
+    scopeResult = validateCoverStyleScopeSelection(coverStyleScope, {
+      whiteCatVisualStyleSelectionSha256: styleResult.selection_sha256,
+      coverDerivedStyleProfileSha256,
+    });
+  } else if (coverStyleScope !== null || coverDerivedStyleProfileSha256 !== null) {
+    throw new Error('only an episode-cover style may carry a cover-style scope selection');
+  }
+
+  validateApprovalSelectionSequence({
+    gate2ScriptSha256,
+    whiteCatStyle,
+    density,
+    mode,
+    policy,
+  });
+  const audioResult = validateNarrationAudioSourceSelection(narrationAudioSource, {
+    gate2ScriptSha256,
+    workflowApprovalModeSelectionSha256: mode.selection_sha256,
+  });
+
+  [whiteCatStyle.decision, density.decision, mode.decision, narrationAudioSource.decision]
+    .concat(scopeResult === null ? [] : [coverStyleScope.decision])
+    .forEach((decision) => requireSameBatchDecision(decision, batch.decision));
+
+  const expectedBindings = {
+    white_cat_visual_style_selection_sha256: styleResult.selection_sha256,
+    cover_style_scope_selection_sha256: scopeResult?.selection_sha256 ?? null,
+    visual_density_selection_sha256: density.selection_sha256,
+    workflow_approval_mode_selection_sha256: mode.selection_sha256,
+    one_click_approval_policy_sha256: mode.approval_mode === 'one_click' ? policy.policy_sha256 : null,
+    narration_audio_source_selection_sha256: audioResult.selection_sha256,
+  };
+  for (const [field, expected] of Object.entries(expectedBindings)) {
+    if ((batch[field] ?? null) !== expected) {
+      throw new Error(`post-cover selection batch has stale or missing ${field}`);
+    }
+  }
+  const expectedSha256 = buildPostCoverSelectionBatchSha256(batch);
+  if (batch.batch_sha256 !== expectedSha256) {
+    throw new Error('post-cover selection batch checksum is stale');
+  }
+  return {
+    result: 'pass',
+    batch_sha256: expectedSha256,
+    style_id: styleResult.style_id,
+    scope: scopeResult?.scope ?? null,
+    density_mode: density.density_mode,
+    approval_mode: mode.approval_mode,
+    source_mode: audioResult.source_mode,
+  };
+};
+
 export const validateLegacyStylelessApprovalSelectionSequence = ({
   gate2ScriptSha256,
   density,
@@ -495,7 +622,7 @@ export const calculateSelectionInvalidation = ({
     invalidate_visual_density_selection: true,
     invalidate_workflow_approval_mode: true,
     invalidate_narration_audio_source_selection: true,
-    invalidate_from: 'awaiting_visual_density_selection',
+    invalidate_from: POST_COVER_SELECTION_BATCH_PHASE,
   };
   if (change === 'publishing_cover') return {
     keep_locked_script: lockedScriptValid,
@@ -505,7 +632,7 @@ export const calculateSelectionInvalidation = ({
     invalidate_visual_density_selection: usesCoverDerivedStyle,
     invalidate_workflow_approval_mode: usesCoverDerivedStyle,
     invalidate_narration_audio_source_selection: usesCoverDerivedStyle,
-    invalidate_from: usesCoverDerivedStyle ? 'awaiting_white_cat_visual_style_selection' : null,
+    invalidate_from: usesCoverDerivedStyle ? POST_COVER_SELECTION_BATCH_PHASE : null,
   };
   if (change === 'visual_density') return {
     keep_locked_script: lockedScriptValid,
@@ -514,7 +641,7 @@ export const calculateSelectionInvalidation = ({
     invalidate_visual_density_selection: false,
     invalidate_workflow_approval_mode: true,
     invalidate_narration_audio_source_selection: true,
-    invalidate_from: 'storyboard_construction',
+    invalidate_from: POST_COVER_SELECTION_BATCH_PHASE,
   };
   if (change === 'narration_audio_source') return {
     keep_locked_script: lockedScriptValid,
@@ -537,7 +664,13 @@ const finalReviewProjection = (review) => ({
     asset_id: asset.asset_id,
     path: asset.path,
     checksum_sha256: asset.checksum_sha256,
-    qa_status: asset.qa_status,
+    qa_status: asset.preapproval_qa_status ?? asset.qa_status,
+    ...(asset.mechanical_qa_result === undefined
+      ? {} : {mechanical_qa_result: asset.mechanical_qa_result}),
+    ...(asset.user_mechanical_gate_override_result === undefined
+      ? {} : {user_mechanical_gate_override_result: asset.user_mechanical_gate_override_result}),
+    ...(asset.user_mechanical_gate_override_sha256 === undefined
+      ? {} : {user_mechanical_gate_override_sha256: asset.user_mechanical_gate_override_sha256}),
   })),
 });
 
@@ -552,6 +685,7 @@ export const validateOneClickFinalVisualReview = (review, {allowApproved = false
   requireSha256(review.storyboard_sha256, 'one-click final review storyboard checksum');
   requireSha256(review.policy_sha256, 'one-click final review policy checksum');
   const ids = new Set();
+  let waivedAssetCount = 0;
   review.assets.forEach((asset) => {
     if (typeof asset.asset_id !== 'string' || asset.asset_id.trim() === '' || ids.has(asset.asset_id)) {
       throw new Error('one-click final visual review asset IDs must be unique');
@@ -559,12 +693,54 @@ export const validateOneClickFinalVisualReview = (review, {allowApproved = false
     ids.add(asset.asset_id);
     if (typeof asset.path !== 'string' || asset.path.trim() === '') throw new Error('one-click final review asset path is missing');
     requireSha256(asset.checksum_sha256, `${asset.asset_id} checksum`);
-    const allowed = allowApproved ? ['qa_passed_pending_final_review', 'approved'] : ['qa_passed_pending_final_review'];
+    const allowed = allowApproved
+      ? [
+        'qa_passed_pending_final_review',
+        'qa_failed_but_waived_once_pending_final_review',
+        'approved',
+      ]
+      : [
+        'qa_passed_pending_final_review',
+        'qa_failed_but_waived_once_pending_final_review',
+      ];
     if (!allowed.includes(asset.qa_status)) throw new Error(`${asset.asset_id} has not passed QA for final review`);
+    const preapprovalQaStatus = asset.qa_status === 'approved'
+      ? asset.preapproval_qa_status
+      : asset.qa_status;
+    if (asset.qa_status === 'approved'
+        && ![
+          'qa_passed_pending_final_review',
+          'qa_failed_but_waived_once_pending_final_review',
+        ].includes(preapprovalQaStatus)) {
+      throw new Error(`${asset.asset_id} approved asset lacks its preapproval QA disposition`);
+    }
+    const hasOverrideEvidence = [
+      asset.mechanical_qa_result,
+      asset.user_mechanical_gate_override_result,
+      asset.user_mechanical_gate_override_sha256,
+    ].some((value) => value !== undefined && value !== null);
+    if (preapprovalQaStatus === 'qa_failed_but_waived_once_pending_final_review') {
+      if (asset.mechanical_qa_result !== 'failed_but_waived_once'
+          || asset.user_mechanical_gate_override_result !== 'pass_with_user_override') {
+        throw new Error(`${asset.asset_id} mechanical override evidence is incomplete`);
+      }
+      requireSha256(
+        asset.user_mechanical_gate_override_sha256,
+        `${asset.asset_id} user mechanical gate override checksum`,
+      );
+      waivedAssetCount += 1;
+    } else if (hasOverrideEvidence) {
+      throw new Error(`${asset.asset_id} ordinary QA status cannot carry mechanical override evidence`);
+    }
   });
   const expected = buildOneClickFinalVisualMapSha256(review);
   if (review.presented_map_sha256 !== expected) throw new Error('one-click final visual map checksum is stale');
-  return {result: 'pass', presented_map_sha256: expected, asset_count: review.assets.length};
+  return {
+    result: waivedAssetCount > 0 ? 'pass_with_user_override' : 'pass',
+    presented_map_sha256: expected,
+    asset_count: review.assets.length,
+    waived_asset_count: waivedAssetCount,
+  };
 };
 
 export const approveOneClickFinalVisualReview = (review, decision) => {
@@ -577,7 +753,11 @@ export const approveOneClickFinalVisualReview = (review, decision) => {
   return {
     ...review,
     status: 'approved',
-    assets: review.assets.map((asset) => ({...asset, qa_status: 'approved'})),
+    assets: review.assets.map((asset) => ({
+      ...asset,
+      preapproval_qa_status: asset.qa_status,
+      qa_status: 'approved',
+    })),
     approval: decision,
     visual_assets_locked: true,
     next_phase: CAPTION_CHOICE_PHASE,

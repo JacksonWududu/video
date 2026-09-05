@@ -190,7 +190,7 @@ export const IanLayeredScene: React.FC<{
     throw new Error('IanLayeredScene only accepts ian-handdrawn-ppt');
   }
   if (typeof soundEffectBusGain !== 'number'
-      || soundEffectBusGain <= 0 || soundEffectBusGain > 1) {
+      || !Number.isFinite(soundEffectBusGain) || soundEffectBusGain <= 0) {
     throw new Error('IanLayeredScene requires the unified SFX bus multiplier');
   }
   const frame = useCurrentFrame();

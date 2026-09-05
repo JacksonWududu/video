@@ -82,6 +82,18 @@ export const validateEpisodeTransitionReviewProposal = (episodeWorkspace) => {
     || state.transition_review.ordinary_boundary_count !== proposal.rows.length) {
     throw new Error('transition review proposal authority or coverage is invalid');
   }
+  requireExactKeys(proposal.fixed_exemptions, ['terminal'], 'transition fixed exemptions');
+  requireExactKeys(proposal.fixed_exemptions.terminal, [
+    'source_shot_id',
+    'next_shot_id',
+    'kind',
+    'selectable',
+  ], 'terminal transition exemption');
+  if (proposal.fixed_exemptions.terminal.next_shot_id !== null
+    || proposal.fixed_exemptions.terminal.kind !== 'terminal-clean-hold'
+    || proposal.fixed_exemptions.terminal.selectable !== false) {
+    throw new Error('direct-first transition proposal terminal exemption is invalid');
+  }
   const refreshLineage = proposal.refresh_lineage ?? null;
   let priorApprovedReview = null;
   let affectedBoundarySet = new Set();
@@ -136,28 +148,6 @@ export const validateEpisodeTransitionReviewProposal = (episodeWorkspace) => {
     || review.rows.some((row) => row.user_selection?.status !== directionStatus)) {
     throw new Error('transition review lacks authorized visual-direction evidence');
   }
-  const episodeVisualStyleId = review.white_cat_visual_style_binding?.style_id
-    ?? 'loose-line-vivid-watercolor';
-  const expectedFixedExemptions = {
-    ...(episodeVisualStyleId === FLIPBOOK_STYLE_ID ? {} : {opening: {
-      source_shot_id: 'OPEN-00',
-      next_shot_id: review.rows[0].shot_id,
-      kind: 'cut',
-      options: {},
-      duration_seconds: 0,
-      duration_in_frames: 0,
-      selectable: false,
-    }}),
-    terminal: {
-      source_shot_id: review.rows.at(-1).shot_id,
-      next_shot_id: null,
-      kind: 'terminal-clean-hold',
-      selectable: false,
-    },
-  };
-  if (!sameCanonical(proposal.fixed_exemptions, expectedFixedExemptions)) {
-    throw new Error('transition fixed exemptions differ from the selected presentation');
-  }
   const overrideByBoundary = new Map();
   const overrideBinding = proposal.user_requested_transition_overrides;
   if (overrideBinding !== undefined) {
@@ -194,6 +184,9 @@ export const validateEpisodeTransitionReviewProposal = (episodeWorkspace) => {
     }
   }
   const expectedPairs = review.rows.slice(0, -1).map((row, index) => [row.shot_id, review.rows[index + 1].shot_id]);
+  if (proposal.fixed_exemptions.terminal.source_shot_id !== review.rows.at(-1)?.shot_id) {
+    throw new Error('direct-first transition proposal terminal shot is stale');
+  }
   if (proposal.rows.length !== expectedPairs.length) {
     throw new Error('transition review does not cover every ordinary boundary');
   }
@@ -205,7 +198,8 @@ export const validateEpisodeTransitionReviewProposal = (episodeWorkspace) => {
     }
     const sourceSelection = reviewById.get(sourceShotId).user_selection;
     const nextSelection = reviewById.get(nextShotId).user_selection;
-    const whiteCatVisualStyleId = episodeVisualStyleId;
+    const whiteCatVisualStyleId = review.white_cat_visual_style_binding?.style_id
+      ?? 'loose-line-vivid-watercolor';
     if (row.source_visual_generation_route !== sourceSelection.visual_generation_route
       || row.next_visual_generation_route !== nextSelection.visual_generation_route
       || row.source_white_cat_present !== sourceSelection.white_cat_present

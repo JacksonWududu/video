@@ -88,6 +88,7 @@ export const KnowledgeVideo: React.FC<{
               intraShotTransitionContract={scene.intra_shot_transition_contract ?? 'intra-shot-watercolor-bloom-v1'}
               intraShotTransitions={scene.intra_shot_transitions}
               heroPoseBackground={'hero_pose_background' in scene ? scene.hero_pose_background?.asset : null}
+              subjectEntrance={'subject_entrance' in scene ? scene.subject_entrance : null}
               shotId={scene.shot_id}
             />
           )}

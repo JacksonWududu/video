@@ -16,7 +16,7 @@ const jsonBytes = (value) => Buffer.from(`${JSON.stringify(value, null, 2)}\n`);
 
 const buildRepository = () => {
   const repositoryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'visible-text-review-'));
-  const episodeWorkspace = 'leverage-video/src/topic8';
+  const episodeWorkspace = 'leverage-video/src/episode-test';
   const workspace = path.join(repositoryRoot, episodeWorkspace);
   fs.mkdirSync(path.join(workspace, 'assets/narration'), {recursive: true});
   fs.mkdirSync(path.join(workspace, 'schema'), {recursive: true});

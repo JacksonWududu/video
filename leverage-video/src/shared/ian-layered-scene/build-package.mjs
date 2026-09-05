@@ -7,6 +7,8 @@ import {fileURLToPath} from 'node:url';
 import sharp from 'sharp';
 
 import {
+  IAN_BOTTOM_SUBTITLE_SAFE_AREA_POLICY,
+  IAN_BOTTOM_SUBTITLE_SAFE_AREA_PROMPT_MARKER,
   IAN_CANONICAL_STYLE_ANCHOR_PATH,
   deriveIanLayeredSceneV2Bytes,
   inspectIanLayeredScenePackage,
@@ -14,6 +16,8 @@ import {
   sha256Canonical,
   sha256Text,
   validateIanLayeredScenePlan,
+  validateIanLayeredScenePackage,
+  validateIanBottomSubtitleSafeArea,
 } from './contract.mjs';
 import {validateIanTextContainment} from '../visual-assets/validate-ian-text-containment.mjs';
 
@@ -140,6 +144,19 @@ const validateFont = (overlay) => {
   }
 };
 
+const validateRejectedAttempts = (values, episodeWorkspace) => {
+  if (values === undefined) return [];
+  if (!Array.isArray(values)) fail('rejected_attempts must be an array');
+  return values.map((value, index) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)
+      || JSON.stringify(Object.keys(value).sort()) !== JSON.stringify(['checksum_sha256', 'path'])) {
+      fail(`rejected_attempts[${index}] must be an exact file binding`);
+    }
+    readBinding(value, `rejected attempt ${index}`, {episodeWorkspace, insideEpisode: true});
+    return {...value};
+  });
+};
+
 export const buildIanLayeredScenePackage = async ({episodeWorkspace, config}) => {
   if (!config || typeof config !== 'object') fail('build config must be an object');
   const item = config.queue_item;
@@ -154,10 +171,11 @@ export const buildIanLayeredScenePackage = async ({episodeWorkspace, config}) =>
   const promptText = prompt.bytes.toString('utf8');
   if (!promptText.includes('16:9 landscape composition')
     || !['no visible text', 'text: none', 'no written characters'].some((phrase) => promptText.toLowerCase().includes(phrase))) {
-    fail('generation prompt must require 16:9 landscape composition and an explicit text-free master');
+    fail('generation prompt must require 16:9 and a text-free master');
   }
   const referenceInputs = await validateReference(config.reference_inputs);
   validateFont(config.text_overlay);
+  const rejectedAttempts = validateRejectedAttempts(config.rejected_attempts, episodeWorkspace);
   const scenePlan = validateIanLayeredScenePlan(item.ian_scene_plan, {
     shotId: item.shot_id,
     sourceText: item.narration_source_text,
@@ -170,10 +188,47 @@ export const buildIanLayeredScenePackage = async ({episodeWorkspace, config}) =>
     fail('queue_item bindings are incomplete');
   }
   const required = config.text_overlay?.mode === 'required';
+  if (Object.hasOwn(config.split_spec ?? {}, 'subtitle_safe_area')) {
+    validateIanBottomSubtitleSafeArea(
+      config.split_spec.subtitle_safe_area,
+      'build config split_spec.subtitle_safe_area',
+    );
+  }
+  const repairFailure = config.split_spec?.layout_repair?.source_failure;
+  const sameBinding = (left, right) => left?.path === right?.path
+    && left?.checksum_sha256 === right?.checksum_sha256;
+  const auditedHistoricalPromptRelayout = Object.hasOwn(
+    config.split_spec ?? {},
+    'subtitle_safe_area',
+  )
+    && config.split_spec?.layout_repair?.contract_version
+      === 'ian-pre-split-layout-repair-v1'
+    && typeof config.split_spec.layout_repair.authorization?.exact_user_message === 'string'
+    && config.split_spec.layout_repair.authorization.exact_user_message.trim() !== ''
+    && sameBinding(repairFailure?.prompt, config.prompt)
+    && sameBinding(repairFailure?.output, config.source_master)
+    && rejectedAttempts.some((binding) => sameBinding(binding, config.source_master));
+  if (!promptText.includes(IAN_BOTTOM_SUBTITLE_SAFE_AREA_PROMPT_MARKER)
+      && !auditedHistoricalPromptRelayout) {
+    fail('generation prompt must require the Ian 23% bottom subtitle safe area; only an audited deterministic relayout may reuse an earlier rejected source and its unchanged historical prompt');
+  }
+  const splitSpec = {
+    ...config.split_spec,
+    subtitle_safe_area: structuredClone(IAN_BOTTOM_SUBTITLE_SAFE_AREA_POLICY),
+  };
+  if (!['none', 'required'].includes(item.visible_text_mode)
+    || config.text_overlay?.mode !== item.visible_text_mode
+    || (required
+      ? (typeof item.exact_visible_text !== 'string' || item.exact_visible_text.trim() === ''
+        || typeof item.visible_text_placement !== 'string'
+        || item.visible_text_placement.trim() === '')
+      : (item.exact_visible_text !== null || item.visible_text_placement !== null))) {
+    fail('Ian text overlay must bind the approved visible text mode, exact copy, and placement');
+  }
   assertOutputPaths(episodeWorkspace, config.output, scenePlan.layer_count, required);
   const derived = await deriveIanLayeredSceneV2Bytes({
     sourceMasterBytes: source.bytes,
-    splitSpec: config.split_spec,
+    splitSpec,
     textOverlay: config.text_overlay,
     scenePlan,
   });
@@ -221,14 +276,26 @@ export const buildIanLayeredScenePackage = async ({episodeWorkspace, config}) =>
       expected_software_agent: {name: 'gpt-image', version: '2.0'},
     },
     normalized_master: rasterBinding(output.normalized_master_path, derived.normalizedMaster, 'text-free-complete-master-normalized', false),
-    split_spec: config.split_spec,
+    split_spec: splitSpec,
     background: rasterBinding(output.background_path, derived.background, 'static-paper-background', false),
     pre_text_layers: scenePlan.layers.map((layer, index) => layerBinding(layer, output.pre_text_layer_paths[index], derived.preTextLayers[index], 'transparent-semantic-element-pre-text')),
     text_overlay: config.text_overlay,
     layers: scenePlan.layers.map((layer, index) => layerBinding(layer, output.layer_paths[index], derived.layers[index], 'transparent-semantic-element')),
     final_composite: rasterBinding(output.final_composite_path, derived.finalComposite, 'final-composite-review-raster', false),
-    verified_visible_text: required ? [config.text_overlay.labels.map((label) => label.text).join('｜')] : [],
+    verified_visible_text: required ? [item.exact_visible_text] : [],
   };
+  const expectedPackageBinding = {
+    episodeWorkspace,
+    queueItemId: item.asset_id,
+    shotId: item.shot_id,
+    treatmentProfileId: item.treatment_profile_id,
+    sourceText: item.narration_source_text,
+    shotStartFrame: item.shot_start_frame,
+    shotEndFrame: item.shot_end_frame,
+    visibleTextMode: item.visible_text_mode,
+    exactVisibleText: item.exact_visible_text,
+  };
+  validateIanLayeredScenePackage(manifest, expectedPackageBinding);
   const files = [
     [output.normalized_master_path, derived.normalizedMaster],
     [output.background_path, derived.background],
@@ -240,7 +307,10 @@ export const buildIanLayeredScenePackage = async ({episodeWorkspace, config}) =>
   for (const [file, bytes] of files) writeExclusive(resolveEpisodeMember(episodeWorkspace, file, 'package output'), bytes);
   const manifestBytes = fs.readFileSync(resolveEpisodeMember(episodeWorkspace, output.manifest_path, 'manifest output'));
   const manifestBinding = {path: output.manifest_path, checksum_sha256: sha256(manifestBytes)};
-  const inspection = await inspectIanLayeredScenePackage(manifest, {repositoryRoot: REPOSITORY_ROOT, episodeWorkspace});
+  const inspection = await inspectIanLayeredScenePackage(manifest, {
+    repositoryRoot: REPOSITORY_ROOT,
+    ...expectedPackageBinding,
+  });
   let containmentEvidence = null;
   if (required) {
     const containmentSpec = {
@@ -280,7 +350,7 @@ export const buildIanLayeredScenePackage = async ({episodeWorkspace, config}) =>
       model_id: 'gpt-image-2', prompt: config.prompt, reference_inputs: referenceInputs,
       output: {path: config.source_master.path, checksum_sha256: sha256(source.bytes)}, selection_status: 'selected',
     }],
-    rejected_attempts: [],
+    rejected_attempts: rejectedAttempts,
     scene_package_manifest: manifestBinding,
     model_provenance_observation: observation,
     deterministic_package_validation: inspection,

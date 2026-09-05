@@ -79,6 +79,7 @@ const IAN_ROUTE = 'ian-handdrawn-ppt';
 const XUAN_ROUTE = XUAN_PAPER_DIORAMA_ROUTE_ID;
 const INK_DOODLE_ROUTE = INK_DOODLE_KNOWLEDGE_CARD_ROUTE_ID;
 const LOCAL_VIDEO_ROUTE = LOCAL_VIDEO_ROUTE_ID;
+const NARRATIVE_SUBJECT_ENTRANCE_VERSION = 'narrative-subject-entrance-v1';
 const STYLE_BACKED_ROUTE_IDS = Object.freeze([XUAN_ROUTE, INK_DOODLE_ROUTE]);
 const STYLE_ROUTE_CONFIGS = new Map(STYLE_BACKED_ROUTE_IDS.map((routeId) => [
   routeId,
@@ -109,6 +110,13 @@ const requireInteger = (value, label, minimum = 0) => {
 const requireSha256 = (value, label) => {
   if (typeof value !== 'string' || !SHA256.test(value)) {
     throw new Error(`${label} must be a lowercase SHA-256`);
+  }
+  return value;
+};
+
+const requireFiniteNumber = (value, label, minimum, maximum) => {
+  if (!Number.isFinite(value) || value < minimum || value > maximum) {
+    throw new Error(`${label} must be a finite number between ${minimum} and ${maximum}`);
   }
   return value;
 };
@@ -500,15 +508,43 @@ const validateAssets = (
           }
         : null,
     });
+    const occurrenceAssetBindings = actionStateSchedule.occurrence_asset_bindings;
+    let assetIdByState = null;
+    if (occurrenceAssetBindings !== undefined) {
+      if (!Array.isArray(occurrenceAssetBindings)
+        || occurrenceAssetBindings.length !== actionStateSchedule.occurrences.length) {
+        throw new Error(`${shot.shot_id} occurrence asset bindings are incomplete`);
+      }
+      assetIdByState = new Map();
+      occurrenceAssetBindings.forEach((binding, index) => {
+        const occurrence = actionStateSchedule.occurrences[index];
+        if (binding?.state_id !== occurrence.state_id
+          || binding?.state_index !== occurrence.state_index
+          || binding?.at_frame !== occurrence.at_frame
+          || binding?.duration_in_frames !== occurrence.duration_in_frames
+          || typeof binding?.asset_id !== 'string' || binding.asset_id.trim() === ''
+          || assetIdByState.has(binding.state_id)
+          || [...assetIdByState.values()].includes(binding.asset_id)) {
+          throw new Error(`${shot.shot_id} occurrence asset bindings are stale or ambiguous`);
+        }
+        assetIdByState.set(binding.state_id, binding.asset_id);
+      });
+    }
     if (actionStateSchedule.occurrences.length !== imageSequence.length
       || actionStateSchedule.occurrences.some((occurrence, index) => (
-        occurrence.state_id !== imageSequence[index].asset_id
+        (assetIdByState?.get(occurrence.state_id) ?? occurrence.state_id)
+          !== imageSequence[index].asset_id
         || (requireV3Contracts ? occurrence.at_frame : occurrence.start_frame) !== imageSequence[index].from
         || occurrence.duration_in_frames !== imageSequence[index].duration_in_frames
       ))) {
       throw new Error(`${shot.shot_id} action-state schedule does not match the exact image sequence`);
     }
-    if (JSON.stringify(actionStateSchedule.intra_shot_transitions.map(projectIntraShotTransition))
+    const scheduledTransitions = actionStateSchedule.intra_shot_transitions.map((transition) => ({
+      ...transition,
+      from_asset_id: assetIdByState?.get(transition.from_asset_id) ?? transition.from_asset_id,
+      to_asset_id: assetIdByState?.get(transition.to_asset_id) ?? transition.to_asset_id,
+    }));
+    if (JSON.stringify(scheduledTransitions.map(projectIntraShotTransition))
       !== JSON.stringify(intraShotTransitions.map(projectIntraShotTransition))) {
       throw new Error(`${shot.shot_id} action-state schedule intra-shot transition map is stale`);
     }
@@ -553,6 +589,60 @@ const validateHeroPoseBackground = (shot, visualGenerationRoute) => {
       `${shot.shot_id}.hero_pose_background.checksum_sha256`,
     ),
     visual_generation_route: visualGenerationRoute,
+  };
+};
+
+const validateNarrativeSubjectEntrance = (shot, imageSequence) => {
+  if (shot.subject_entrance === undefined) return null;
+  const entrance = shot.subject_entrance;
+  if (!entrance || typeof entrance !== 'object' || Array.isArray(entrance)
+    || entrance.contract_version !== NARRATIVE_SUBJECT_ENTRANCE_VERSION
+    || shot.motion_tier !== 'hero_pose'
+    || entrance.subject_asset_id !== imageSequence[0]?.asset_id
+    || entrance.at_frame !== 0
+    || entrance.easing !== 'ease-out-cubic'
+    || entrance.settled_state !== 'exact-approved-source-pixels-v1') {
+    throw new Error(`${shot.shot_id} subject entrance must bind the first approved hero-pose subject`);
+  }
+  const durationInFrames = requireInteger(
+    entrance.duration_in_frames,
+    `${shot.shot_id}.subject_entrance.duration_in_frames`,
+    2,
+  );
+  if (durationInFrames > imageSequence[0].duration_in_frames) {
+    throw new Error(`${shot.shot_id} subject entrance exceeds the first pose occurrence`);
+  }
+  return {
+    contract_version: NARRATIVE_SUBJECT_ENTRANCE_VERSION,
+    subject_asset_id: entrance.subject_asset_id,
+    at_frame: 0,
+    duration_in_frames: durationInFrames,
+    translate_x_px: requireFiniteNumber(
+      entrance.translate_x_px,
+      `${shot.shot_id}.subject_entrance.translate_x_px`,
+      -1920,
+      1920,
+    ),
+    translate_y_px: requireFiniteNumber(
+      entrance.translate_y_px,
+      `${shot.shot_id}.subject_entrance.translate_y_px`,
+      -1080,
+      1080,
+    ),
+    initial_scale: requireFiniteNumber(
+      entrance.initial_scale,
+      `${shot.shot_id}.subject_entrance.initial_scale`,
+      0.5,
+      1,
+    ),
+    initial_opacity: requireFiniteNumber(
+      entrance.initial_opacity,
+      `${shot.shot_id}.subject_entrance.initial_opacity`,
+      0,
+      1,
+    ),
+    easing: 'ease-out-cubic',
+    settled_state: 'exact-approved-source-pixels-v1',
   };
 };
 
@@ -672,6 +762,9 @@ const buildScene = (
   if (shot.motion_tier !== 'hero_pose' && shot.hero_pose_background !== undefined) {
     throw new Error(`${shot.shot_id} non-hero shot must not carry a hero_pose_background`);
   }
+  const subjectEntrance = requireV3Contracts
+    ? validateNarrativeSubjectEntrance(shot, imageSequence)
+    : null;
   if (actionStateSchedule && actionStateSchedule.motion_tier !== shot.motion_tier) {
     throw new Error(`${shot.shot_id} action-state motion tier differs from the approved shot tier`);
   }
@@ -858,6 +951,7 @@ const buildScene = (
       ? buildActionStatePlanSha256(actionStateSchedule)
       : null,
     hero_pose_background: heroPoseBackground,
+    subject_entrance: subjectEntrance,
     whiteboard,
     local_video: localVideo,
     transition_intent: transition?.source_intent ?? 'clean hold',
@@ -1484,7 +1578,10 @@ export const buildKnowledgeVideoAssemblyPlan = (input, options = {}) => {
       const expectedAssetCount = scene.motion_tier === 'hero_pose'
         ? rhythmShot.asset_plan.pose_count
         : rhythmShot.asset_plan.main_image_count;
-      const actualTransitionPlan = scene.intra_shot_transitions.map((transition) => ({
+      const rhythmTransitionSource = scene.action_state_schedule?.occurrence_asset_bindings
+        ? scene.action_state_schedule.intra_shot_transitions
+        : scene.intra_shot_transitions;
+      const actualTransitionPlan = rhythmTransitionSource.map((transition) => ({
         from_asset_id: transition.from_asset_id,
         to_asset_id: transition.to_asset_id,
         kind: transition.kind,
@@ -1507,7 +1604,16 @@ export const buildKnowledgeVideoAssemblyPlan = (input, options = {}) => {
     ? extendFirstSceneToFrameZero(scene, legacyFirstShotLeadInFrames)
     : scene);
   const transitionSelectionReview = input.transitionSelectionReview;
-  if (transitionSelectionReview?.status !== 'approved'
+  const transitionReviewIsPolicyAuthorized = transitionSelectionReview?.status === 'policy_authorized'
+    && workflowApprovalValidation?.result === 'pass'
+    && workflowApprovalValidation.approval_mode === 'one_click'
+    && scenes.slice(0, -1).every((scene) => (
+      scene.transition?.user_selection?.status === 'policy_authorized'
+      && scene.transition.user_selection.policy_sha256 === input.workflowApproval?.policy?.policy_sha256
+    ));
+  if (!['approved', 'policy_authorized'].includes(transitionSelectionReview?.status)
+    || (transitionSelectionReview.status === 'policy_authorized'
+      && !transitionReviewIsPolicyAuthorized)
     || transitionSelectionReview?.catalog_version !== transitionCatalog
     || typeof transitionSelectionReview?.path !== 'string'
     || !transitionSelectionReview.path.startsWith(`${input.episodeWorkspace}/schema/`)

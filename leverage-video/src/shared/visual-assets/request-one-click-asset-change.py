@@ -47,7 +47,10 @@ def record_pre_final_change(
         raise ValueError("unpresented one-click visual queue is not active")
     queue = gate._queue(state)
     item = gate._find(queue, asset_id)
-    if not isinstance(item, dict) or item.get("status") != "qa_passed_pending_final_review":
+    if not isinstance(item, dict) or item.get("status") not in {
+        "qa_passed_pending_final_review",
+        "qa_failed_but_waived_once_pending_final_review",
+    }:
         raise ValueError(f"asset is not an unpresented one-click QA pass: {asset_id}")
 
     affected_ids = {asset_id}
@@ -90,7 +93,11 @@ def record_pre_final_change(
         "actual_reference_inputs", "generation_lineage", "rejected_attempts",
         "technical_qa", "semantic_qa", "visible_text_qa", "style_qa",
         "continuity_qa", "visual_qa", "historical_identity_qa",
-        "qa_contract_version", "revision_source",
+        "identity_qa", "qa_contract_version", "revision_source",
+        "mechanical_qa_result", "user_mechanical_gate_override",
+        "user_mechanical_gate_override_result", "waived_mechanical_gate_ids",
+        "override_bound_artifacts", "original_qa_result",
+        "pending_user_mechanical_gate_override",
     }
     stale_prefixes = (
         "approved_", "presented_", "batch_", "qa_evidence_", "prompt_",

@@ -56,19 +56,76 @@ non-overlapping composition zone. Require visible gutters of at least the
 package's `minimum_inter_layer_gutter_px`, ample negative space, no decorative
 content outside the union of those zones, and no visible text. A zone may contain
 one coherent semantic group, but it must not contain content owned by another
-narration range.
+narration range. New or modified packages bind
+`ian-bottom-subtitle-safe-area-v1`: every zone and deterministic
+text container must end at or above `y=832`, leaving exactly
+`x=0, y=832, width=1920, height=248` (about `23%`) for bottom subtitles. Do not
+default to a taller protected band; existing exact-byte-approved packages remain
+read-only. Bind the policy from
+`leverage-video/src/shared/ian-layered-scene/bottom-subtitle-safe-area-v1.json`
+as `split_spec.subtitle_safe_area`; packages created before this Ian-only policy
+may omit it only as unchanged historical evidence.
 
-After generation, normalize only by the checksum-bound deterministic
-scale-to-cover and centered-crop record. Separate the normalized master offline
-with `ian-semantic-region-alpha-split-v1`: use the exact approved bboxes, matte,
-alpha thresholds, blur, paper color, gutter, and outside-union limit to rebuild
-the static background and full-canvas transparent pre-text layers. The split is
-deterministic asset preparation, not a Remotion mask or reveal. Reject overlap,
-insufficient gutter, visible content outside the approved union, empty layers,
-or nondeterministic reruns; never repair such a master by hand, inpainting,
-chroma-key guessing, runtime crop, or transform.
+After generation, first create the checksum-bound deterministic scale-to-cover
+and centered-crop raster. Normally this raster is the normalized master. When
+the semantic groups are complete and mutually separated but miss only their
+approved zone bounds, an exact user instruction may authorize one
+`ian-pre-split-layout-repair-v1` recovery. Preserve the direct raw source and
+its failed QA evidence. Bind the exact asset ID and user message, the selected
+failed prompt/output/reason/attempt number, one source bbox per approved layer,
+the fixed 1,024-pixel outside-union ceiling, and an 8 px matte-only source-bbox
+edge gutter. Extract each
+group with the package's fixed matte/alpha/blur parameters, apply only uniform
+downscaling at or below 1.0 as an exact integer numerator/denominator plus
+integer translation, and composite the groups
+onto the fixed paper background wholly inside their original approved target
+zones. Forbid upscaling, stretching, rotation, reflection, redraw, inpainting,
+content deletion, inferred grouping, cross-layer merging, text insertion, or a
+new ImageGen stage. Require all source regions and resulting target placements
+to remain ordered, non-overlapping, checksum-bound, and deterministically
+replayable. The repaired composite becomes the package's normalized master;
+the unmodified raw ImageGen output remains its source master and provenance
+authority.
 
-The background and all layers keep identical 1920×1080 registration. Legacy
+Classify that eligible source under
+`ian-generation-layout-repair-disposition-v1`, not as a rejected generation.
+Its failure reason must begin with `IAN_ZONE_GEOMETRY:` or
+`IAN_ZONE_GEOMETRY_AND_SUBTITLE_SAFE_BAND:`; preserve it under
+`image_generation_repairable_findings` with
+`counts_toward_rejected_generation_limit: false`, pause further ImageGen calls
+for the asset, and bind the latest finding as the repair source. Missing or
+merged groups, overlapping ownership, clipped content, forbidden text, wrong
+semantics/style/lineage, or any need for redraw/inpainting remains a normal
+counted rejection. This classification relaxes generation retry accounting
+only; every repaired package must still pass the unchanged strict geometry,
+subtitle-safe-area, split, text, recomposition, and Visual Asset Review gates.
+
+If the source reached `stopped_user_takeover_required`, this repair is a user
+takeover disposition, not a fourth generation and not a waiver of the failed
+geometry. By default the recorder must match the bound repair source to the third
+rejected generation. An earlier preserved failure may be selected only when one
+current `one-time-explicit-user-mechanical-gate-override-v1` explicitly releases
+`IAN_STOPPED_LAYOUT_REPAIR_SOURCE_MUST_BE_THIRD_REJECTED_GENERATION`, binds all
+three prompt/output failure records plus their current SHA-256 values, and is
+consumed exactly once for `awaiting_visual_asset_review → visual_production`.
+Preserve all three rejected outputs and reasons, replay the repair, and mark the
+unchanged attempt count resolved only after full Ian QA passes. This source-only
+release never waives package geometry, split, text, style, or visual QA.
+
+Separate the normalized master offline with
+`ian-semantic-region-alpha-split-v1`: use the exact approved target bboxes,
+matte, alpha thresholds, blur, paper color, gutter, and outside-union limit to
+rebuild the static background and full-canvas transparent pre-text layers. The
+split and any authorized pre-split repair are deterministic asset preparation,
+not Remotion masks, motion, or reveals. Reject overlap, insufficient gutter,
+visible content outside the approved union, empty layers, content clipped by a
+source bbox, unauthorized transforms, or nondeterministic reruns. Never repair
+by hand, runtime crop/transform, inpainting, or chroma-key guessing.
+
+The background and all layers keep identical 1920×1080 registration. A
+pre-split repair changes only deterministic package preparation; it never
+changes narration byte ranges, layer IDs, z-order, entry frames, entry effects,
+or SFX timing. Legacy
 unchanged evidence retains `ian-layer-entry-fade-v1`. New or revised assembly
 uses a checksum-bound `ian-layered-entry-effects-v2` artifact without changing
 any package raster byte. Each semantic layer receives exactly one primary
@@ -106,6 +163,15 @@ the narration.
   direct lineage, checksum equality, or exact observation fails closed.
 - Disable the ordinary page shell: no automatic page number, title, subtitle,
   label, signature, watermark, corner text, or filler writing.
+- Include the exact prompt marker
+  `IAN BOTTOM SUBTITLE SAFE AREA: x=0, y=832, width=1920, height=248.` and keep all
+  essential semantic groups above it; background paper may continue through it.
+  One provenance-preserving exception exists for a deterministic relayout of a
+  previously rejected raw master whose generation predates this marker: keep its
+  historical prompt bytes unchanged, require an explicit current
+  `split_spec.subtitle_safe_area`, and bind the repair to that same rejected
+  prompt/output plus the user's exact relayout instruction. This exception never
+  authorizes a new ImageGen call or permits rewriting the old prompt.
 - Always use an empty `Required text only` list for the generated master. Both
   `visible_text_mode: none` and `required` masters are completely text-free.
 - For `visible_text_mode: required`, deterministically overlay only the exact
@@ -146,11 +212,13 @@ node .agents/skills/ian-handdrawn-ppt/scripts/validate_knowledge_video_layered_s
 ```
 
 The validator rereads every member; checks direct ImageGen lineage plus the exact
-`gpt-image/2.0` embedded observation; replays normalization, semantic-region
-alpha split, and text overlay; verifies dimensions, alpha roles, bboxes and
-gutters; then rebuilds the final composite from the background and ordered final
-layers and requires exact byte equality. Structured QA and Visual Asset Review
-remain required; the manifest cannot approve its own pixels.
+`gpt-image/2.0` embedded observation; replays normalization, any authorized
+`ian-pre-split-layout-repair-v1`, semantic-region alpha split, and text overlay;
+verifies dimensions, alpha roles, source/target bboxes, scale/translation,
+gutters, and target-zone containment; then rebuilds the final composite from
+the background and ordered final layers and requires exact byte equality.
+Structured QA and Visual Asset Review remain required; the manifest cannot
+approve its own pixels.
 
 QA records exactly one `ian-gpt-image-2-text-free-master-v1` generation stage.
 It binds the prompt, pinned Ian style reference, direct raw output path/checksum,

@@ -236,6 +236,8 @@
         "paper_background_rgba": {"$ref": "#/$defs/opaqueRgba"},
         "minimum_inter_layer_gutter_px": {"type": "integer", "minimum": 8},
         "outside_union_max_visible_pixels": {"const": 1024},
+        "subtitle_safe_area": {"$ref": "#/$defs/ianBottomSubtitleSafeArea"},
+        "layout_repair": {"$ref": "#/$defs/layoutRepair"},
         "layers": {
           "type": "array",
           "minItems": 1,
@@ -526,6 +528,94 @@
       "properties": {
         "layer_id": {"type": "string", "pattern": "^L[0-9]{2}$"},
         "bbox": {"$ref": "#/$defs/bbox"}
+      }
+    },
+    "ianBottomSubtitleSafeArea": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contract_version",
+        "target_height_percent",
+        "pixel_rounding",
+        "safe_area"
+      ],
+      "properties": {
+        "contract_version": {"const": "ian-bottom-subtitle-safe-area-v1"},
+        "target_height_percent": {"const": 23},
+        "pixel_rounding": {"const": "nearest-integer-v1"},
+        "safe_area": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["x", "y", "width", "height"],
+          "properties": {
+            "x": {"const": 0},
+            "y": {"const": 832},
+            "width": {"const": 1920},
+            "height": {"const": 248}
+          }
+        }
+      }
+    },
+    "layoutRepair": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contract_version",
+        "method",
+        "authorization",
+        "source_failure",
+        "source_outside_union_max_visible_pixels",
+        "source_bbox_minimum_matte_gutter_px",
+        "layers"
+      ],
+      "properties": {
+        "contract_version": {"const": "ian-pre-split-layout-repair-v1"},
+        "method": {"const": "matte-alpha-rational-downscale-integer-translate-v1"},
+        "authorization": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["asset_id", "exact_user_message"],
+          "properties": {
+            "asset_id": {"type": "string", "minLength": 1},
+            "exact_user_message": {"type": "string", "minLength": 1}
+          }
+        },
+        "source_failure": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["attempt_number", "prompt", "output", "failure_reason"],
+          "properties": {
+            "attempt_number": {"type": "integer", "minimum": 1},
+            "prompt": {"$ref": "#/$defs/fileBinding"},
+            "output": {"$ref": "#/$defs/fileBinding"},
+            "failure_reason": {"type": "string", "minLength": 1}
+          }
+        },
+        "source_outside_union_max_visible_pixels": {"const": 1024},
+        "source_bbox_minimum_matte_gutter_px": {"const": 8},
+        "layers": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/$defs/layoutRepairLayer"}
+        }
+      }
+    },
+    "layoutRepairLayer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "layer_id",
+        "source_bbox",
+        "scale_numerator",
+        "scale_denominator",
+        "target_bbox"
+      ],
+      "properties": {
+        "layer_id": {"type": "string", "pattern": "^L[0-9]{2}$"},
+        "source_bbox": {"$ref": "#/$defs/bbox"},
+        "scale_numerator": {"type": "integer", "minimum": 1},
+        "scale_denominator": {"type": "integer", "minimum": 1},
+        "target_bbox": {"$ref": "#/$defs/bbox"}
       }
     },
     "fontBinding": {

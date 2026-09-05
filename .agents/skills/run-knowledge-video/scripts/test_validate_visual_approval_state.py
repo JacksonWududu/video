@@ -7,6 +7,7 @@ import pathlib
 import struct
 import tempfile
 import unittest
+from unittest import mock
 
 
 SCRIPT = pathlib.Path(__file__).with_name("validate_visual_approval_state.py")
@@ -65,6 +66,30 @@ class VisualApprovalGateTests(unittest.TestCase):
     @staticmethod
     def _sha256(path):
         return hashlib.sha256(path.read_bytes()).hexdigest()
+
+    @staticmethod
+    def _override_sha256(value):
+        projection = {
+            key: value[key]
+            for key in (
+                "contract_version",
+                "episode_id",
+                "scope_id",
+                "gate_ids",
+                "acknowledged_failures",
+                "bound_artifacts",
+                "decision",
+                "consumption",
+                "reuse_forbidden",
+            )
+        }
+        encoded = json.dumps(
+            projection,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()
 
     def _attach_white_cat_v2(self, item, *, route="imagegen"):
         is_master = item.get("role") in {
@@ -384,7 +409,7 @@ class VisualApprovalGateTests(unittest.TestCase):
         item = self.state["visual_asset_review"]["queue"][0]
         item.update(
             status="awaiting_user_approval",
-            path="leverage-video/src/topic3/assets/image/s06-master-v02.png",
+            path="leverage-video/src/episode-test/assets/image/s06-master-v02.png",
             checksum_sha256="a" * 64,
             presented_checksum_sha256="b" * 64,
         )
@@ -460,7 +485,7 @@ class VisualApprovalGateTests(unittest.TestCase):
         item = self.state["visual_asset_review"]["queue"][0]
         item.update(
             status="awaiting_user_approval",
-            path="leverage-video/src/topic3/assets/image/s06-master-v02.png",
+            path="leverage-video/src/episode-test/assets/image/s06-master-v02.png",
             checksum_sha256="a" * 64,
             presented_checksum_sha256="a" * 64,
             measured_dimensions=[2048, 1152],
@@ -475,7 +500,7 @@ class VisualApprovalGateTests(unittest.TestCase):
         item = state["visual_asset_review"]["queue"][0]
         item.update(
             status="awaiting_user_approval",
-            path="leverage-video/src/topic3/assets/image/s06-master-v02.png",
+            path="leverage-video/src/episode-test/assets/image/s06-master-v02.png",
             checksum_sha256="a" * 64,
             presented_checksum_sha256="a" * 64,
         )
@@ -514,11 +539,27 @@ class VisualApprovalGateTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "user takeover required"):
             self.gate.require_generation_allowed(self.state, "S06-master-v02")
 
+    def test_repairable_ian_geometry_blocks_another_generation(self):
+        item = self.state["visual_asset_review"]["queue"][0]
+        item.update(
+            status="changes_requested",
+            visual_generation_route="ian-handdrawn-ppt",
+            image_generation_attempt_control={
+                "contract_version": "storyboard-image-generation-attempt-limit-v1",
+                "maximum_automatic_rejected_generations": 3,
+                "rejected_generation_count": 0,
+                "automatic_retry_status": "deterministic_layout_repair_required",
+            },
+        )
+        self.state["visual_asset_review"]["queue_generation_allowed"] = True
+        with self.assertRaisesRegex(ValueError, "deterministic layout repair required"):
+            self.gate.require_generation_allowed(self.state, "S06-master-v02")
+
     def test_approval_accepts_1672x941_as_close_16x9(self):
         item = self.state["visual_asset_review"]["queue"][0]
         item.update(
             status="awaiting_user_approval",
-            path="leverage-video/src/topic3/assets/image/s06-master-v02.png",
+            path="leverage-video/src/episode-test/assets/image/s06-master-v02.png",
             checksum_sha256="a" * 64,
             presented_checksum_sha256="a" * 64,
             measured_dimensions=[1672, 941],
@@ -529,7 +570,7 @@ class VisualApprovalGateTests(unittest.TestCase):
         item = self.state["visual_asset_review"]["queue"][0]
         item.update(
             status="awaiting_user_approval",
-            path="leverage-video/src/topic3/assets/image/s06-master-v02.png",
+            path="leverage-video/src/episode-test/assets/image/s06-master-v02.png",
             checksum_sha256="a" * 64,
             presented_checksum_sha256="a" * 64,
             measured_dimensions=[1600, 1200],
@@ -541,7 +582,7 @@ class VisualApprovalGateTests(unittest.TestCase):
         item = self.state["visual_asset_review"]["queue"][0]
         item.update(
             status="awaiting_user_approval",
-            path="leverage-video/src/topic3/assets/image/s06-master-v02.png",
+            path="leverage-video/src/episode-test/assets/image/s06-master-v02.png",
             checksum_sha256="a" * 64,
             presented_checksum_sha256="a" * 64,
             measured_dimensions=[1672, 941],
@@ -555,7 +596,7 @@ class VisualApprovalGateTests(unittest.TestCase):
         item = self.state["visual_asset_review"]["queue"][0]
         item.update(
             status="awaiting_user_approval",
-            path="leverage-video/src/topic3/assets/image/s06-master-v02.png",
+            path="leverage-video/src/episode-test/assets/image/s06-master-v02.png",
             checksum_sha256="a" * 64,
             presented_checksum_sha256="a" * 64,
             measured_dimensions=[1672, 940],
@@ -678,7 +719,7 @@ class VisualApprovalGateTests(unittest.TestCase):
         item = self.state["visual_asset_review"]["queue"][0]
         item.update(
             status="awaiting_batch_qa",
-            path="leverage-video/src/topic3/assets/image/s06-master-v02.png",
+            path="leverage-video/src/episode-test/assets/image/s06-master-v02.png",
             checksum_sha256="a" * 64,
             measured_dimensions=[1672, 940],
         )
@@ -788,6 +829,73 @@ class VisualApprovalGateTests(unittest.TestCase):
                 self.state, [item], self.repository_root
             )
 
+    def test_style_summary_loads_complete_v2_selection_for_hero_background(self):
+        item = self.state["visual_asset_review"]["queue"][0]
+        self.state["visual_asset_review"]["queue"] = [item]
+        selection = {
+            "contract_version": "white-cat-visual-style-selection-v2",
+            "gate2_script_sha256": "a" * 64,
+            "style_id": "cover-derived-episode-style",
+            "treatment_profile_id": "imagegen-cover-derived-narrative",
+            "visual_cohesion_profile_id": "cover-derived-cohesion-v1",
+            "style_profile_path": "episode/schema/cover-derived-style-profile-v1.json",
+            "style_profile_checksum_sha256": "b" * 64,
+            "style_source": "episode_cover",
+            "source_style_id": None,
+            "style_label": "当前封面风格（暖金深蓝编辑绘本）",
+            "publishing_cover_package_path": "episode/schema/publishing-cover-generation-v1.json",
+            "publishing_cover_package_sha256": "c" * 64,
+            "decision": {
+                "status": "selected",
+                "exact_message": "那选择1， 继续推进",
+                "decided_at": "2026-08-29T14:58:28+08:00",
+            },
+        }
+        selection["selection_sha256"] = self.gate._canonical_sha256(selection)
+        selection_path = self.repository_root / "episode/schema/white-cat-visual-style-selection-v2.json"
+        selection_path.parent.mkdir(parents=True)
+        selection_path.write_text(
+            json.dumps(selection, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        self.state["white_cat_visual_style_selection"] = {
+            "contract_version": selection["contract_version"],
+            "status": "selected",
+            "path": "episode/schema/white-cat-visual-style-selection-v2.json",
+            "file_checksum_sha256": self._sha256(selection_path),
+            **{
+                field: selection[field]
+                for field in (
+                    "selection_sha256",
+                    "style_id",
+                    "style_source",
+                    "style_label",
+                    "treatment_profile_id",
+                    "visual_cohesion_profile_id",
+                    "style_profile_path",
+                    "style_profile_checksum_sha256",
+                    "publishing_cover_package_path",
+                    "publishing_cover_package_sha256",
+                    "decision",
+                )
+            },
+        }
+        item.update(
+            asset_kind="hero_pose_background",
+            white_cat_present=False,
+            visual_generation_route="imagegen",
+            white_cat_visual_style_id=selection["style_id"],
+            white_cat_visual_style_selection_sha256=selection["selection_sha256"],
+            visual_cohesion_profile_id=selection["visual_cohesion_profile_id"],
+            treatment_profile_id=selection["treatment_profile_id"],
+        )
+        previous_root = self.gate.REPOSITORY_ROOT
+        self.gate.REPOSITORY_ROOT = self.repository_root
+        try:
+            self.assertEqual(self.gate._queue(self.state)[0]["asset_id"], item["asset_id"])
+        finally:
+            self.gate.REPOSITORY_ROOT = previous_root
+
     def test_current_style_lock_requires_complete_passing_cohesion_qa(self):
         overview = self._write_png("assets/image/review/cohesion.png")
         selection = {
@@ -855,7 +963,7 @@ class VisualApprovalGateTests(unittest.TestCase):
         first, second = self.state["visual_asset_review"]["queue"]
         first.update(
             status="qa_passed_pending_batch_review",
-            path="leverage-video/src/topic3/assets/image/s06-master-v02.png",
+            path="leverage-video/src/episode-test/assets/image/s06-master-v02.png",
             checksum_sha256="a" * 64,
             batch_qa_checksum_sha256="a" * 64,
             measured_dimensions=[1672, 940],
@@ -866,7 +974,7 @@ class VisualApprovalGateTests(unittest.TestCase):
             )
         second.update(
             status="qa_passed_pending_batch_review",
-            path="leverage-video/src/topic3/assets/image/s06-action-01-v02.png",
+            path="leverage-video/src/episode-test/assets/image/s06-action-01-v02.png",
             checksum_sha256="b" * 64,
             batch_qa_checksum_sha256="b" * 64,
             measured_dimensions=[1672, 940],
@@ -1130,6 +1238,86 @@ class VisualApprovalGateTests(unittest.TestCase):
                 repository_root=self.repository_root,
             )
         self.assertEqual(item["status"], "qa_passed_pending_batch_review")
+
+    def test_white_cat_hero_pose_requires_transparent_registration_qa(self):
+        state = self._hybrid_state(1)
+        item = state["visual_asset_review"]["queue"][0]
+        item.update(role="action-01", asset_kind="hero_pose", state_index=0)
+        relative_path = "assets/image/S01-white-cat-hero-pose-v01.png"
+        target = self._write_png(relative_path)
+        item.update(
+            status="awaiting_batch_qa",
+            path=relative_path,
+            checksum_sha256=self._sha256(target),
+            measured_dimensions=[1672, 941],
+            narration_source_text="白猫姿态",
+            technical_qa={"result": "pass"},
+        )
+        self._attach_white_cat_v2(item)
+
+        with self.assertRaisesRegex(ValueError, "transparent registration QA"):
+            self.gate.record_hybrid_qa_pass(
+                state, item["asset_id"], "2026-08-22T11:03:00Z"
+            )
+
+        item["transparent_pose_qa"] = {
+            "result": "pass",
+            "source_checksum_sha256": item["checksum_sha256"],
+            "full_canvas_rgba": True,
+            "transparent_background": True,
+            "registration_anchor_policy": "fixed-full-canvas-v1",
+            "measured_alpha": {
+                "min_alpha": 0,
+                "max_alpha": 255,
+                "transparent_pixel_count": 1,
+                "nontransparent_pixel_count": 1,
+            },
+        }
+        passed = self.gate.record_hybrid_qa_pass(
+            state, item["asset_id"], "2026-08-22T11:04:00Z"
+        )
+        self.assertEqual(passed["status"], "qa_passed_pending_batch_review")
+
+    def test_white_cat_hero_pose_accepts_exact_supplemental_alpha_dimensions(self):
+        relative_path = "assets/image/S01-white-cat-hero-pose-v01.png"
+        target = self._write_png(relative_path)
+        item = {
+            "asset_id": "S01-white-cat-hero-pose-v01",
+            "role": "action-01",
+            "asset_kind": "hero_pose",
+            "path": relative_path,
+            "checksum_sha256": self._sha256(target),
+        }
+        self._attach_white_cat_v2(item)
+        alpha_evidence = {
+            "min_alpha": 0,
+            "max_alpha": 255,
+            "transparent_pixel_count": 1,
+            "nontransparent_pixel_count": 1,
+        }
+        item["transparent_pose_qa"] = {
+            "result": "pass",
+            "source_checksum_sha256": item["checksum_sha256"],
+            "full_canvas_rgba": True,
+            "transparent_background": True,
+            "registration_anchor_policy": "fixed-full-canvas-v1",
+            "measured_alpha": {
+                "width": 1672,
+                "height": 941,
+                **alpha_evidence,
+            },
+        }
+        helper = mock.Mock()
+        helper.png_rgba_alpha_evidence.return_value = alpha_evidence
+        with mock.patch.object(self.gate, "_load_imagegen_helper", return_value=helper):
+            self.gate._require_white_cat_qa_v2_state(
+                item, self.repository_root,
+            )
+            item["transparent_pose_qa"]["measured_alpha"]["width"] = 1671
+            with self.assertRaisesRegex(ValueError, "alpha evidence changed on disk"):
+                self.gate._require_white_cat_qa_v2_state(
+                    item, self.repository_root,
+                )
 
     def test_white_cat_hybrid_approval_rejects_deleted_numbered_map(self):
         state = self._hybrid_state(1)
@@ -1602,6 +1790,332 @@ class VisualApprovalGateTests(unittest.TestCase):
             )
         self.assertEqual(item["status"], "awaiting_batch_qa")
         self.assertNotIn("batch_qa_checksum_sha256", item)
+
+    def test_one_click_final_review_recognizes_exact_consumed_white_cat_p2_override(self):
+        state = self._one_click_state()
+        state["episode_id"] = "episode-test"
+        first, second = state["visual_asset_review"]["queue"]
+        self._attach_white_cat_v2(first)
+        first.update(
+            status="qa_passed_pending_final_review",
+            generation_attempt_scope_id="S01:state-0",
+            prompt_path="assets/image/prompt.txt",
+            mechanical_qa_result="failed_but_waived_once",
+            user_mechanical_gate_override_result="pass_with_user_override",
+        )
+        prompt = self.repository_root / first["prompt_path"]
+        prompt.write_text(
+            "WHITE-CAT SATCHEL STRAP LOCK:\n",
+            encoding="utf-8",
+        )
+        first["prompt_checksum_sha256"] = self._sha256(prompt)
+        first["identity_qa"].update(
+            result="fail",
+            accessory_geometry_correct=False,
+            rear_strap_attached_to_rear_bag_end=False,
+            bag_end_attachment_count=1,
+            both_bag_end_anchors_visibly_traceable=False,
+            source_retry_policy_compliant=False,
+        )
+        anatomy_inspection = first["identity_qa"]["anatomy_evidence"]["inspection_evidence"]
+        qa_path = "assets/image/p2-failed-qa.json"
+        qa_file = self.repository_root / qa_path
+        qa_file.write_text(
+            json.dumps({"result": "fail", "identity_qa": first["identity_qa"]}),
+            encoding="utf-8",
+        )
+        first["qa_evidence_path"] = qa_path
+        first["qa_evidence_checksum_sha256"] = self._sha256(qa_file)
+        attempt_gate_id = "storyboard-image-generation-attempt-limit:S01:state-0"
+        p2_gate_id = f"visual_asset.{first['asset_id']}.P2_SATCHEL_TOPOLOGY"
+        prior_outputs = []
+        for index in (1, 2):
+            relative = f"assets/image/p2-failed-attempt-{index}.png"
+            output = self._write_png(relative, marker=f"p2-fail-{index}".encode())
+            prior_outputs.append({
+                "path": relative,
+                "checksum_sha256": self._sha256(output),
+            })
+        failure_outputs = [
+            *prior_outputs,
+            {"path": first["path"], "checksum_sha256": first["checksum_sha256"]},
+        ]
+        failures = [
+            {
+                "prompt": {
+                    "path": first["prompt_path"],
+                    "checksum_sha256": first["prompt_checksum_sha256"],
+                },
+                "output": output,
+                "failure_reason": "P2_SATCHEL_TOPOLOGY: rear strap detached",
+                "error_code": "P2_SATCHEL_TOPOLOGY",
+                "qa_time": f"2026-08-22T09:5{index}:00+08:00",
+                "attempt_number": index,
+            }
+            for index, output in enumerate(failure_outputs, start=1)
+        ]
+        failure = failures[-1]
+        first["white_cat_imagegen_qa_failures"] = copy.deepcopy(failures)
+        first["image_generation_qa_failures"] = copy.deepcopy(failures)
+        first["image_generation_attempt_control"] = {
+            "contract_version": "storyboard-image-generation-attempt-limit-v1",
+            "generation_attempt_scope_id": first["generation_attempt_scope_id"],
+            "maximum_automatic_rejected_generations": 3,
+            "rejected_generation_count": 3,
+            "automatic_retry_status": "stopped_user_takeover_required",
+        }
+        first["white_cat_generation_attempt_control"] = {
+            "contract_version": "white-cat-imagegen-attempt-limit-v1",
+            "maximum_automatic_qa_failures": 3,
+            "qa_failed_generation_count": 3,
+            "automatic_retry_status": "stopped_user_takeover_required",
+        }
+        override = {
+            "contract_version": "one-time-explicit-user-mechanical-gate-override-v1",
+            "episode_id": state["episode_id"],
+            "scope_id": first["generation_attempt_scope_id"],
+            "gate_ids": [attempt_gate_id, p2_gate_id],
+            "acknowledged_failures": [
+                {
+                    "gate_id": attempt_gate_id,
+                    "observed_result": "stopped_user_takeover_required",
+                    "reason": "three distinct generated outputs were rejected",
+                },
+                {
+                    "gate_id": p2_gate_id,
+                    "observed_result": "fail",
+                    "reason": failure["failure_reason"],
+                },
+            ],
+            "bound_artifacts": [
+                failure["output"],
+                failure["prompt"],
+                {
+                    "path": first["qa_evidence_path"],
+                    "checksum_sha256": first["qa_evidence_checksum_sha256"],
+                },
+                {
+                    "path": anatomy_inspection["numbered_limb_map_path"],
+                    "checksum_sha256": anatomy_inspection[
+                        "numbered_limb_map_checksum_sha256"
+                    ],
+                },
+            ],
+            "decision": {
+                "exact_user_message": (
+                    "接受当前 S01-state-0 的 P2 背带错误图，"
+                    "并放行该资产三次失败限制，仅此一次"
+                ),
+                "decided_at": "2026-08-22T10:00:00+08:00",
+                "disposition": "allow_once",
+            },
+            "consumption": {
+                "from_phase": "awaiting_visual_asset_review",
+                "to_phase": "visual_production",
+                "status": "consumed",
+                "consumed_transition_id": "episode-test:S01-state-0:p2:1",
+                "consumed_at": "2026-08-22T10:00:01+08:00",
+            },
+            "reuse_forbidden": True,
+        }
+        override["override_sha256"] = self._override_sha256(override)
+        first["user_mechanical_gate_override"] = override
+        first["waived_mechanical_gate_ids"] = [attempt_gate_id, p2_gate_id]
+        first["override_bound_artifacts"] = copy.deepcopy(
+            override["bound_artifacts"]
+        )
+        first["status"] = "qa_failed_but_waived_once_pending_final_review"
+        second["status"] = "qa_passed_pending_final_review"
+        state["blockers"] = [{
+            "blocker_id": attempt_gate_id,
+            "contract_version": "storyboard-image-generation-attempt-limit-v1",
+            "asset_id": first["asset_id"],
+            "generation_attempt_scope_id": first["generation_attempt_scope_id"],
+            "status": "failed_but_waived_once",
+            "user_mechanical_gate_override_sha256": override["override_sha256"],
+        }]
+
+        final_review = self.gate.present_one_click_final_visual_review(state)
+
+        self.assertEqual(final_review["status"], "pending")
+        self.assertEqual(
+            final_review["assets"][0]["qa_status"],
+            "qa_failed_but_waived_once_pending_final_review",
+        )
+        self.assertEqual(first["identity_qa"]["result"], "fail")
+
+        baseline_first = copy.deepcopy(first)
+        baseline_blockers = copy.deepcopy(state["blockers"])
+        first["asset_kind"] = "hero_pose"
+        prompt.write_text(
+            "WHITE-CAT SATCHEL STRAP LOCK:\n"
+            "HERO-POSE ASSET: full-canvas transparent RGBA with fixed "
+            "registration anchors.\n",
+            encoding="utf-8",
+        )
+        first["prompt_checksum_sha256"] = self._sha256(prompt)
+        exact_prompt_binding = {
+            "path": first["prompt_path"],
+            "checksum_sha256": first["prompt_checksum_sha256"],
+        }
+        for failure_list in (
+            first["white_cat_imagegen_qa_failures"],
+            first["image_generation_qa_failures"],
+        ):
+            for row in failure_list:
+                row["prompt"] = copy.deepcopy(exact_prompt_binding)
+        override["bound_artifacts"][1] = copy.deepcopy(exact_prompt_binding)
+        first["override_bound_artifacts"] = copy.deepcopy(
+            override["bound_artifacts"]
+        )
+        override["override_sha256"] = self._override_sha256(override)
+        state["blockers"][0]["user_mechanical_gate_override_sha256"] = override[
+            "override_sha256"
+        ]
+        exact_hero_override = self.gate._white_cat_p2_override_evidence(
+            first,
+            state=state,
+            repository_root=self.repository_root,
+            inspection=anatomy_inspection,
+        )
+        self.assertEqual(
+            exact_hero_override["gate_ids"], [attempt_gate_id, p2_gate_id]
+        )
+
+        prompt.write_text(
+            "FINAL P2 CAMERA AND BAG-END LAYOUT — BLOCKING PRIORITY:\n"
+            "HERO-POSE ASSET: full-canvas transparent RGBA after deterministic "
+            "chroma conversion, with fixed registration anchors.\n",
+            encoding="utf-8",
+        )
+        first["asset_kind"] = "hero_pose"
+        first["prompt_checksum_sha256"] = self._sha256(prompt)
+        current_prompt_binding = {
+            "path": first["prompt_path"],
+            "checksum_sha256": first["prompt_checksum_sha256"],
+        }
+        for failure_list in (
+            first["white_cat_imagegen_qa_failures"],
+            first["image_generation_qa_failures"],
+        ):
+            for row in failure_list:
+                row["prompt"] = copy.deepcopy(current_prompt_binding)
+        prompt_gate_ids = [
+            f"visual_asset.{first['asset_id']}.P2_PROMPT_FIXED_MARKER",
+            f"visual_asset.{first['asset_id']}.HERO_POSE_PROMPT_FIXED_MARKER",
+        ]
+        prompt_failures = [
+            {
+                "gate_id": prompt_gate_ids[0],
+                "observed_result": "fail",
+                "reason": (
+                    "P2_PROMPT_FIXED_MARKER: required literal is missing: "
+                    "WHITE-CAT SATCHEL STRAP LOCK:"
+                ),
+            },
+            {
+                "gate_id": prompt_gate_ids[1],
+                "observed_result": "fail",
+                "reason": (
+                    "HERO_POSE_PROMPT_FIXED_MARKER: required literal is missing: "
+                    "HERO-POSE ASSET: full-canvas transparent RGBA with fixed "
+                    "registration anchors."
+                ),
+            },
+        ]
+        override["gate_ids"].extend(prompt_gate_ids)
+        override["acknowledged_failures"].extend(copy.deepcopy(prompt_failures))
+        override["bound_artifacts"][1] = copy.deepcopy(current_prompt_binding)
+        override["decision"]["supplemental_exact_user_messages"] = [{
+            "exact_user_message": (
+                f"对 {first['asset_id']} 本次转换，追加一次性放行 P2 提示词固定"
+                "标记缺失与 HERO-POSE 固定标记不完全匹配门禁；保留真实提示词"
+                "及失败证据。"
+            ),
+            "decided_at": "2026-08-22T10:00:00+08:00",
+            "disposition": "allow_once",
+            "gate_ids": prompt_gate_ids,
+        }]
+        override["override_sha256"] = self._override_sha256(override)
+        first["waived_mechanical_gate_ids"] = copy.deepcopy(override["gate_ids"])
+        first["override_bound_artifacts"] = copy.deepcopy(
+            override["bound_artifacts"]
+        )
+        first["prompt_contract_qa"] = {
+            "contract_version": "white-cat-prompt-fixed-marker-qa-v1",
+            "result": "failed_but_waived_once",
+            "prompt": current_prompt_binding,
+            "failures": copy.deepcopy(prompt_failures),
+        }
+        state["blockers"][0]["user_mechanical_gate_override_sha256"] = override[
+            "override_sha256"
+        ]
+        prompt_override = self.gate._white_cat_p2_override_evidence(
+            first,
+            state=state,
+            repository_root=self.repository_root,
+            inspection=anatomy_inspection,
+        )
+        self.assertEqual(prompt_override["gate_ids"], override["gate_ids"])
+
+        first["prompt_contract_qa"]["failures"][0]["reason"] = "stale reason"
+        with self.assertRaisesRegex(ValueError, "prompt-marker QA evidence"):
+            self.gate._white_cat_p2_override_evidence(
+                first,
+                state=state,
+                repository_root=self.repository_root,
+                inspection=anatomy_inspection,
+            )
+        first["prompt_contract_qa"]["failures"] = copy.deepcopy(prompt_failures)
+
+        override["decision"]["supplemental_exact_user_messages"][0][
+            "exact_user_message"
+        ] = "一次性放行提示词门禁"
+        override["override_sha256"] = self._override_sha256(override)
+        state["blockers"][0]["user_mechanical_gate_override_sha256"] = override[
+            "override_sha256"
+        ]
+        with self.assertRaisesRegex(ValueError, "supplemental prompt-marker release"):
+            self.gate._white_cat_p2_override_evidence(
+                first,
+                state=state,
+                repository_root=self.repository_root,
+                inspection=anatomy_inspection,
+            )
+
+        state["visual_asset_review"]["queue"][0] = baseline_first
+        first = baseline_first
+        state["blockers"] = baseline_blockers
+        prompt.write_text(
+            "WHITE-CAT SATCHEL STRAP LOCK:\n",
+            encoding="utf-8",
+        )
+
+        state["blockers"][0]["status"] = "resolved"
+        state["visual_asset_review"].pop("final_review")
+        with self.assertRaisesRegex(ValueError, "attempt-limit blocker"):
+            self.gate.present_one_click_final_visual_review(state)
+
+    def test_one_click_final_review_rejects_stale_white_cat_p2_override(self):
+        state = self._one_click_state()
+        state["episode_id"] = "episode-test"
+        first = state["visual_asset_review"]["queue"][0]
+        self._attach_white_cat_v2(first)
+        first.update(
+            status="qa_passed_pending_final_review",
+            mechanical_qa_result="failed_but_waived_once",
+            user_mechanical_gate_override_result="pass_with_user_override",
+            identity_qa={**first["identity_qa"], "result": "fail", "accessory_geometry_correct": False},
+            user_mechanical_gate_override={
+                "contract_version": "one-time-explicit-user-mechanical-gate-override-v1",
+                "override_sha256": "f" * 64,
+            },
+        )
+        state["visual_asset_review"]["queue"][1]["status"] = "qa_passed_pending_final_review"
+
+        with self.assertRaisesRegex(ValueError, "one-time user gate override"):
+            self.gate.present_one_click_final_visual_review(state)
+        self.assertNotIn("final_review", state["visual_asset_review"])
 
     def test_white_cat_one_click_final_payload_rechecks_numbered_map_binding(self):
         state = self._one_click_state()

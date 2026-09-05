@@ -36,7 +36,7 @@ test('selective sound design keeps unselected layers silent and binds real asset
         trim_end_sample_exclusive: 8820,
         gain_multiplier: 0.25,
         derived_asset: {
-          asset: 'topic7/assets/audio/sfx/select-click-v3.wav',
+          asset: 'episode-test/assets/audio/sfx/select-click-v3.wav',
           checksum_sha256: 'c'.repeat(64),
           sample_rate_hz: 44100,
           channels: 2,

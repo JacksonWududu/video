@@ -26,7 +26,9 @@ class EpisodeWorkspaceValidatorTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
         self.repo = Path(self.temporary.name)
-        self.workspace = self.repo / "leverage-video/src/topic1"
+        self.workspace_relative = "leverage-video/src/" + "topic" + str(1)
+        self.workspace = self.repo / self.workspace_relative
+        self.episode_id = "episode-test"
         for directory in (
             "assets/audio",
             "assets/image",
@@ -139,14 +141,14 @@ class EpisodeWorkspaceValidatorTests(unittest.TestCase):
         return item
 
     def post_delivery_context(self) -> dict:
-        master = self.workspace / "assets/video/topic1-caption-free-master-v1.mp4"
+        master = self.workspace / "assets/video/episode-test-caption-free-master-v1.mp4"
         master.write_bytes(b"verified-delivered-master")
         master_path = master.relative_to(self.repo).as_posix()
         master_checksum = sha256(master)
 
         transaction = self.workspace / "schema/delivery-transaction-v1.json"
         transaction.write_text(
-            json.dumps({"transaction_id": "delivery-topic1-v1"}) + "\n",
+            json.dumps({"transaction_id": "delivery-episode-test-v1"}) + "\n",
             encoding="utf-8",
         )
         transaction_path = transaction.relative_to(self.repo).as_posix()
@@ -238,7 +240,7 @@ class EpisodeWorkspaceValidatorTests(unittest.TestCase):
                 "transaction_manifest_checksum_sha256": transaction_checksum,
                 "outputs": {
                     "caption_free_master": {
-                        "path": "/external/topic1-caption-free-master-v1.mp4",
+                        "path": "/external/episode-test-caption-free-master-v1.mp4",
                         "checksum_sha256": master_checksum,
                     },
                 },
@@ -490,6 +492,138 @@ class EpisodeWorkspaceValidatorTests(unittest.TestCase):
         )
         return item
 
+    def attach_stopped_ian_earlier_source_override(self, item: dict) -> dict:
+        manifest_file = self.repo / item["scene_package_manifest_path"]
+        manifest = json.loads(manifest_file.read_text(encoding="utf-8"))
+        second_prompt = item["generation_lineage"][0]["prompt"]
+        second_output = {
+            "path": item["ian_scene_package_members"][0]["path"],
+            "checksum_sha256": item["ian_scene_package_members"][0][
+                "checksum_sha256"
+            ],
+        }
+
+        def write_attempt(number: int) -> tuple[dict, dict]:
+            prompt = self.workspace / f"assets/narration/ian-attempt-{number}.txt"
+            prompt.write_text(
+                "16:9 landscape composition\nno visible text\n",
+                encoding="utf-8",
+            )
+            output = self.workspace / f"assets/image/ian/attempt-{number}.png"
+            output.write_bytes(f"rejected-{number}".encode())
+            return (
+                {
+                    "path": prompt.relative_to(self.repo).as_posix(),
+                    "checksum_sha256": sha256(prompt),
+                },
+                {
+                    "path": output.relative_to(self.repo).as_posix(),
+                    "checksum_sha256": sha256(output),
+                },
+            )
+
+        first_prompt, first_output = write_attempt(1)
+        third_prompt, third_output = write_attempt(3)
+        bindings = [
+            (first_prompt, first_output),
+            (second_prompt, second_output),
+            (third_prompt, third_output),
+        ]
+        failures = [
+            {
+                "attempt_number": number,
+                "prompt": prompt,
+                "output": output,
+                "failure_reason": f"IAN_ZONE_GEOMETRY: attempt {number}",
+            }
+            for number, (prompt, output) in enumerate(bindings, start=1)
+        ]
+        projections = [MODULE._generation_failure_projection(row) for row in failures]
+        message = (
+            "接受 S01-ian-v01 第二次失败图，并仅此一次放行 Ian 停队后布局修复源"
+            "必须为第三次失败图门禁；保留三次真实失败证据。"
+        )
+        manifest["split_spec"] = {
+            "layout_repair": {
+                "contract_version": "ian-pre-split-layout-repair-v1",
+                "authorization": {
+                    "asset_id": item["asset_id"],
+                    "exact_user_message": message,
+                },
+                "source_failure": projections[1],
+            }
+        }
+        manifest_file.write_text(
+            json.dumps(manifest, ensure_ascii=False), encoding="utf-8"
+        )
+        item.update(
+            generation_attempt_scope_id="S01:standalone-graphic",
+            image_generation_qa_failures=failures,
+            rejected_attempts=[row["output"] for row in projections],
+            image_generation_attempt_control={
+                "contract_version": "storyboard-image-generation-attempt-limit-v1",
+                "generation_attempt_scope_id": "S01:standalone-graphic",
+                "maximum_automatic_rejected_generations": 3,
+                "rejected_generation_count": 3,
+                "automatic_retry_status": (
+                    "resolved_by_user_directed_deterministic_layout_repair_qa_pass"
+                ),
+            },
+            scene_package_manifest_checksum_sha256=sha256(manifest_file),
+        )
+        gate_id = (
+            "visual_asset.S01-ian-v01."
+            "IAN_STOPPED_LAYOUT_REPAIR_SOURCE_MUST_BE_THIRD_REJECTED_GENERATION"
+        )
+        artifacts = [
+            binding
+            for failure in projections
+            for binding in (failure["prompt"], failure["output"])
+        ]
+        override = {
+            "contract_version": "one-time-explicit-user-mechanical-gate-override-v1",
+            "episode_id": self.episode_id,
+            "scope_id": "S01:standalone-graphic:ian-layout-repair-source-selection",
+            "gate_ids": [gate_id],
+            "acknowledged_failures": [{
+                "gate_id": gate_id,
+                "observed_result": "fail",
+                "reason": (
+                    "Selected Ian stopped-takeover layout-repair source is preserved "
+                    "attempt 2; the default contract requires preserved attempt 3."
+                ),
+            }],
+            "bound_artifacts": artifacts,
+            "decision": {
+                "exact_user_message": message,
+                "decided_at": "2026-08-30T16:25:08+08:00",
+                "disposition": "allow_once",
+            },
+            "consumption": {
+                "from_phase": "awaiting_visual_asset_review",
+                "to_phase": "visual_production",
+                "status": "consumed",
+                "consumed_transition_id": f"{self.episode_id}:S01:ian-earlier-source:1",
+                "consumed_at": "2026-08-30T17:40:02+08:00",
+            },
+            "reuse_forbidden": True,
+        }
+        override["override_sha256"] = MODULE._canonical_sha256(override)
+        item["ian_layout_repair_source_selection"] = {
+            "contract_version": "ian-stopped-layout-repair-source-selection-v1",
+            "result": "pass_with_user_override",
+            "selected_source_failure": projections[1],
+            "default_required_source_failure": projections[2],
+            "user_mechanical_gate_override": override,
+        }
+        item["user_takeover_disposition"] = {
+            "contract_version": "ian-pre-split-layout-repair-takeover-v1",
+            "source_failure": projections[1],
+            "source_selection_result": "pass_with_user_override",
+            "source_selection_override_sha256": override["override_sha256"],
+        }
+        return item
+
     def test_web_artifacts_use_source_and_document_categories(self) -> None:
         self.assertEqual(MODULE._expected_category(Path("book.css")), ("script",))
         self.assertEqual(MODULE._expected_category(Path("book.html")), ("docs",))
@@ -546,6 +680,608 @@ class EpisodeWorkspaceValidatorTests(unittest.TestCase):
     def test_pending_imagegen_v2_passes(self) -> None:
         self.write_state(self.item(status="qa_passed_pending_final_review"))
         self.assertEqual(self.errors(), [])
+
+    def test_early_failed_p2_master_uses_generic_hash_bound_acceptance(self) -> None:
+        item = self.item(
+            status="qa_failed_but_waived_once_pending_final_review",
+            qa_contract="ordinary-imagegen-white-cat-master-qa-v2",
+        )
+        item.update(
+            asset_id="S03-master-v01",
+            generation_attempt_scope_id="S03:base/master",
+            mechanical_qa_result="failed_but_waived_once",
+            user_mechanical_gate_override_result="pass_with_user_override",
+        )
+        qa_file = self.repo / item["qa_evidence_path"]
+        qa = json.loads(qa_file.read_text(encoding="utf-8"))
+        failure_reason = (
+            "P2_SATCHEL_TOPOLOGY: rear bag-end anchor is not traceable; "
+            "the cat baseline intrudes into the bottom 18% subtitle-safe area."
+        )
+        qa.update(
+            result="fail",
+            asset_id="S03-master-v01",
+            waivable_mechanical_failures=[
+                {
+                    "error_code": "P2_SATCHEL_TOPOLOGY",
+                    "observed_result": "fail",
+                    "reason": failure_reason,
+                },
+                {
+                    "error_code": "BOTTOM_SUBTITLE_SAFE_AREA",
+                    "observed_result": "fail",
+                    "reason": failure_reason,
+                },
+            ],
+            visual_qa={
+                "result": "fail",
+                "bottom_subtitle_safe_area_readable": False,
+                "bottom_subtitle_safe_area_result": "fail",
+                "safe_band_fraction": 0.18,
+            },
+        )
+        qa["identity_qa"].update(
+            result="fail",
+            cat_count=1,
+            foreleg_count=2,
+            hindleg_count=2,
+            paw_count=4,
+            accessory_geometry_correct=False,
+            satchel_count=1,
+            bag_strap_count=1,
+            bag_end_attachment_count=1,
+            front_strap_attached_to_forward_bag_end=True,
+            rear_strap_attached_to_rear_bag_end=False,
+            himation_trim_distinct_from_bag_straps=True,
+            satchel_anatomical_flank="right",
+            both_bag_end_anchors_visibly_traceable=False,
+            source_retry_policy_compliant=False,
+        )
+        prompt = self.workspace / "assets/image/s01-master-prompt.txt"
+        prompt.write_text(
+            "WHITE-CAT SATCHEL STRAP LOCK:\n"
+            "Keep the bottom 18% subtitle-safe.\n",
+            encoding="utf-8",
+        )
+        prompt_binding = {
+            "path": prompt.relative_to(self.repo).as_posix(),
+            "checksum_sha256": sha256(prompt),
+        }
+        source_binding = {
+            "path": item["path"],
+            "checksum_sha256": item["checksum_sha256"],
+        }
+        failure = {
+            "attempt_number": 1,
+            "prompt": prompt_binding,
+            "output": source_binding,
+            "failure_reason": failure_reason,
+            "error_code": "P2_SATCHEL_TOPOLOGY",
+        }
+        item.update(
+            prompt_path=prompt_binding["path"],
+            prompt_checksum_sha256=prompt_binding["checksum_sha256"],
+            image_generation_qa_failures=[json.loads(json.dumps(failure))],
+            white_cat_imagegen_qa_failures=[json.loads(json.dumps(failure))],
+            image_generation_attempt_control={
+                "contract_version": "storyboard-image-generation-attempt-limit-v1",
+                "generation_attempt_scope_id": "S03:base/master",
+                "maximum_automatic_rejected_generations": 3,
+                "rejected_generation_count": 1,
+                "automatic_retry_status": "stopped_by_explicit_user_acceptance",
+            },
+            white_cat_generation_attempt_control={
+                "contract_version": "white-cat-imagegen-attempt-limit-v1",
+                "maximum_automatic_qa_failures": 3,
+                "qa_failed_generation_count": 1,
+                "automatic_retry_status": "stopped_by_explicit_user_acceptance",
+            },
+        )
+        qa_file.write_text(
+            json.dumps(qa, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        item["qa_evidence_checksum_sha256"] = sha256(qa_file)
+        selection = self.workspace / "schema/s01-master-user-selection-v1.json"
+        selection.write_text(
+            json.dumps({"selected_attempt_number": 1}) + "\n",
+            encoding="utf-8",
+        )
+        item["user_source_selection_evidence"] = {
+            "path": selection.relative_to(self.repo).as_posix(),
+            "checksum_sha256": sha256(selection),
+        }
+        artifacts = [
+            source_binding,
+            prompt_binding,
+            {
+                "path": item["qa_evidence_path"],
+                "checksum_sha256": item["qa_evidence_checksum_sha256"],
+            },
+            {
+                "path": self.numbered_map_relative,
+                "checksum_sha256": sha256(self.numbered_map),
+            },
+            item["user_source_selection_evidence"],
+        ]
+        p2_gate = "visual_asset.S03-master-v01.P2_SATCHEL_TOPOLOGY"
+        subtitle_gate = "visual_asset.S03-master-v01.BOTTOM_SUBTITLE_SAFE_AREA"
+        override = {
+            "contract_version": "one-time-explicit-user-mechanical-gate-override-v1",
+            "episode_id": "episode-test",
+            "scope_id": "S03:base/master",
+            "gate_ids": [p2_gate, subtitle_gate],
+            "acknowledged_failures": [
+                {
+                    "gate_id": p2_gate,
+                    "observed_result": "fail",
+                    "reason": failure_reason,
+                },
+                {
+                    "gate_id": subtitle_gate,
+                    "observed_result": "fail",
+                    "reason": failure_reason,
+                },
+            ],
+            "bound_artifacts": artifacts,
+            "decision": {
+                "exact_user_message": (
+                    "接受 S03-master-v01 第一次失败图，并仅此一次放行 "
+                    "P2_SATCHEL_TOPOLOGY 与底部18%字幕安全区门禁；"
+                    "停止该资产后续自动重试，保留真实失败证据，以第一次失败图继续。"
+                ),
+                "decided_at": "2026-08-30T21:05:00+08:00",
+                "disposition": "allow_once",
+            },
+            "consumption": {
+                "from_phase": "visual_production",
+                "to_phase": "visual_production",
+                "status": "consumed",
+                "consumed_transition_id": "episode-test:S03-master:early-p2-subtitle:1",
+                "consumed_at": "2026-08-30T21:05:01+08:00",
+            },
+            "reuse_forbidden": True,
+        }
+        selection.write_text(
+            json.dumps({
+                "contract_version": "visual-asset-user-source-selection-v1",
+                "episode_id": "episode-test",
+                "asset_id": "S03-master-v01",
+                "generation_attempt_scope_id": "S03:base/master",
+                "selected_attempt_number": 1,
+                "selected_generation_source": source_binding,
+                "selected_prompt": prompt_binding,
+                "preserved_failure": {
+                    "attempt_number": 1,
+                    "error_code": "P2_SATCHEL_TOPOLOGY",
+                    "failure_reason": failure_reason,
+                },
+                "disclosed_gate_ids": [p2_gate, subtitle_gate],
+                "gate_effect": {
+                    "selection_recorded": True,
+                    "mechanical_gate_override_consumed": True,
+                    "release_decision": override["decision"],
+                    "consumed_transition_id": override["consumption"][
+                        "consumed_transition_id"
+                    ],
+                },
+            }, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        item["user_source_selection_evidence"]["checksum_sha256"] = sha256(
+            selection
+        )
+        override["override_sha256"] = MODULE._canonical_sha256(override)
+        item.update(
+            user_mechanical_gate_override=override,
+            waived_mechanical_gate_ids=[p2_gate, subtitle_gate],
+            override_bound_artifacts=artifacts,
+        )
+        self.write_state(item, extra_state={
+            "episode_id": "episode-test",
+            "blockers": [],
+        })
+        self.assertEqual(self.errors(), [])
+        item["image_generation_attempt_control"]["automatic_retry_status"] = (
+            "stopped_user_takeover_required"
+        )
+        self.write_state(item, extra_state={
+            "episode_id": "episode-test",
+            "blockers": [],
+        })
+        self.assertTrue(any(
+            "attempt-limit/white-cat failure history is stale" in error
+            for error in self.errors()
+        ))
+
+    def test_failed_p2_qa_requires_exact_consumed_override_and_audit_blocker(self) -> None:
+        item = self.item(
+            status="qa_failed_but_waived_once_pending_final_review",
+            qa_contract="ordinary-imagegen-white-cat-action-qa-v2",
+        )
+        item.update(
+            asset_id="S01-action-02-v01",
+            role="action-02",
+            asset_kind="hero_pose",
+            generation_attempt_scope_id="S01:action-02",
+            mechanical_qa_result="failed_but_waived_once",
+            user_mechanical_gate_override_result="pass_with_user_override",
+        )
+        qa_file = self.repo / item["qa_evidence_path"]
+        qa = json.loads(qa_file.read_text(encoding="utf-8"))
+        qa.update(result="fail", asset_id=item["asset_id"])
+        qa["identity_qa"].update(
+            result="fail",
+            accessory_geometry_correct=False,
+            satchel_count=1,
+            front_strap_attached_to_forward_bag_end=True,
+            rear_strap_attached_to_rear_bag_end=False,
+            bag_end_attachment_count=1,
+            himation_trim_distinct_from_bag_straps=True,
+            satchel_anatomical_flank="right",
+            both_bag_end_anchors_visibly_traceable=False,
+            source_retry_policy_compliant=False,
+        )
+        qa_file.write_text(
+            json.dumps(qa, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        item["qa_evidence_checksum_sha256"] = sha256(qa_file)
+        prompt = self.workspace / "assets/image/action-02-prompt.txt"
+        prompt.write_text(
+            "WHITE-CAT SATCHEL STRAP LOCK:\n"
+            "HERO-POSE ASSET: full-canvas transparent RGBA with fixed "
+            "registration anchors.\n",
+            encoding="utf-8",
+        )
+        item["prompt_path"] = prompt.relative_to(self.repo).as_posix()
+        item["prompt_checksum_sha256"] = sha256(prompt)
+        outputs = []
+        for attempt in (1, 2, 3):
+            output = self.workspace / f"assets/image/action-02-attempt-{attempt}.png"
+            output.write_bytes(f"attempt-{attempt}".encode())
+            outputs.append({
+                "path": output.relative_to(self.repo).as_posix(),
+                "checksum_sha256": sha256(output),
+            })
+        prompt_binding = {
+            "path": item["prompt_path"],
+            "checksum_sha256": item["prompt_checksum_sha256"],
+        }
+        failures = [{
+            "attempt_number": index + 1,
+            "prompt": prompt_binding,
+            "output": output,
+            "failure_reason": (
+                "P2_SATCHEL_TOPOLOGY: rear bag-end anchor missing"
+                if index == 2 else f"P2 failure {index + 1}"
+            ),
+            "error_code": "P2_SATCHEL_TOPOLOGY",
+        } for index, output in enumerate(outputs)]
+        item["image_generation_qa_failures"] = json.loads(json.dumps(failures))
+        item["white_cat_imagegen_qa_failures"] = json.loads(json.dumps(failures))
+        item["image_generation_attempt_control"] = {
+            "contract_version": "storyboard-image-generation-attempt-limit-v1",
+            "generation_attempt_scope_id": item["generation_attempt_scope_id"],
+            "maximum_automatic_rejected_generations": 3,
+            "rejected_generation_count": 3,
+            "automatic_retry_status": "stopped_user_takeover_required",
+        }
+        item["white_cat_generation_attempt_control"] = {
+            "contract_version": "white-cat-imagegen-attempt-limit-v1",
+            "maximum_automatic_qa_failures": 3,
+            "qa_failed_generation_count": 3,
+            "automatic_retry_status": "stopped_user_takeover_required",
+        }
+        attempt_gate = "storyboard-image-generation-attempt-limit:S01:action-02"
+        p2_gate = f"visual_asset.{item['asset_id']}.P2_SATCHEL_TOPOLOGY"
+        artifacts = [
+            {"path": item["path"], "checksum_sha256": item["checksum_sha256"]},
+            prompt_binding,
+            {
+                "path": item["qa_evidence_path"],
+                "checksum_sha256": item["qa_evidence_checksum_sha256"],
+            },
+            {
+                "path": self.numbered_map_relative,
+                "checksum_sha256": sha256(self.numbered_map),
+            },
+            outputs[2],
+        ]
+        override = {
+            "contract_version": "one-time-explicit-user-mechanical-gate-override-v1",
+            "episode_id": self.episode_id,
+            "scope_id": "S01:action-02",
+            "gate_ids": [attempt_gate, p2_gate],
+            "acknowledged_failures": [
+                {
+                    "gate_id": attempt_gate,
+                    "observed_result": "stopped_user_takeover_required",
+                    "reason": "three failures",
+                },
+                {
+                    "gate_id": p2_gate,
+                    "observed_result": "fail",
+                    "reason": failures[2]["failure_reason"],
+                },
+            ],
+            "bound_artifacts": artifacts,
+            "decision": {
+                "exact_user_message": "接受 S01-action-02-v01 的 P2 背带失败并放行三次限制",
+                "decided_at": "2026-08-29T18:20:00+08:00",
+                "disposition": "allow_once",
+            },
+            "consumption": {
+                "from_phase": "awaiting_visual_asset_review",
+                "to_phase": "visual_production",
+                "status": "consumed",
+                "consumed_transition_id": f"{self.episode_id}:S01-action-02:p2:1",
+                "consumed_at": "2026-08-29T18:20:01+08:00",
+            },
+            "reuse_forbidden": True,
+        }
+        override["override_sha256"] = MODULE._canonical_sha256(override)
+        item.update(
+            user_mechanical_gate_override=override,
+            waived_mechanical_gate_ids=[attempt_gate, p2_gate],
+            override_bound_artifacts=artifacts,
+        )
+        blocker = {
+            "blocker_id": attempt_gate,
+            "contract_version": "storyboard-image-generation-attempt-limit-v1",
+            "asset_id": item["asset_id"],
+            "generation_attempt_scope_id": item["generation_attempt_scope_id"],
+            "status": "failed_but_waived_once",
+            "user_mechanical_gate_override_sha256": override["override_sha256"],
+        }
+        self.write_state(item, extra_state={"episode_id": self.episode_id, "blockers": [blocker]})
+        self.assertEqual(self.errors(), [])
+
+        combined_item = json.loads(json.dumps(item))
+        combined_blocker = json.loads(json.dumps(blocker))
+        combined_qa = json.loads(json.dumps(qa))
+        combined_reason = (
+            "P0_FORWARD_REVERSE_MISMATCH: anatomical front is screen-right and "
+            "rear is screen-left; the rear wide blue path also fails to reach a "
+            "distinct rear bag-end ring."
+        )
+        original_prompt_text = prompt.read_text(encoding="utf-8")
+        original_qa_bytes = qa_file.read_bytes()
+        prompt.write_text(
+            original_prompt_text
+            + "CAT FACING MAP: torso three-quarter screen-left; anatomical front "
+            "and chest map screen-left; anatomical rear and rump map screen-right.\n",
+            encoding="utf-8",
+        )
+        combined_prompt_binding = {
+            "path": combined_item["prompt_path"],
+            "checksum_sha256": sha256(prompt),
+        }
+        combined_item["prompt_checksum_sha256"] = combined_prompt_binding[
+            "checksum_sha256"
+        ]
+        for failure_list in (
+            combined_item["image_generation_qa_failures"],
+            combined_item["white_cat_imagegen_qa_failures"],
+        ):
+            for failure in failure_list:
+                failure["prompt"] = json.loads(json.dumps(combined_prompt_binding))
+        combined_item["white_cat_imagegen_qa_failures"][-1].update(
+            error_code="P0_FORWARD_REVERSE_MISMATCH",
+            failure_reason=combined_reason,
+        )
+        combined_qa["identity_qa"].update(
+            cat_facing_screen_direction="three-quarter-screen-right",
+            anatomical_front_maps_to_screen="screen-right",
+            anatomical_rear_maps_to_screen="screen-left",
+            forward_reverse_mapping_qa={
+                "contract_version": "white-cat-forward-reverse-mapping-qa-v1",
+                "result": "fail",
+                "error_code": "P0_FORWARD_REVERSE_MISMATCH",
+                "expected_cat_facing_screen_direction": "three-quarter-screen-left",
+                "expected_anatomical_front_maps_to_screen": "screen-left",
+                "expected_anatomical_rear_maps_to_screen": "screen-right",
+                "observed_cat_facing_screen_direction": "three-quarter-screen-right",
+                "observed_anatomical_front_maps_to_screen": "screen-right",
+                "observed_anatomical_rear_maps_to_screen": "screen-left",
+                "failure_reason": combined_reason,
+            },
+        )
+        combined_qa["waivable_mechanical_failures"] = [
+            {
+                "error_code": "P0_FORWARD_REVERSE_MISMATCH",
+                "observed_result": "fail",
+                "reason": combined_reason,
+            },
+            {
+                "error_code": "P2_SATCHEL_TOPOLOGY",
+                "observed_result": "fail",
+                "reason": combined_reason,
+            },
+        ]
+        qa_file.write_text(
+            json.dumps(combined_qa, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        combined_item["qa_evidence_checksum_sha256"] = sha256(qa_file)
+        combined_artifacts = [
+            {
+                "path": combined_item["path"],
+                "checksum_sha256": combined_item["checksum_sha256"],
+            },
+            combined_prompt_binding,
+            {
+                "path": combined_item["qa_evidence_path"],
+                "checksum_sha256": combined_item["qa_evidence_checksum_sha256"],
+            },
+            {
+                "path": self.numbered_map_relative,
+                "checksum_sha256": sha256(self.numbered_map),
+            },
+            outputs[2],
+        ]
+        p0_gate = (
+            f"visual_asset.{combined_item['asset_id']}.P0_FORWARD_REVERSE_MISMATCH"
+        )
+        combined_override = json.loads(json.dumps(override))
+        combined_override["gate_ids"] = [attempt_gate, p0_gate, p2_gate]
+        combined_override["acknowledged_failures"] = [
+            combined_override["acknowledged_failures"][0],
+            {
+                "gate_id": p0_gate,
+                "observed_result": "fail",
+                "reason": combined_reason,
+            },
+            {
+                "gate_id": p2_gate,
+                "observed_result": "fail",
+                "reason": combined_reason,
+            },
+        ]
+        combined_override["bound_artifacts"] = combined_artifacts
+        combined_override["decision"]["exact_user_message"] = (
+            "接受 S01-action-02-v01 第三次失败图，并仅此一次放行三次尝试"
+            "限制、P0 前后朝向门禁与 P2 背带拓扑门禁；保留真实提示词及"
+            "失败证据。"
+        )
+        combined_override["consumption"]["consumed_transition_id"] = (
+            f"{self.episode_id}:S01-action-02:p0-p2:1"
+        )
+        combined_override.pop("override_sha256")
+        combined_override["override_sha256"] = MODULE._canonical_sha256(
+            combined_override
+        )
+        combined_item.update(
+            user_mechanical_gate_override=combined_override,
+            waived_mechanical_gate_ids=combined_override["gate_ids"],
+            override_bound_artifacts=combined_artifacts,
+        )
+        combined_blocker["user_mechanical_gate_override_sha256"] = (
+            combined_override["override_sha256"]
+        )
+        self.write_state(
+            combined_item,
+            extra_state={
+                "episode_id": self.episode_id,
+                "blockers": [combined_blocker],
+            },
+        )
+        self.assertEqual(self.errors(), [])
+
+        prompt.write_text(original_prompt_text, encoding="utf-8")
+        qa_file.write_bytes(original_qa_bytes)
+
+        original_item = json.loads(json.dumps(item))
+        original_blocker = json.loads(json.dumps(blocker))
+        prompt.write_text(
+            "FINAL P2 CAMERA AND BAG-END LAYOUT — BLOCKING PRIORITY:\n"
+            "HERO-POSE ASSET: full-canvas transparent RGBA after deterministic "
+            "chroma conversion, with fixed registration anchors.\n",
+            encoding="utf-8",
+        )
+        item["asset_kind"] = "hero_pose"
+        item["prompt_checksum_sha256"] = sha256(prompt)
+        prompt_binding["checksum_sha256"] = item["prompt_checksum_sha256"]
+        for failure_list in (
+            item["image_generation_qa_failures"],
+            item["white_cat_imagegen_qa_failures"],
+        ):
+            for failure in failure_list:
+                failure["prompt"] = json.loads(json.dumps(prompt_binding))
+        prompt_gate_ids = [
+            f"visual_asset.{item['asset_id']}.P2_PROMPT_FIXED_MARKER",
+            f"visual_asset.{item['asset_id']}.HERO_POSE_PROMPT_FIXED_MARKER",
+        ]
+        prompt_failures = [
+            {
+                "gate_id": prompt_gate_ids[0],
+                "observed_result": "fail",
+                "reason": (
+                    "P2_PROMPT_FIXED_MARKER: required literal is missing: "
+                    "WHITE-CAT SATCHEL STRAP LOCK:"
+                ),
+            },
+            {
+                "gate_id": prompt_gate_ids[1],
+                "observed_result": "fail",
+                "reason": (
+                    "HERO_POSE_PROMPT_FIXED_MARKER: required literal is missing: "
+                    "HERO-POSE ASSET: full-canvas transparent RGBA with fixed "
+                    "registration anchors."
+                ),
+            },
+        ]
+        override["gate_ids"].extend(prompt_gate_ids)
+        override["acknowledged_failures"].extend(
+            json.loads(json.dumps(prompt_failures))
+        )
+        override["decision"]["supplemental_exact_user_messages"] = [{
+            "exact_user_message": (
+                "对 S01-action-02-v01 本次转换，追加一次性放行 P2 提示词固定"
+                "标记缺失与 HERO-POSE 固定标记不完全匹配门禁；保留真实提示词"
+                "及失败证据。"
+            ),
+            "decided_at": "2026-08-29T18:21:00+08:00",
+            "disposition": "allow_once",
+            "gate_ids": prompt_gate_ids,
+        }]
+        override.pop("override_sha256")
+        override["override_sha256"] = MODULE._canonical_sha256(override)
+        item["waived_mechanical_gate_ids"] = override["gate_ids"]
+        item["override_bound_artifacts"] = artifacts
+        item["prompt_contract_qa"] = {
+            "contract_version": "white-cat-prompt-fixed-marker-qa-v1",
+            "result": "failed_but_waived_once",
+            "prompt": prompt_binding,
+            "failures": json.loads(json.dumps(prompt_failures)),
+        }
+        blocker["user_mechanical_gate_override_sha256"] = override["override_sha256"]
+        self.write_state(
+            item,
+            extra_state={"episode_id": self.episode_id, "blockers": [blocker]},
+        )
+        self.assertEqual(self.errors(), [])
+
+        item["prompt_contract_qa"]["failures"][0]["reason"] = "stale reason"
+        self.write_state(
+            item,
+            extra_state={"episode_id": self.episode_id, "blockers": [blocker]},
+        )
+        self.assertTrue(any(
+            "prompt-marker QA evidence is stale" in error
+            for error in self.errors()
+        ))
+        item["prompt_contract_qa"]["failures"] = json.loads(
+            json.dumps(prompt_failures)
+        )
+
+        override["decision"]["supplemental_exact_user_messages"][0][
+            "exact_user_message"
+        ] = "一次性放行提示词门禁"
+        override.pop("override_sha256")
+        override["override_sha256"] = MODULE._canonical_sha256(override)
+        blocker["user_mechanical_gate_override_sha256"] = override["override_sha256"]
+        self.write_state(
+            item,
+            extra_state={"episode_id": self.episode_id, "blockers": [blocker]},
+        )
+        self.assertTrue(any(
+            "supplemental prompt-marker release is stale" in error
+            for error in self.errors()
+        ))
+
+        item = original_item
+        blocker = original_blocker
+        prompt.write_text(
+            "WHITE-CAT SATCHEL STRAP LOCK:\n"
+            "HERO-POSE ASSET: full-canvas transparent RGBA with fixed "
+            "registration anchors.\n",
+            encoding="utf-8",
+        )
+
+        blocker["status"] = "resolved"
+        self.write_state(item, extra_state={"episode_id": self.episode_id, "blockers": [blocker]})
+        self.assertTrue(any("attempt-limit blocker is stale" in error for error in self.errors()))
 
     def test_pending_imagegen_action_requires_action_v2(self) -> None:
         item = self.item(status="awaiting_batch_qa")
@@ -665,6 +1401,23 @@ class EpisodeWorkspaceValidatorTests(unittest.TestCase):
         self.write_state(item)
         self.assertEqual(self.errors(), [])
 
+    def test_stopped_ian_earlier_repair_source_requires_exact_consumed_override(
+        self,
+    ) -> None:
+        item = self.attach_stopped_ian_earlier_source_override(
+            self.attach_ian_v2_package(
+                self.ian_item(status="qa_passed_pending_final_review")
+            )
+        )
+        self.write_state(item, extra_state={"episode_id": self.episode_id})
+        self.assertEqual(self.errors(), [])
+
+        item.pop("ian_layout_repair_source_selection")
+        self.write_state(item, extra_state={"episode_id": self.episode_id})
+        self.assertTrue(any(
+            "lacks a consumed exact override" in error for error in self.errors()
+        ))
+
     def test_qa_passed_ian_rejects_v1_package_in_unfinished_episode(self) -> None:
         item = self.attach_ian_v2_package(
             self.ian_item(status="qa_passed_pending_final_review")
@@ -678,10 +1431,10 @@ class EpisodeWorkspaceValidatorTests(unittest.TestCase):
         self.assertTrue(any("manifest is stale" in error for error in self.errors()))
 
     def visible_text_review_state(self, *, row_approval: bool = False) -> dict:
-        storyboard_path = "leverage-video/src/topic1/assets/narration/storyboard-v1.md"
+        storyboard_path = f"{self.workspace_relative}/assets/narration/storyboard-v1.md"
         storyboard = self.repo / storyboard_path
         storyboard.write_text("storyboard", encoding="utf-8")
-        direction_path = "leverage-video/src/topic1/schema/direction-v3.json"
+        direction_path = f"{self.workspace_relative}/schema/direction-v3.json"
         direction = {
             "contract_version": "per-shot-visual-direction-review-v3",
             "status": "policy_authorized",
@@ -726,7 +1479,7 @@ class EpisodeWorkspaceValidatorTests(unittest.TestCase):
             row["approval"] = {"status": "approved"}
         review = {
             "contract_version": "visible-text-batch-review-v1",
-            "episode_workspace": "leverage-video/src/topic1",
+            "episode_workspace": self.workspace_relative,
             "status": "approved",
             "storyboard": direction["storyboard"],
             "visual_direction_review": direction_binding,
@@ -763,14 +1516,14 @@ class EpisodeWorkspaceValidatorTests(unittest.TestCase):
             "user_has_reviewed_complete_map": True,
             "row_by_row_approval_performed": False,
         }
-        review_path = "leverage-video/src/topic1/schema/visible-text-batch-review-v1.json"
+        review_path = f"{self.workspace_relative}/schema/visible-text-batch-review-v1.json"
         review_file = self.repo / review_path
         review_file.write_text(
             json.dumps(review, ensure_ascii=False, indent=2) + "\n",
             encoding="utf-8",
         )
         return {
-            "workspace_path": "leverage-video/src/topic1",
+            "workspace_path": self.workspace_relative,
             "visual_direction_review": direction_binding,
             "visible_text_review": {
                 "contract_version": "visible-text-batch-review-v1",
@@ -986,7 +1739,7 @@ class EpisodeWorkspaceValidatorTests(unittest.TestCase):
             "result": "pass",
             "sound_effects_projection_sha256": "f" * 64,
             "narration": {
-                "asset": "topic99/assets/audio/narration.wav",
+                "asset": "episode-test/assets/audio/narration.wav",
                 "checksum_sha256": "c" * 64,
                 "gain": 1,
             },

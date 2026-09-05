@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
+import fs from 'node:fs';
 import test from 'node:test';
 
 import {
@@ -13,6 +14,13 @@ import {
 } from './validate-final-storyboard.mjs';
 
 const sha256 = (bytes) => crypto.createHash('sha256').update(bytes).digest('hex');
+
+test('active v3 storyboard validation uses direct-first S01 order without OPEN-00', () => {
+  const source = fs.readFileSync(new URL('./validate-final-storyboard.mjs', import.meta.url), 'utf8');
+  assert.match(source, /const expectedShotIds = review\.rows\.map\(\(row\) => row\.shot_id\)/);
+  assert.doesNotMatch(source, /const expectedShotIds = \['OPEN-00'/);
+  assert.match(source, /direct-first-shot-v1/);
+});
 
 test('validates the review duration as exact shot frames divided by 30', () => {
   assert.equal(validateSummaryDurationSeconds(

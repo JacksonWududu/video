@@ -7,7 +7,11 @@ import test from 'node:test';
 import sharp from 'sharp';
 
 import {buildIanLayeredScenePackage} from './build-package.mjs';
-import {inspectIanLayeredScenePackage, sha256Text} from './contract.mjs';
+import {
+  inspectIanLayeredScenePackage,
+  sha256Text,
+  validateIanLayeredScenePackage,
+} from './contract.mjs';
 
 const root = path.resolve(import.meta.dirname, '../../../..');
 const sha256 = (value) => crypto.createHash('sha256').update(value).digest('hex');
@@ -66,7 +70,7 @@ const withC2pa = (png) => {
 };
 
 const planFor = (narration) => ({
-  contract_version: 'ian-layered-scene-plan-v1', shot_id: 'S17',
+  contract_version: 'ian-layered-scene-plan-v1', shot_id: 'S02',
   narration_source_text_sha256: sha256Text(narration),
   scene_renderer: 'ian-static-layered-scene-v1', background_policy: 'static-paper-background-v1',
   layer_asset_policy: 'full-canvas-transparent-png-v1',
@@ -94,14 +98,17 @@ const fixture = async (t, {mode = 'none', c2pa = true, gutter = 8, badBbox = fal
   const sourcePath = path.join(assets, 'source.png');
   const promptPath = path.join(assets, 'prompt.txt');
   write(sourcePath, source);
-  write(promptPath, '16:9 landscape composition; no visible text; separated zones.');
+  write(promptPath, '16:9 landscape composition; no visible text; separated zones. IAN BOTTOM SUBTITLE SAFE AREA: x=0, y=832, width=1920, height=248.');
   const fontPath = '/System/Library/Fonts/STHeiti Light.ttc';
   const config = {
     queue_item: {
-      asset_id: 'S17-ian-v01', shot_id: 'S17', treatment_profile_id: 'ian-handdrawn-technical',
+      asset_id: 'S02-ian-v01', shot_id: 'S02', treatment_profile_id: 'ian-handdrawn-technical',
       storyboard_path: `${episode}/storyboard.md`, storyboard_checksum_sha256: '1'.repeat(64),
       visual_direction_review_path: `${episode}/schema/direction.json`, visual_direction_review_checksum_sha256: '2'.repeat(64), visual_direction_presented_map_sha256: '3'.repeat(64),
       narration_source_text: narration, shot_start_frame: 100, shot_end_frame: 160,
+      visible_text_mode: mode,
+      exact_visible_text: mode === 'required' ? '个人理性\n集体收缩' : null,
+      visible_text_placement: mode === 'required' ? '左右对照区，各自居中' : null,
       ian_scene_plan: planFor(narration),
     },
     source_master: {path: relative(sourcePath), checksum_sha256: sha256(source)},
@@ -116,7 +123,10 @@ const fixture = async (t, {mode = 'none', c2pa = true, gutter = 8, badBbox = fal
     text_overlay: mode === 'none' ? {contract_version: 'ian-deterministic-layer-text-overlay-v1', mode: 'none', font: null, minimum_inset_px: 8, labels: []} : {
       contract_version: 'ian-deterministic-layer-text-overlay-v1', mode: 'required', minimum_inset_px: 8,
       font: {path: fontPath, checksum_sha256: sha256(fs.readFileSync(fontPath)), font_family: 'Heiti SC'},
-      labels: [{layer_id: 'L01', text: '甲乙', lines: ['甲乙'], container_bbox: {x: 120, y: 560, width: 300, height: 100}, font_size: 34, font_weight: 500, letter_spacing: 0, fill: '#26333a', background: null}],
+      labels: [
+        {layer_id: 'L01', text: '个人理性', lines: ['个人理性'], container_bbox: {x: 120, y: 560, width: 300, height: 100}, font_size: 34, font_weight: 500, letter_spacing: 0, fill: '#26333a', background: null},
+        {layer_id: 'L02', text: '集体收缩', lines: ['集体收缩'], container_bbox: {x: 1300, y: 600, width: 300, height: 100}, font_size: 34, font_weight: 500, letter_spacing: 0, fill: '#26333a', background: null},
+      ],
     },
     output: {
       manifest_path: `${episode}/schema/ian-package.json`, qa_skeleton_path: `${episode}/schema/ian-qa.json`,
@@ -134,6 +144,9 @@ test('builds a text-free package and skeleton that inspector replays', async (t)
   assert.equal(result.containment_evidence, null);
   const manifest = JSON.parse(fs.readFileSync(path.join(root, config.output.manifest_path)));
   assert.equal(manifest.text_overlay.mode, 'none');
+  assert.deepEqual(manifest.split_spec.subtitle_safe_area.safe_area, {
+    x: 0, y: 832, width: 1920, height: 248,
+  });
   assert.deepEqual(manifest.verified_visible_text, []);
   assert.equal((await inspectIanLayeredScenePackage(manifest, {repositoryRoot: root, episodeWorkspace: episode})).result, 'pass');
 });
@@ -144,7 +157,29 @@ test('builds required text and containment evidence', async (t) => {
   assert.equal(result.containment_evidence.result, 'pass');
   assert.ok(fs.existsSync(path.join(root, config.output.containment_evidence_path)));
   const manifest = JSON.parse(fs.readFileSync(path.join(root, config.output.manifest_path)));
-  assert.equal((await inspectIanLayeredScenePackage(manifest, {repositoryRoot: root, episodeWorkspace: episode})).result, 'pass');
+  assert.deepEqual(manifest.text_overlay.labels.map((label) => label.text), ['个人理性', '集体收缩']);
+  assert.deepEqual(manifest.verified_visible_text, ['个人理性\n集体收缩']);
+  assert.equal((await inspectIanLayeredScenePackage(manifest, {
+    repositoryRoot: root,
+    episodeWorkspace: episode,
+    visibleTextMode: 'required',
+    exactVisibleText: '个人理性\n集体收缩',
+  })).result, 'pass');
+
+  const substituted = structuredClone(manifest);
+  substituted.text_overlay.labels[1].text = '集体扩张';
+  substituted.text_overlay.labels[1].lines = ['集体扩张'];
+  assert.throws(() => validateIanLayeredScenePackage(substituted, {
+    visibleTextMode: 'required',
+    exactVisibleText: '个人理性\n集体收缩',
+  }), /exact approved visible text/);
+
+  const dropped = structuredClone(manifest);
+  dropped.text_overlay.labels.pop();
+  assert.throws(() => validateIanLayeredScenePackage(dropped, {
+    visibleTextMode: 'required',
+    exactVisibleText: '个人理性\n集体收缩',
+  }), /exact approved visible text/);
 });
 
 test('refuses overwrite, invalid gutter, and source lacking C2PA', async (t) => {
@@ -157,4 +192,68 @@ test('refuses overwrite, invalid gutter, and source lacking C2PA', async (t) => 
   await assert.rejects(() => buildIanLayeredScenePackage({episodeWorkspace: badBbox.episode, config: badBbox.config}), /bbox/);
   const noC2pa = await fixture(t, {c2pa: false});
   await assert.rejects(() => buildIanLayeredScenePackage({episodeWorkspace: noC2pa.episode, config: noC2pa.config}), /C2PA/);
+  const missingSafeAreaPrompt = await fixture(t);
+  const promptPath = path.join(root, missingSafeAreaPrompt.config.prompt.path);
+  const promptBytes = Buffer.from('16:9 landscape composition; no visible text; separated zones.');
+  fs.writeFileSync(promptPath, promptBytes);
+  missingSafeAreaPrompt.config.prompt.checksum_sha256 = sha256(promptBytes);
+  await assert.rejects(
+    () => buildIanLayeredScenePackage({
+      episodeWorkspace: missingSafeAreaPrompt.episode,
+      config: missingSafeAreaPrompt.config,
+    }),
+    /Ian 23% bottom subtitle safe area/,
+  );
+});
+
+test('reuses an unchanged pre-policy prompt only for an audited deterministic relayout', async (t) => {
+  const {config, episode} = await fixture(t);
+  const promptPath = path.join(root, config.prompt.path);
+  const promptBytes = Buffer.from('16:9 landscape composition; no visible text; separated zones.');
+  fs.writeFileSync(promptPath, promptBytes);
+  config.prompt.checksum_sha256 = sha256(promptBytes);
+  config.rejected_attempts = [structuredClone(config.source_master)];
+  config.split_spec.subtitle_safe_area = {
+    contract_version: 'ian-bottom-subtitle-safe-area-v1',
+    target_height_percent: 23,
+    pixel_rounding: 'nearest-integer-v1',
+    safe_area: {x: 0, y: 832, width: 1920, height: 248},
+  };
+  config.split_spec.layout_repair = {
+    contract_version: 'ian-pre-split-layout-repair-v1',
+    method: 'matte-alpha-rational-downscale-integer-translate-v1',
+    authorization: {
+      asset_id: 'S02-ian-v01',
+      exact_user_message: '按照新规则修改S02',
+    },
+    source_failure: {
+      attempt_number: 3,
+      prompt: structuredClone(config.prompt),
+      output: structuredClone(config.source_master),
+      failure_reason: 'historical source predates the current Ian subtitle-safe prompt marker',
+    },
+    source_outside_union_max_visible_pixels: 1024,
+    source_bbox_minimum_matte_gutter_px: 8,
+    layers: [
+      {
+        layer_id: 'L01',
+        source_bbox: {x: 64, y: 184, width: 432, height: 432},
+        scale_numerator: 1,
+        scale_denominator: 1,
+        target_bbox: {x: 80, y: 200, width: 432, height: 432},
+      },
+      {
+        layer_id: 'L02',
+        source_bbox: {x: 1392, y: 292, width: 416, height: 416},
+        scale_numerator: 1,
+        scale_denominator: 1,
+        target_bbox: {x: 1300, y: 300, width: 416, height: 416},
+      },
+    ],
+  };
+  const result = await buildIanLayeredScenePackage({episodeWorkspace: episode, config});
+  assert.equal(result.result, 'pass');
+  const manifest = JSON.parse(fs.readFileSync(path.join(root, config.output.manifest_path)));
+  assert.equal(manifest.master_generation.prompt.checksum_sha256, sha256(promptBytes));
+  assert.equal(manifest.split_spec.subtitle_safe_area.safe_area.y, 832);
 });

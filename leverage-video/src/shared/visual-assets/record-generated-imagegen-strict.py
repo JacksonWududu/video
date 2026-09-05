@@ -9,12 +9,16 @@ import math
 from pathlib import Path
 import re
 import struct
+import subprocess
 from typing import Any
 import zlib
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
 GATE_PATH = REPOSITORY_ROOT / ".agents/skills/run-knowledge-video/scripts/validate_visual_approval_state.py"
+OVERRIDE_BRIDGE_PATH = (
+    Path(__file__).resolve().parents[1] / "user-gate-override/consume-override.mjs"
+)
 CANONICAL_ROOT = Path("/Users/jackson/Documents/Codex/character-library/white-cat/v2").resolve()
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 WHITE_CAT_SATCHEL_PROMPT_MARKER = "WHITE-CAT SATCHEL STRAP LOCK:"
@@ -35,6 +39,7 @@ WHITE_CAT_REAR_TRACE = [
 WHITE_CAT_ANATOMY_QA_VERSION = "white-cat-anatomy-qa-v2"
 WHITE_CAT_MASTER_QA_VERSION = "ordinary-imagegen-white-cat-master-qa-v2"
 WHITE_CAT_ACTION_QA_VERSION = "ordinary-imagegen-white-cat-action-qa-v2"
+HERO_POSE_BACKGROUND_QA_VERSION = "ordinary-imagegen-hero-pose-background-qa-v1"
 WHITE_CAT_LIMB_IDS = {"F1", "F2", "H1", "H2"}
 WHITE_CAT_STYLE_SELECTION_VERSION = "white-cat-visual-style-selection-v1"
 WHITE_CAT_STYLE_SELECTION_VERSION_V2 = "white-cat-visual-style-selection-v2"
@@ -57,6 +62,128 @@ DYNAMIC_WHITE_CAT_STYLE_OPTION = {
     "treatment_profile_id": "imagegen-cover-derived-narrative",
     "visual_cohesion_profile_id": "cover-derived-cohesion-v1",
 }
+P0_AMBIGUOUS_TRACE = "P0_AMBIGUOUS_TRACE"
+WAIVED_PENDING_FINAL_REVIEW_STATUS = (
+    "qa_failed_but_waived_once_pending_final_review"
+)
+TAKEOVER_ITEM_STATUSES = {
+    "pending_generation",
+    "changes_requested",
+    "awaiting_batch_qa",
+    "awaiting_user_approval",
+}
+
+
+def _is_stopped_takeover_target(
+    state: dict[str, Any], item: dict[str, Any] | None, asset_id: str,
+) -> bool:
+    review = state.get("visual_asset_review", {})
+    controls = (
+        item.get("image_generation_attempt_control", {}) if item else {},
+        item.get("white_cat_generation_attempt_control", {}) if item else {},
+    )
+    return bool(
+        item
+        and item.get("status") in TAKEOVER_ITEM_STATUSES
+        and review.get("user_takeover_required") is True
+        and review.get("user_takeover_asset_id") == asset_id
+        and review.get("current_asset_id") == asset_id
+        and review.get("queue_generation_allowed") is False
+        and any(
+            control.get("automatic_retry_status")
+            == "stopped_user_takeover_required"
+            for control in controls
+        )
+    )
+
+
+def _consumed_transition_ids(value: object) -> set[str]:
+    found: set[str] = set()
+    if isinstance(value, dict):
+        for key, nested in value.items():
+            if key == "consumed_transition_id" and isinstance(nested, str):
+                found.add(nested)
+            else:
+                found.update(_consumed_transition_ids(nested))
+    elif isinstance(value, list):
+        for nested in value:
+            found.update(_consumed_transition_ids(nested))
+    return found
+
+
+def _consume_user_gate_override(
+    override: dict[str, Any],
+    *,
+    episode_id: str,
+    scope_id: str,
+    gate_ids: list[str],
+    artifacts: list[dict[str, str]],
+    transition_id: str,
+    consumed_at: str,
+) -> dict[str, Any]:
+    payload = {
+        "operation": "consume",
+        "override": override,
+        "bindings": {
+            "episodeId": episode_id,
+            "requiredScopeId": scope_id,
+            "requiredGateIds": gate_ids,
+            "requiredArtifacts": artifacts,
+            "fromPhase": "awaiting_visual_asset_review",
+            "toPhase": "visual_production",
+        },
+        "consumed_transition_id": transition_id,
+        "consumed_at": consumed_at,
+    }
+    try:
+        command = subprocess.run(
+            ["node", str(OVERRIDE_BRIDGE_PATH)],
+            input=json.dumps(payload, ensure_ascii=False),
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+    except OSError as error:
+        raise ValueError("one-time user gate override validator is unavailable") from error
+    if command.returncode != 0:
+        detail = command.stderr.strip() or "validation failed"
+        raise ValueError(f"one-time user gate override: {detail}")
+    try:
+        consumed = json.loads(command.stdout)
+    except json.JSONDecodeError as error:
+        raise ValueError(
+            "one-time user gate override validator returned invalid JSON"
+        ) from error
+    if not isinstance(consumed, dict):
+        raise ValueError(
+            "one-time user gate override validator returned an invalid record"
+        )
+    return consumed
+
+
+def _clear_active_takeover(review: dict[str, Any]) -> None:
+    for key in (
+        "user_takeover_required",
+        "user_takeover_asset_id",
+        "user_takeover_scope_id",
+        "user_takeover_message",
+    ):
+        review.pop(key, None)
+
+
+def next_generation_target(
+    queue: list[dict[str, Any]], generation_unlocking_statuses: set[str]
+) -> dict[str, Any] | None:
+    return next(
+        (
+            item
+            for item in queue
+            if item.get("active_for_current_storyboard") is not False
+            and item.get("status") != "superseded"
+            and item.get("status") not in generation_unlocking_statuses
+        ),
+        None,
+    )
 
 
 def _canonical_sha256(value: Any) -> str:
@@ -69,6 +196,50 @@ def _canonical_sha256(value: Any) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+def load_white_cat_visual_style_selection(state: dict[str, Any]) -> dict[str, Any]:
+    summary = state.get("white_cat_visual_style_selection")
+    if not isinstance(summary, dict):
+        raise ValueError("white-cat visual style selection is missing or unsupported")
+    path_value = summary.get("path")
+    checksum = summary.get("file_checksum_sha256")
+    if path_value is None and checksum is None:
+        return summary
+    if not isinstance(path_value, str) or not SHA256_RE.fullmatch(str(checksum or "")):
+        raise ValueError("white-cat visual style selection file binding is incomplete")
+    selection_file = checksum_bound_file(
+        {"path": path_value, "checksum_sha256": checksum},
+        "white-cat visual style selection",
+    )
+    try:
+        selection = json.loads(selection_file.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise ValueError("white-cat visual style selection file is invalid JSON") from error
+    if not isinstance(selection, dict) or summary.get("status") != "selected":
+        raise ValueError("white-cat visual style selection summary is invalid")
+    summary_fields = [
+        "contract_version",
+        "selection_sha256",
+        "style_id",
+        "treatment_profile_id",
+        "visual_cohesion_profile_id",
+        "style_profile_path",
+        "style_profile_checksum_sha256",
+        "decision",
+    ]
+    if selection.get("contract_version") == WHITE_CAT_STYLE_SELECTION_VERSION_V2:
+        summary_fields.extend(
+            [
+                "style_source",
+                "style_label",
+                "publishing_cover_package_path",
+                "publishing_cover_package_sha256",
+            ]
+        )
+    if any(summary.get(field) != selection.get(field) for field in summary_fields):
+        raise ValueError("white-cat visual style selection summary is stale or substituted")
+    return selection
+
+
 def resolve_white_cat_visual_style_binding(
     state: dict[str, Any], item: dict[str, Any]
 ) -> tuple[str, str, bool]:
@@ -76,12 +247,12 @@ def resolve_white_cat_visual_style_binding(
     selection_sha256 = item.get("white_cat_visual_style_selection_sha256")
     cohesion_id = item.get("visual_cohesion_profile_id")
     if style_id is None and selection_sha256 is None and cohesion_id is None:
+        if state.get("white_cat_visual_style_selection") is not None:
+            raise ValueError("ordinary ImageGen episode style binding is missing")
         return "loose-line-vivid-watercolor", "warm-paper-watercolor-cohesion-v1", False
     if style_id is None or not SHA256_RE.fullmatch(selection_sha256 or "") or cohesion_id is None:
         raise ValueError("white-cat visual style binding is incomplete")
-    selection = state.get("white_cat_visual_style_selection")
-    if not isinstance(selection, dict):
-        raise ValueError("white-cat visual style selection is missing or unsupported")
+    selection = load_white_cat_visual_style_selection(state)
     contract_version = selection.get("contract_version")
     option = WHITE_CAT_STYLE_OPTIONS.get(style_id)
     projection: dict[str, Any] = {
@@ -396,6 +567,109 @@ def validate_white_cat_anatomy_qa_v2(
         raise ValueError("P0_EVIDENCE_STALE: anatomy result is inconsistent with passing evidence")
 
 
+def validate_white_cat_ambiguous_trace_failure(
+    identity: dict[str, Any],
+    *,
+    selected_source: dict[str, Any],
+    selected_source_file: Path,
+    expected_reason: str,
+) -> None:
+    if (
+        identity.get("result") != "fail"
+        or identity.get("cat_count") != 1
+        or identity.get("foreleg_count") != 2
+        or identity.get("hindleg_count") != 2
+        or identity.get("paw_count") != 4
+    ):
+        raise ValueError(
+            "P0_AMBIGUOUS_TRACE: failed identity counts or disposition are stale"
+        )
+    anatomy = identity.get("anatomy_evidence")
+    if (
+        not isinstance(anatomy, dict)
+        or anatomy.get("contract_version") != WHITE_CAT_ANATOMY_QA_VERSION
+        or anatomy.get("result") != "fail"
+        or anatomy.get("error_code") != P0_AMBIGUOUS_TRACE
+        or anatomy.get("failure_reason") != expected_reason
+        or anatomy.get("source_image") != {
+            "path": selected_source.get("path"),
+            "checksum_sha256": selected_source.get("checksum_sha256"),
+        }
+    ):
+        raise ValueError(
+            "P0_AMBIGUOUS_TRACE: anatomy failure evidence is missing or stale"
+        )
+    source_dimensions = png_dimensions(selected_source_file)
+    if anatomy.get("canvas") != {
+        "width": source_dimensions[0],
+        "height": source_dimensions[1],
+    }:
+        raise ValueError("P0_EVIDENCE_STALE: anatomy failure canvas is stale")
+    traces = anatomy.get("limb_traces")
+    if not isinstance(traces, list) or len(traces) != 4 or any(
+        not isinstance(trace, dict) for trace in traces
+    ):
+        raise ValueError("P0_AMBIGUOUS_TRACE: four trace records are required")
+    trace_ids = [trace.get("id") for trace in traces]
+    paw_ids = [trace.get("paw_region_id") for trace in traces]
+    if (
+        trace_ids != ["F1", "F2", "H1", "H2"]
+        or len(set(paw_ids)) != 4
+        or any(not isinstance(paw_id, str) or not paw_id for paw_id in paw_ids)
+        or [
+            trace.get("id")
+            for trace in traces
+            if trace.get("continuous_to_torso") is not True
+        ]
+        != ["H1"]
+        or next(trace for trace in traces if trace.get("id") == "H1").get(
+            "ambiguity_reason"
+        )
+        != expected_reason
+    ):
+        raise ValueError(
+            "P0_AMBIGUOUS_TRACE: the exact H1 ambiguity is not preserved"
+        )
+    if (
+        anatomy.get("forward_trace_ids") != ["F1", "F2", "H1", "H2"]
+        or anatomy.get("reverse_trace_ids") != ["F1", "F2", "H1", "H2"]
+        or anatomy.get("unassigned_paw_like_shapes") != 0
+        or anatomy.get("ambiguous_limb_regions") != 1
+        or anatomy.get("branched_or_fused_limb_regions") != 0
+    ):
+        raise ValueError(
+            "P0_AMBIGUOUS_TRACE: unresolved-region evidence is missing or stale"
+        )
+    evidence = anatomy.get("inspection_evidence")
+    if (
+        not isinstance(evidence, dict)
+        or evidence.get("methods")
+        != ["full_resolution", "numbered_limb_map"]
+        or evidence.get("numbered_limb_map_source_checksum_sha256")
+        != selected_source.get("checksum_sha256")
+        or evidence.get("numbered_limb_map_limb_ids")
+        != ["F1", "F2", "H1", "H2"]
+    ):
+        raise ValueError("P0_EVIDENCE_STALE: numbered limb-map provenance is stale")
+    numbered_map = checksum_bound_file(
+        {
+            "path": evidence.get("numbered_limb_map_path"),
+            "checksum_sha256": evidence.get(
+                "numbered_limb_map_checksum_sha256"
+            ),
+        },
+        "numbered limb map",
+    )
+    if (
+        numbered_map == selected_source_file.resolve()
+        or png_dimensions(numbered_map) != source_dimensions
+    ):
+        raise ValueError(
+            "P0_EVIDENCE_STALE: numbered limb map is not an independent same-size PNG"
+        )
+    validate_white_cat_accessory_qa(identity)
+
+
 def validate_white_cat_accessory_qa(identity: dict[str, Any]) -> None:
     if identity.get("accessory_geometry_correct") is not True or (
         identity.get("satchel_count") != 1
@@ -490,6 +764,118 @@ def checksum_bound_file(binding: dict[str, Any], label: str) -> Path:
     if sha256_file(file) != binding["checksum_sha256"]:
         raise ValueError(f"{label} checksum is stale")
     return file
+
+
+def validate_same_episode_reference_inputs(
+    state: dict[str, Any], item: dict[str, Any], references: Any,
+    workspace: Path, style_binding: Any,
+) -> None:
+    if not isinstance(references, list):
+        raise ValueError("ordinary ImageGen reference inputs must be a list")
+    if not references:
+        return
+    queue = [
+        row for row in state["visual_asset_review"]["queue"]
+        if row.get("active_for_current_storyboard") is True
+    ]
+    targets = [index for index, row in enumerate(queue) if row.get("asset_id") == item["asset_id"]]
+    if len(targets) != 1 or item.get("white_cat_present") is not False:
+        raise ValueError("ordinary ImageGen reference target is ambiguous or not cat-free")
+    expected_style = resolve_white_cat_visual_style_binding(state, item)
+
+    def scoped_file(binding: dict[str, Any], label: str) -> Path:
+        value = binding.get("path")
+        if not isinstance(value, str) or not value or Path(value).is_absolute() or ".." in Path(value).parts:
+            raise ValueError(f"{label} must be a root-relative file inside the episode")
+        file = REPOSITORY_ROOT.resolve() / value
+        file.relative_to(workspace)
+        if file.resolve(strict=True) != file or file.is_symlink():
+            raise ValueError(f"{label} must not use symlinks")
+        return checksum_bound_file(binding, label)
+
+    seen: set[str] = set()
+    for reference in references:
+        if (
+            not isinstance(reference, dict)
+            or set(reference) != {"role", "asset_id", "path", "checksum_sha256"}
+            or reference.get("role") not in {
+                "same_episode_identity_reference", "same_episode_composition_reference",
+            }
+            or not isinstance(reference.get("asset_id"), str)
+            or reference["asset_id"] in seen
+        ):
+            raise ValueError("ordinary ImageGen reference binding is invalid or duplicated")
+        seen.add(reference["asset_id"])
+        sources = [(index, row) for index, row in enumerate(queue)
+                   if row.get("asset_id") == reference["asset_id"]]
+        if len(sources) != 1 or sources[0][0] >= targets[0]:
+            raise ValueError("ordinary ImageGen reference must be a unique earlier queue item")
+        source = sources[0][1]
+        role = source.get("role", "")
+        if (
+            source.get("active_for_current_storyboard") is not True
+            or source.get("white_cat_present") is not False
+            or source.get("visual_generation_route") != "imagegen"
+            or source.get("asset_kind") is not None
+            or not re.fullmatch(r"S\d{2,}", str(source.get("shot_id", "")))
+            or not (role == "base/master" or re.fullmatch(r"action-\d{2,}", str(role)))
+            or source.get("visible_text_mode") != "none"
+            or source.get("generator") != "codex-native-imagegen"
+            or source.get("treatment_profile_id") != item.get("treatment_profile_id")
+            or resolve_white_cat_visual_style_binding(state, source) != expected_style
+            or source.get("style_profile_id") != item.get("treatment_profile_id")
+            or source.get("style_medium_id") != expected_style[0]
+            or source.get("path") != reference["path"]
+            or source.get("checksum_sha256") != reference["checksum_sha256"]
+            or source.get("technical_qa", {}).get("result") != "pass"
+        ):
+            raise ValueError("ordinary ImageGen reference is not an active matching-style source")
+        status = source.get("status")
+        if status == "approved":
+            reviewed_checksum = source.get("approved_checksum_sha256")
+        elif (
+            status == "qa_passed_pending_final_review"
+            and state["visual_asset_review"].get("mode") == "one_click_final_review_v1"
+        ):
+            reviewed_checksum = source.get("batch_qa_checksum_sha256")
+        else:
+            raise ValueError("ordinary ImageGen reference has not passed source approval or one-click QA")
+        if reviewed_checksum != reference["checksum_sha256"]:
+            raise ValueError("ordinary ImageGen reference approval or QA checksum is stale")
+        source_file = scoped_file(reference, "ordinary ImageGen reference source")
+        dimensions = list(png_dimensions(source_file))
+        qa_file = scoped_file({
+            "path": source.get("qa_evidence_path"),
+            "checksum_sha256": source.get("qa_evidence_checksum_sha256"),
+        }, "ordinary ImageGen reference QA")
+        source_qa = json.loads(qa_file.read_text(encoding="utf-8"))
+        if (
+            not isinstance(source_qa, dict)
+            or source_qa.get("contract_version") != (
+                "ordinary-imagegen-historical-master-qa-v1" if role == "base/master"
+                else "ordinary-imagegen-historical-action-qa-v1"
+            )
+            or source_qa.get("result") != "pass"
+            or source_qa.get("asset_id") != source["asset_id"]
+            or source_qa.get("generator") != "codex-native-imagegen"
+            or source_qa.get("selected_source", {}).get("path") != reference["path"]
+            or source_qa.get("selected_source", {}).get("checksum_sha256") != reviewed_checksum
+            or source_qa.get("selected_source", {}).get("dimensions") != dimensions
+            or source.get("measured_dimensions") != dimensions
+            or source_qa.get("style_profile", {}).get("id") != source["style_profile_id"]
+            or source_qa.get("style_profile", {}).get("medium_id") != expected_style[0]
+            or source_qa.get("white_cat_visual_style_binding") != style_binding
+        ):
+            raise ValueError("ordinary ImageGen reference QA does not bind the exact source and style")
+        for check in ("semantic_qa", "visible_text_qa", "style_qa", "continuity_qa",
+                      "visual_qa", "historical_identity_qa"):
+            if source_qa.get(check, {}).get("result") != "pass" or source.get(check) != source_qa[check]:
+                raise ValueError(f"ordinary ImageGen reference {check} is not passing or is stale")
+        if (
+            source_qa["visible_text_qa"].get("no_visible_text") is not True
+            or source_qa["visible_text_qa"].get("no_pseudotext") is not True
+        ):
+            raise ValueError("ordinary ImageGen reference is not verified text-free")
 
 
 def png_dimensions(file: Path) -> tuple[int, int]:
@@ -593,6 +979,109 @@ def png_dimensions(file: Path) -> tuple[int, int]:
     return width, height
 
 
+def png_rgba_alpha_evidence(file: Path) -> dict[str, int]:
+    """Decode an 8-bit, non-interlaced RGBA PNG and measure real alpha pixels."""
+    data = file.read_bytes()
+    if data[:8] != b"\x89PNG\r\n\x1a\n":
+        raise ValueError(f"not a decodable RGBA PNG: {file}")
+    offset = 8
+    width = height = 0
+    compressed = bytearray()
+    while offset < len(data):
+        if offset + 12 > len(data):
+            raise ValueError(f"not a decodable RGBA PNG: {file}")
+        length = struct.unpack(">I", data[offset : offset + 4])[0]
+        kind = data[offset + 4 : offset + 8]
+        payload_end = offset + 8 + length
+        chunk_end = payload_end + 4
+        if chunk_end > len(data):
+            raise ValueError(f"not a decodable RGBA PNG: {file}")
+        payload = data[offset + 8 : payload_end]
+        expected_crc = struct.unpack(">I", data[payload_end:chunk_end])[0]
+        if zlib.crc32(kind + payload) & 0xFFFFFFFF != expected_crc:
+            raise ValueError(f"not a decodable RGBA PNG: {file}")
+        if kind == b"IHDR":
+            if length != 13:
+                raise ValueError(f"not a decodable RGBA PNG: {file}")
+            width, height, bit_depth, color_type, compression, filtering, interlace = struct.unpack(
+                ">IIBBBBB", payload
+            )
+            if (
+                width < 1
+                or height < 1
+                or bit_depth != 8
+                or color_type != 6
+                or compression != 0
+                or filtering != 0
+                or interlace != 0
+            ):
+                raise ValueError("hero-pose source must be an 8-bit non-interlaced RGBA PNG")
+        elif kind == b"IDAT":
+            compressed.extend(payload)
+        elif kind == b"IEND":
+            break
+        offset = chunk_end
+    if width < 1 or height < 1 or not compressed:
+        raise ValueError(f"not a decodable RGBA PNG: {file}")
+    try:
+        raw = zlib.decompress(bytes(compressed))
+    except zlib.error as error:
+        raise ValueError(f"not a decodable RGBA PNG: {file}") from error
+    stride = width * 4
+    if len(raw) != height * (stride + 1):
+        raise ValueError(f"not a decodable RGBA PNG: {file}")
+
+    previous = bytearray(stride)
+    alpha_values: list[int] = []
+
+    def paeth(left: int, above: int, upper_left: int) -> int:
+        estimate = left + above - upper_left
+        left_distance = abs(estimate - left)
+        above_distance = abs(estimate - above)
+        upper_left_distance = abs(estimate - upper_left)
+        if left_distance <= above_distance and left_distance <= upper_left_distance:
+            return left
+        if above_distance <= upper_left_distance:
+            return above
+        return upper_left
+
+    for row_index in range(height):
+        start = row_index * (stride + 1)
+        filter_type = raw[start]
+        encoded = raw[start + 1 : start + 1 + stride]
+        if filter_type not in range(5):
+            raise ValueError(f"not a decodable RGBA PNG: {file}")
+        decoded = bytearray(stride)
+        for index, value in enumerate(encoded):
+            left = decoded[index - 4] if index >= 4 else 0
+            above = previous[index]
+            upper_left = previous[index - 4] if index >= 4 else 0
+            predictor = (
+                0
+                if filter_type == 0
+                else left
+                if filter_type == 1
+                else above
+                if filter_type == 2
+                else (left + above) // 2
+                if filter_type == 3
+                else paeth(left, above, upper_left)
+            )
+            decoded[index] = (value + predictor) & 0xFF
+        alpha_values.extend(decoded[3::4])
+        previous = decoded
+    minimum = min(alpha_values)
+    maximum = max(alpha_values)
+    transparent_count = sum(value == 0 for value in alpha_values)
+    nontransparent_count = sum(value > 0 for value in alpha_values)
+    return {
+        "min_alpha": minimum,
+        "max_alpha": maximum,
+        "transparent_pixel_count": transparent_count,
+        "nontransparent_pixel_count": nontransparent_count,
+    }
+
+
 def load_gate():
     spec = importlib.util.spec_from_file_location("visual_approval_gate", GATE_PATH)
     if spec is None or spec.loader is None:
@@ -614,24 +1103,45 @@ def record(args: argparse.Namespace) -> dict[str, Any]:
         (queued for queued in review.get("queue", []) if queued.get("asset_id") == args.asset_id),
         None,
     )
-    is_user_takeover = bool(
-        candidate
-        and review.get("user_takeover_required") is True
-        and review.get("user_takeover_asset_id") == args.asset_id
-        and review.get("current_asset_id") == args.asset_id
-        and review.get("queue_generation_allowed") is False
-        and candidate.get("status") == "awaiting_user_approval"
-        and candidate.get("white_cat_generation_attempt_control", {}).get("automatic_retry_status")
-        == "stopped_user_takeover_required"
+    stopped_takeover_target = _is_stopped_takeover_target(
+        state, candidate, args.asset_id,
     )
-    item = candidate if is_user_takeover else gate.require_generation_allowed(state, args.asset_id)
+    accepting_ambiguous_trace_override = bool(
+        getattr(args, "accept_p0_ambiguous_trace_with_user_override", False)
+    )
+    if accepting_ambiguous_trace_override and not stopped_takeover_target:
+        raise ValueError(
+            "P0_AMBIGUOUS_TRACE override requires the exact stopped takeover target"
+        )
+    is_user_takeover = bool(
+        stopped_takeover_target and not accepting_ambiguous_trace_override
+    )
+    item = (
+        candidate
+        if stopped_takeover_target
+        else gate.require_generation_allowed(state, args.asset_id)
+    )
+    is_hero_pose_background_kind = item.get("asset_kind") == "hero_pose_background"
+    is_hero_pose_background = (
+        is_hero_pose_background_kind
+        and item.get("role") == "base/master"
+        and item.get("state_index") is None
+        and item.get("motion_tier") == "hero_pose"
+        and item.get("white_cat_present") is False
+        and isinstance(item.get("schedule_background_asset_id"), str)
+        and bool(item["schedule_background_asset_id"].strip())
+    )
+    if is_hero_pose_background_kind and not is_hero_pose_background:
+        raise ValueError("hero-pose background queue contract is invalid")
     is_white_cat_master = item.get("white_cat_present") is True
     expected_style_id, expected_cohesion_id, current_style_binding = (
         resolve_white_cat_visual_style_binding(state, item)
-        if is_white_cat_master
-        else ("loose-line-vivid-watercolor", "warm-paper-watercolor-cohesion-v1", False)
     )
-    active_style_selection = state.get("white_cat_visual_style_selection", {})
+    active_style_selection = (
+        load_white_cat_visual_style_selection(state)
+        if current_style_binding
+        else {}
+    )
     expected_style_profile_sha256 = (
         active_style_selection.get("style_profile_checksum_sha256")
         if current_style_binding
@@ -652,12 +1162,21 @@ def record(args: argparse.Namespace) -> dict[str, Any]:
         qa.get("contract_version") != (
             WHITE_CAT_MASTER_QA_VERSION
             if is_white_cat_master
-            else "ordinary-imagegen-historical-master-qa-v1"
+            else (
+                HERO_POSE_BACKGROUND_QA_VERSION
+                if is_hero_pose_background
+                else "ordinary-imagegen-historical-master-qa-v1"
+            )
         )
-        or qa.get("result") != "pass"
+        or qa.get("result")
+        != ("fail" if accepting_ambiguous_trace_override else "pass")
         or qa.get("asset_id") != args.asset_id
         or qa.get("generator")
-        != ("user-supplied-takeover-image" if is_user_takeover else "codex-native-imagegen")
+        != (
+            "user-supplied-takeover-image"
+            if is_user_takeover
+            else "codex-native-imagegen"
+        )
         or qa.get("style_profile", {}).get("id") != item.get("treatment_profile_id")
         or not isinstance(qa.get("generation_lineage"), list)
         or len(qa["generation_lineage"]) < 1
@@ -678,8 +1197,12 @@ def record(args: argparse.Namespace) -> dict[str, Any]:
         text = prompt.read_text(encoding="utf-8")
         if "16:9 landscape composition" not in text or "VISIBLE-TEXT MODE: none." not in text:
             raise ValueError("production prompt lacks exact 16:9 or text-free instruction")
-        if is_white_cat_master:
-            validate_white_cat_prompt_contract(text)
+        if is_white_cat_master or is_hero_pose_background:
+            if is_hero_pose_background and "HERO-POSE BACKGROUND: independent text-free registered background." not in text:
+                raise ValueError("hero-pose background prompt lacks its independent-background marker")
+            if is_white_cat_master:
+                validate_white_cat_prompt_contract(text)
+        if current_style_binding:
             validate_white_cat_style_prompt_and_qa(
                 prompt_text=text,
                 qa=qa,
@@ -723,12 +1246,23 @@ def record(args: argparse.Namespace) -> dict[str, Any]:
             raise ValueError("canonical white-cat version mismatch")
         primary_path = character["primary_path"]
         primary_checksum = character["primary_checksum_sha256"]
-    elif qa.get("actual_reference_inputs") != []:
-        raise ValueError("historical master declares unrecorded reference inputs")
+    elif is_hero_pose_background:
+        if qa.get("actual_reference_inputs") != []:
+            raise ValueError("hero-pose background must not consume publishing-cover or character image inputs")
+    else:
+        validate_same_episode_reference_inputs(
+            state, item, qa["actual_reference_inputs"], workspace,
+            qa.get("white_cat_visual_style_binding"),
+        )
     for index, stage in enumerate(qa["generation_lineage"]):
         checksum_bound_file(stage.get("prompt", {}), f"generation stage {index} prompt")
         checksum_bound_file(stage.get("output", {}), f"generation stage {index} output")
         references = stage.get("reference_inputs", [])
+        if not is_white_cat_master and not is_hero_pose_background:
+            validate_same_episode_reference_inputs(
+                state, item, references, workspace,
+                qa.get("white_cat_visual_style_binding"),
+            )
         for ref_index, reference in enumerate(references):
             checksum_bound_file(reference, f"generation stage {index} reference {ref_index}")
         if is_white_cat_master and not any(
@@ -749,20 +1283,265 @@ def record(args: argparse.Namespace) -> dict[str, Any]:
         checksum_bound_file(rejected, f"rejected attempt {index}")
 
     checks = ["semantic_qa", "visible_text_qa", "style_qa", "continuity_qa", "visual_qa"]
-    if not is_white_cat_master:
+    if not is_white_cat_master and not is_hero_pose_background:
         checks.append("historical_identity_qa")
     for check in checks:
         if qa.get(check, {}).get("result") != "pass":
             raise ValueError(f"{check} did not pass")
     if is_white_cat_master:
-        validate_white_cat_identity_qa_v2(
-            qa["identity_qa"],
-            selected_source=qa["selected_source"],
-            selected_source_file=source,
-        )
+        if accepting_ambiguous_trace_override:
+            waivable = qa.get("waivable_mechanical_failures")
+            if (
+                not isinstance(waivable, list)
+                or len(waivable) != 1
+                or waivable[0].get("error_code") != P0_AMBIGUOUS_TRACE
+                or waivable[0].get("observed_result") != "fail"
+                or not isinstance(waivable[0].get("reason"), str)
+                or not waivable[0]["reason"].startswith(
+                    f"{P0_AMBIGUOUS_TRACE}:"
+                )
+            ):
+                raise ValueError(
+                    "P0_AMBIGUOUS_TRACE: waivable failure evidence is missing or stale"
+                )
+            validate_white_cat_ambiguous_trace_failure(
+                qa["identity_qa"],
+                selected_source=qa["selected_source"],
+                selected_source_file=source,
+                expected_reason=waivable[0]["reason"],
+            )
+        else:
+            validate_white_cat_identity_qa_v2(
+                qa["identity_qa"],
+                selected_source=qa["selected_source"],
+                selected_source_file=source,
+            )
     visible = qa["visible_text_qa"]
     if visible.get("no_visible_text") is not True or visible.get("no_pseudotext") is not True:
         raise ValueError("white-cat text-free QA is incomplete")
+
+    consumed_override: dict[str, Any] | None = None
+    override_artifacts: list[dict[str, str]] | None = None
+    override_gate_ids: list[str] | None = None
+    attempt_blocker: dict[str, Any] | None = None
+    if accepting_ambiguous_trace_override:
+        if (
+            review.get("mode") != "one_click_final_review_v1"
+            or state.get("phase") != "awaiting_visual_asset_review"
+            or state.get("current_phase") != "awaiting_visual_asset_review"
+        ):
+            raise ValueError(
+                "one-time user gate override requires awaiting_visual_asset_review"
+            )
+        scope_id = item.get("generation_attempt_scope_id")
+        if (
+            not isinstance(scope_id, str)
+            or not scope_id
+            or review.get("user_takeover_scope_id") != scope_id
+        ):
+            raise ValueError("one-time user gate override scope is stale")
+        attempt_control = item.get("image_generation_attempt_control", {})
+        white_cat_control = item.get("white_cat_generation_attempt_control", {})
+        generation_failures = item.get("image_generation_qa_failures", [])
+        white_cat_failures = item.get("white_cat_imagegen_qa_failures", [])
+        if (
+            attempt_control.get("contract_version")
+            != "storyboard-image-generation-attempt-limit-v1"
+            or attempt_control.get("generation_attempt_scope_id") != scope_id
+            or attempt_control.get("maximum_automatic_rejected_generations") != 3
+            or attempt_control.get("rejected_generation_count") != 3
+            or attempt_control.get("automatic_retry_status")
+            != "stopped_user_takeover_required"
+            or white_cat_control.get("contract_version")
+            != "white-cat-imagegen-attempt-limit-v1"
+            or white_cat_control.get("maximum_automatic_qa_failures") != 3
+            or white_cat_control.get("qa_failed_generation_count") != 3
+            or white_cat_control.get("automatic_retry_status")
+            != "stopped_user_takeover_required"
+            or not isinstance(generation_failures, list)
+            or len(generation_failures) != 3
+            or not isinstance(white_cat_failures, list)
+            or len(white_cat_failures) != 3
+            or [row.get("attempt_number") for row in generation_failures]
+            != [1, 2, 3]
+            or [row.get("attempt_number") for row in white_cat_failures]
+            != [1, 2, 3]
+            or len({
+                row.get("output", {}).get("checksum_sha256")
+                for row in generation_failures
+                if isinstance(row, dict)
+            })
+            != 3
+        ):
+            raise ValueError(
+                "one-time user gate override lacks the exact three-attempt stop evidence"
+            )
+        selected_failure = white_cat_failures[1]
+        selected_generation_failure = generation_failures[1]
+        selected_reason = selected_failure.get("failure_reason")
+        if (
+            selected_failure.get("error_code") != P0_AMBIGUOUS_TRACE
+            or selected_failure.get("prompt") != qa.get("selected_prompt")
+            or selected_failure.get("output", {}).get("path")
+            != qa.get("selected_source", {}).get("path")
+            or selected_failure.get("output", {}).get("checksum_sha256")
+            != qa.get("selected_source", {}).get("checksum_sha256")
+            or selected_generation_failure.get("prompt")
+            != selected_failure.get("prompt")
+            or selected_generation_failure.get("output")
+            != selected_failure.get("output")
+            or selected_generation_failure.get("failure_reason") != selected_reason
+            or qa.get("waivable_mechanical_failures") != [{
+                "error_code": P0_AMBIGUOUS_TRACE,
+                "observed_result": "fail",
+                "reason": selected_reason,
+            }]
+        ):
+            raise ValueError(
+                "P0_AMBIGUOUS_TRACE: selected source is not the exact second failed output"
+            )
+        attempt_gate_id = f"storyboard-image-generation-attempt-limit:{scope_id}"
+        matching_blockers = [
+            blocker
+            for blocker in state.get("blockers", [])
+            if isinstance(blocker, dict)
+            and blocker.get("blocker_id") == attempt_gate_id
+        ]
+        if (
+            len(matching_blockers) != 1
+            or matching_blockers[0].get("contract_version")
+            != "storyboard-image-generation-attempt-limit-v1"
+            or matching_blockers[0].get("asset_id") != item.get("asset_id")
+            or matching_blockers[0].get("generation_attempt_scope_id") != scope_id
+            or matching_blockers[0].get("status")
+            != "stopped_user_takeover_required"
+        ):
+            raise ValueError(
+                "one-time user gate override attempt-limit blocker is missing or stale"
+            )
+        attempt_blocker = matching_blockers[0]
+        inspection = qa["identity_qa"]["anatomy_evidence"][
+            "inspection_evidence"
+        ]
+        override_artifacts = [
+            {
+                "path": qa["selected_source"]["path"],
+                "checksum_sha256": qa["selected_source"]["checksum_sha256"],
+            },
+            {
+                "path": qa["selected_prompt"]["path"],
+                "checksum_sha256": qa["selected_prompt"]["checksum_sha256"],
+            },
+            {
+                "path": args.qa_path,
+                "checksum_sha256": sha256_file(qa_file),
+            },
+            {
+                "path": inspection["numbered_limb_map_path"],
+                "checksum_sha256": inspection[
+                    "numbered_limb_map_checksum_sha256"
+                ],
+            },
+        ]
+        for failure in generation_failures:
+            for key in ("prompt", "output"):
+                binding = failure.get(key)
+                if not isinstance(binding, dict):
+                    raise ValueError(
+                        "one-time user gate override failure artifact is missing"
+                    )
+                checksum_bound_file(binding, f"failed attempt {failure.get('attempt_number')} {key}")
+                normalized = {
+                    "path": binding.get("path"),
+                    "checksum_sha256": binding.get("checksum_sha256"),
+                }
+                if normalized not in override_artifacts:
+                    override_artifacts.append(normalized)
+        p0_gate_id = f"visual_asset.{item['asset_id']}.{P0_AMBIGUOUS_TRACE}"
+        override_gate_ids = [attempt_gate_id, p0_gate_id]
+        exact_message = getattr(args, "override_exact_user_message", "")
+        normalized_message = exact_message.lower()
+        if (
+            item["asset_id"].lower() not in normalized_message
+            or "p0_ambiguous_trace" not in normalized_message
+            or not any(
+                marker in normalized_message
+                for marker in ("第二", "第2", "attempt 2")
+            )
+            or not any(
+                marker in normalized_message
+                for marker in ("三次", "3次", "attempt")
+            )
+            or not any(
+                marker in normalized_message
+                for marker in ("放行", "接受", "允许")
+            )
+            or not any(
+                marker in normalized_message
+                for marker in ("一次", "本次", "仅此一次")
+            )
+            or "保留" not in normalized_message
+            or "失败证据" not in normalized_message
+        ):
+            raise ValueError(
+                "one-time user gate override message must name the asset, second failure, P0_AMBIGUOUS_TRACE, three-attempt stop, and evidence retention"
+            )
+        decided_at = getattr(args, "override_decided_at", "")
+        pending_override = {
+            "contract_version": "one-time-explicit-user-mechanical-gate-override-v1",
+            "episode_id": state.get("episode_id"),
+            "scope_id": scope_id,
+            "gate_ids": override_gate_ids,
+            "acknowledged_failures": [
+                {
+                    "gate_id": attempt_gate_id,
+                    "observed_result": "stopped_user_takeover_required",
+                    "reason": attempt_blocker["message"],
+                },
+                {
+                    "gate_id": p0_gate_id,
+                    "observed_result": "fail",
+                    "reason": selected_reason,
+                },
+            ],
+            "bound_artifacts": override_artifacts,
+            "decision": {
+                "exact_user_message": exact_message,
+                "decided_at": decided_at,
+                "disposition": "allow_once",
+            },
+            "consumption": {
+                "from_phase": "awaiting_visual_asset_review",
+                "to_phase": "visual_production",
+                "status": "available",
+            },
+            "reuse_forbidden": True,
+        }
+        pending_override["override_sha256"] = _canonical_sha256(
+            pending_override
+        )
+        transition_id = getattr(args, "override_transition_id", "")
+        consumed_at = getattr(args, "override_consumed_at", "")
+        if (
+            not isinstance(transition_id, str)
+            or not transition_id
+            or transition_id in _consumed_transition_ids(state)
+        ):
+            raise ValueError(
+                "one-time user gate override consumed transition id is missing or reused"
+            )
+        episode_id = state.get("episode_id")
+        if not isinstance(episode_id, str) or not episode_id:
+            raise ValueError("one-time user gate override episode id is missing")
+        consumed_override = _consume_user_gate_override(
+            pending_override,
+            episode_id=episode_id,
+            scope_id=scope_id,
+            gate_ids=override_gate_ids,
+            artifacts=override_artifacts,
+            transition_id=transition_id,
+            consumed_at=consumed_at,
+        )
 
     identity_fields = ({
         "character_reference_version": character["version"],
@@ -777,7 +1556,7 @@ def record(args: argparse.Namespace) -> dict[str, Any]:
         "supporting_geometry_reference_path": character["supporting_geometry_path"],
         "supporting_geometry_reference_checksum_sha256": character["supporting_geometry_checksum_sha256"],
         "identity_qa": qa["identity_qa"],
-    } if is_white_cat_master else {
+    } if is_white_cat_master else {} if is_hero_pose_background else {
         "historical_identity_qa": qa["historical_identity_qa"],
     })
     item.update(
@@ -819,21 +1598,47 @@ def record(args: argparse.Namespace) -> dict[str, Any]:
         )),
         **identity_fields,
     )
-    if is_white_cat_master:
+    if is_white_cat_master or is_hero_pose_background:
         item["qa_contract_version"] = qa["contract_version"]
     if is_user_takeover:
         item["user_takeover_source"] = qa["user_takeover_source"]
         item["user_takeover_adopted_at"] = args.qa_time
+    if accepting_ambiguous_trace_override:
+        if (
+            consumed_override is None
+            or override_artifacts is None
+            or override_gate_ids is None
+            or attempt_blocker is None
+        ):
+            raise ValueError("one-time user gate override record is incomplete")
+        item.update(
+            status=WAIVED_PENDING_FINAL_REVIEW_STATUS,
+            batch_qa_checksum_sha256=qa["selected_source"]["checksum_sha256"],
+            batch_qa_time=args.qa_time,
+            mechanical_qa_result="failed_but_waived_once",
+            user_mechanical_gate_override=consumed_override,
+            user_mechanical_gate_override_result="pass_with_user_override",
+            waived_mechanical_gate_ids=override_gate_ids,
+            override_bound_artifacts=override_artifacts,
+            original_qa_result="fail",
+        )
+        attempt_blocker.update(
+            status="failed_but_waived_once",
+            user_mechanical_gate_override_sha256=consumed_override[
+                "override_sha256"
+            ],
+        )
+        review["queue_generation_allowed"] = True
+        state["phase"] = "visual_production"
+        state["current_phase"] = "visual_production"
+        _clear_active_takeover(review)
     if one_click:
-        gate.record_hybrid_qa_pass(state, args.asset_id, args.qa_time)
-        active = [
-            queued for queued in review.get("queue", [])
-            if queued.get("active_for_current_storyboard") is not False
-            and queued.get("status") != "superseded"
-        ]
-        next_item = next((queued for queued in active if queued.get("status") not in {
-            "approved", "qa_passed_pending_batch_review", "qa_passed_pending_final_review",
-        }), None)
+        if not accepting_ambiguous_trace_override:
+            gate.record_hybrid_qa_pass(state, args.asset_id, args.qa_time)
+        next_item = next_generation_target(
+            review.get("queue", []),
+            gate.GENERATION_UNLOCKING_STATUSES,
+        )
         review["current_asset_id"] = next_item.get("asset_id") if next_item else None
     else:
         state["visual_asset_review"]["queue_generation_allowed"] = False
@@ -847,7 +1652,11 @@ def record(args: argparse.Namespace) -> dict[str, Any]:
     temporary.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     temporary.replace(state_file)
     return {
-        "result": "pass",
+        "result": (
+            "pass_with_user_override"
+            if accepting_ambiguous_trace_override
+            else "pass"
+        ),
         "asset_id": args.asset_id,
         "status": item["status"],
         "checksum_sha256": item["checksum_sha256"],
@@ -863,9 +1672,32 @@ def main() -> None:
     parser.add_argument("asset_id")
     parser.add_argument("qa_path")
     parser.add_argument("qa_time")
+    parser.add_argument(
+        "--accept-p0-ambiguous-trace-with-user-override",
+        action="store_true",
+    )
+    parser.add_argument("--override-exact-user-message")
+    parser.add_argument("--override-decided-at")
+    parser.add_argument("--override-transition-id")
+    parser.add_argument("--override-consumed-at")
     args = parser.parse_args()
     if not re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}", args.qa_time):
         raise SystemExit("qa_time must be ISO-8601 with offset")
+    if args.accept_p0_ambiguous_trace_with_user_override and (
+        not args.override_exact_user_message
+        or not args.override_transition_id
+        or not re.fullmatch(
+            r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}",
+            args.override_decided_at or "",
+        )
+        or not re.fullmatch(
+            r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}",
+            args.override_consumed_at or "",
+        )
+    ):
+        raise SystemExit(
+            "P0_AMBIGUOUS_TRACE override requires the exact user message, transition id, and ISO-8601 decision/consumption times"
+        )
     print(json.dumps(record(args), ensure_ascii=False, indent=2))
 
 

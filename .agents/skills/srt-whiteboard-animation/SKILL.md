@@ -31,7 +31,7 @@ description: "Use only when a knowledge-video shot has the explicitly approved v
 - 新工作以 [whiteboard-annotation-v2.schema.json](references/whiteboard-annotation-v2.schema.json) 与 [whiteboard-render-evidence-v1.schema.json](references/whiteboard-render-evidence-v1.schema.json) 为机器接口。v2 直接使用 `none | required`，并强制记录 repository-root-relative v3 review 路径、文件 SHA-256、`presented_map_sha256`、shot ID、精确文字与位置。旧 [whiteboard-annotation-v1.schema.json](references/whiteboard-annotation-v1.schema.json) 仅供完成且未改的历史证据只读解析，不能生成 preview 或 clip。
 - 标注必须通过 `scripts/validate_whiteboard_annotation.py`；验证器会从 episode workspace 重读 v3 工件，并与固定 `schema/episode-state.json` 中当前已批准的 `artifact_path`、`artifact_checksum_sha256`、`presented_map_sha256` 指针及逐镜字段比较，不接受 annotation 自报的“approved”文字或旧 v3 工件。所有 workspace 内路径必须 repository-root-relative。画布固定 `1920×1080`、帧率固定 `30`；区域和保护区均为画布内整数坐标；元素按 `sequence` 串行、不重叠；字幕跨度须精确回指锁稿；底部字幕安全区不得被绘制元素侵入；完整画面最终停留不少于 15 帧。
 - 区域预览只用 `scripts/render_annotation_preview.py` 生成静态 PNG，并在对话中展示审批。
-- 成片只用 `scripts/render_whiteboard_clip.py`。输出必须为 `1920×1080`、30 fps、H.264、无音轨、帧数等于镜头帧数；不得延长镜头。
+- 成片只用 `scripts/render_whiteboard_clip.py`。所有新建或修改的成片必须执行 `canvas-only-no-hand-pen-cursor-v1`：画面只显示画布内容逐步出现，禁止叠加手、握笔手势、笔、笔尖、光标或其他随绘制路径同步移动的覆盖物；不得加载 `drawing-hand.png`、自定义手/笔素材或程序化笔尖，也不得提供绕过此规则的渲染参数。输出必须为 `1920×1080`、30 fps、H.264、无音轨、帧数等于镜头帧数；不得延长镜头。
 - 运行时使用本 Skill 的 `.venv/bin/python`。依赖固定为 `opencv-python-headless==5.0.0.93`、`numpy==2.5.1`、`Pillow==12.3.0`；不得运行时自动安装，不得安装或回退到 PyAV。只用已有系统 ffmpeg。
 
 ```bash

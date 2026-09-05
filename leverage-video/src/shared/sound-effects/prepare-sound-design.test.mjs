@@ -15,7 +15,7 @@ const asset = {
 };
 const input = {
   resume_mode: 'standard',
-  episode_workspace: 'leverage-video/src/topic99',
+  episode_workspace: 'leverage-video/src/episode-test',
   bindings: {sound_effect_library: manifest(3)},
   event_decisions: [{
     event_id: 'S01:semantic:reveal', decision: 'audible', semantic_role: 'exact_reveal',
@@ -32,7 +32,7 @@ const input = {
       asset_id: 'exact-reveal', title: 'Exact reveal', semantic_roles: ['exact_reveal'],
     },
     derivative_request: {
-      output_path: 'leverage-video/src/topic99/assets/audio/sfx/exact-reveal.wav',
+      output_path: 'leverage-video/src/episode-test/assets/audio/sfx/exact-reveal.wav',
       trim_start_sample: 0, trim_end_sample: 4410,
     },
   }],

@@ -33,7 +33,7 @@ Read [references/topic-editorial-contract.md](references/topic-editorial-contrac
 ## Direct-input route
 
 1. Preserve the user's original topic text and identify its single central question without silently changing its intent.
-2. Validate channel fit, a credible evidence path, 100–240 second scope, platform/content safety, and white-cat visual feasibility.
+2. Apply `knowledge-video-duration-policy-v1`: validate channel fit, a credible evidence path, responsible scope within the user's stated target duration when one exists, platform/content safety, and white-cat visual feasibility. Never impose a fixed duration threshold.
 3. Apply the same scoring rubric as an editorial diagnostic. Do not reject a safe, supportable topic merely because it did not originate in the generated pool.
 4. If there is no material blocker, record `topic_source: user_supplied` and pass Gate 1 immediately; the user's submission is the selection.
 5. If a material issue is resolvable only by reframing, explain the exact issue and proposed reframe, then keep Gate 1 open for confirmation. Do not substitute a different topic.

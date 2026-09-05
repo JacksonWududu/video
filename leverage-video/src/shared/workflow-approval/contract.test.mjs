@@ -3,6 +3,8 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import test from 'node:test';
 
+import {buildCoverStyleScopeSelectionSha256} from '../publishing-cover/contract.mjs';
+
 import {
   WHITE_CAT_VISUAL_STYLE_OPTIONS,
   WHITE_CAT_VISUAL_STYLE_SELECTION_VERSION_V2,
@@ -11,14 +13,17 @@ import {
   buildOneClickApprovalPolicySha256,
   buildOneClickFinalVisualMapSha256,
   buildNarrationAudioSourceSelectionSha256,
+  buildPostCoverSelectionBatchSha256,
   buildVisualDensitySelectionSha256,
   buildWhiteCatVisualStyleSelectionSha256,
   buildWorkflowApprovalModeSha256,
   calculateSelectionInvalidation,
   resolveLegacyDensity,
   validateApprovalSelectionSequence,
+  validateOneClickFinalVisualReview,
   validateOneClickApprovalPolicy,
   validateNarrationAudioSourceSelection,
+  validatePostCoverSelectionBatch,
   validateRevoiceDensityLock,
   validateWhiteCatVisualStyleSelection,
 } from './contract.mjs';
@@ -30,13 +35,16 @@ const buildSelections = ({
   whiteCatStyleId = 'loose-line-vivid-watercolor',
   densityMode = 'rich',
   approvalMode = 'one_click',
+  audioSourceMode = 'edge_tts',
+  batchMessage = null,
 } = {}) => {
+  const selected = (fallback) => decision(batchMessage ?? fallback);
   const whiteCatStyle = {
     contract_version: 'white-cat-visual-style-selection-v1',
     gate2_script_sha256: gate2,
     style_id: whiteCatStyleId,
     ...WHITE_CAT_VISUAL_STYLE_OPTIONS[whiteCatStyleId],
-    decision: decision(whiteCatStyleId),
+    decision: selected(whiteCatStyleId),
   };
   whiteCatStyle.selection_sha256 = buildWhiteCatVisualStyleSelectionSha256(whiteCatStyle);
   const density = {
@@ -44,7 +52,7 @@ const buildSelections = ({
     gate2_script_sha256: gate2,
     white_cat_visual_style_selection_sha256: whiteCatStyle.selection_sha256,
     density_mode: densityMode,
-    decision: decision(densityMode),
+    decision: selected(densityMode),
   };
   density.selection_sha256 = buildVisualDensitySelectionSha256(density);
   const mode = {
@@ -52,7 +60,7 @@ const buildSelections = ({
     gate2_script_sha256: gate2,
     visual_density_selection_sha256: density.selection_sha256,
     approval_mode: approvalMode,
-    decision: decision(approvalMode),
+    decision: selected(approvalMode),
   };
   mode.selection_sha256 = buildWorkflowApprovalModeSha256(mode);
   const policy = approvalMode === 'one_click' ? {
@@ -73,8 +81,163 @@ const buildSelections = ({
     qa_bypass_forbidden: true,
   } : null;
   if (policy) policy.policy_sha256 = buildOneClickApprovalPolicySha256(policy);
-  return {whiteCatStyle, density, mode, policy};
+  const narrationAudioSource = {
+    contract_version: 'narration-audio-source-selection-v1',
+    gate2_script_sha256: gate2,
+    workflow_approval_mode_selection_sha256: mode.selection_sha256,
+    source_mode: audioSourceMode,
+    edge_tts: audioSourceMode === 'edge_tts' ? {
+      provider: 'edge-tts',
+      voice: 'zh-CN-YunjianNeural',
+      rate: '+20%',
+      network_access_authorized: true,
+    } : null,
+    decision: selected(audioSourceMode),
+  };
+  narrationAudioSource.selection_sha256 = buildNarrationAudioSourceSelectionSha256(narrationAudioSource);
+  return {whiteCatStyle, density, mode, policy, narrationAudioSource};
 };
+
+const buildCorePostCoverBatch = () => {
+  const batchMessage = '风格=水彩；密度=丰富；审批=一键；旁白=Edge TTS';
+  const selections = buildSelections({batchMessage});
+  const batch = {
+    contract_version: 'post-cover-selection-batch-v1',
+    gate2_script_sha256: gate2,
+    decision: decision(batchMessage),
+    white_cat_visual_style_selection_sha256: selections.whiteCatStyle.selection_sha256,
+    cover_style_scope_selection_sha256: null,
+    visual_density_selection_sha256: selections.density.selection_sha256,
+    workflow_approval_mode_selection_sha256: selections.mode.selection_sha256,
+    one_click_approval_policy_sha256: selections.policy.policy_sha256,
+    narration_audio_source_selection_sha256: selections.narrationAudioSource.selection_sha256,
+  };
+  batch.batch_sha256 = buildPostCoverSelectionBatchSha256(batch);
+  return {...selections, batch};
+};
+
+const buildCoverDerivedPostCoverBatch = () => {
+  const batchMessage = '风格=当前封面；范围=仅本期；密度=丰富；审批=手动；旁白=同目录';
+  const sharedDecision = decision(batchMessage);
+  const whiteCatStyle = {
+    contract_version: WHITE_CAT_VISUAL_STYLE_SELECTION_VERSION_V2,
+    gate2_script_sha256: gate2,
+    style_source: 'episode_cover',
+    style_id: 'cover-derived-episode-style',
+    source_style_id: null,
+    style_label: '当前封面风格',
+    treatment_profile_id: 'imagegen-cover-derived-narrative',
+    visual_cohesion_profile_id: 'cover-derived-cohesion-v1',
+    style_profile_path: 'topic/schema/cover-derived-style-profile-v1.json',
+    style_profile_checksum_sha256: '4'.repeat(64),
+    publishing_cover_package_path: 'topic/schema/publishing-cover-generation-v1.json',
+    publishing_cover_package_sha256: '5'.repeat(64),
+    decision: sharedDecision,
+  };
+  whiteCatStyle.selection_sha256 = buildWhiteCatVisualStyleSelectionSha256(whiteCatStyle);
+  const coverDerivedStyleProfileSha256 = '6'.repeat(64);
+  const coverStyleScope = {
+    contract_version: 'cover-style-scope-selection-v1',
+    white_cat_visual_style_selection_sha256: whiteCatStyle.selection_sha256,
+    cover_derived_style_profile_sha256: coverDerivedStyleProfileSha256,
+    scope: 'episode_only',
+    decision: sharedDecision,
+  };
+  coverStyleScope.selection_sha256 = buildCoverStyleScopeSelectionSha256(coverStyleScope);
+  const density = {
+    contract_version: 'visual-density-selection-v1',
+    gate2_script_sha256: gate2,
+    white_cat_visual_style_selection_sha256: whiteCatStyle.selection_sha256,
+    density_mode: 'rich',
+    decision: sharedDecision,
+  };
+  density.selection_sha256 = buildVisualDensitySelectionSha256(density);
+  const mode = {
+    contract_version: 'workflow-approval-mode-v1',
+    gate2_script_sha256: gate2,
+    visual_density_selection_sha256: density.selection_sha256,
+    approval_mode: 'manual',
+    decision: sharedDecision,
+  };
+  mode.selection_sha256 = buildWorkflowApprovalModeSha256(mode);
+  const narrationAudioSource = {
+    contract_version: 'narration-audio-source-selection-v1',
+    gate2_script_sha256: gate2,
+    workflow_approval_mode_selection_sha256: mode.selection_sha256,
+    source_mode: 'colocated_voice',
+    edge_tts: null,
+    decision: sharedDecision,
+  };
+  narrationAudioSource.selection_sha256 = buildNarrationAudioSourceSelectionSha256(narrationAudioSource);
+  const batch = {
+    contract_version: 'post-cover-selection-batch-v1',
+    gate2_script_sha256: gate2,
+    decision: sharedDecision,
+    white_cat_visual_style_selection_sha256: whiteCatStyle.selection_sha256,
+    cover_style_scope_selection_sha256: coverStyleScope.selection_sha256,
+    visual_density_selection_sha256: density.selection_sha256,
+    workflow_approval_mode_selection_sha256: mode.selection_sha256,
+    one_click_approval_policy_sha256: null,
+    narration_audio_source_selection_sha256: narrationAudioSource.selection_sha256,
+  };
+  batch.batch_sha256 = buildPostCoverSelectionBatchSha256(batch);
+  return {
+    batch,
+    whiteCatStyle,
+    coverStyleScope,
+    coverDerivedStyleProfileSha256,
+    density,
+    mode,
+    policy: null,
+    narrationAudioSource,
+  };
+};
+
+test('post-cover selections validate as one atomic core-style response', () => {
+  const value = buildCorePostCoverBatch();
+  assert.equal(validatePostCoverSelectionBatch({
+    ...value,
+    gate2ScriptSha256: gate2,
+  }).result, 'pass');
+
+  value.narrationAudioSource.decision = decision('只单独回答旁白');
+  value.narrationAudioSource.selection_sha256 = buildNarrationAudioSourceSelectionSha256(
+    value.narrationAudioSource,
+  );
+  value.batch.narration_audio_source_selection_sha256 = value.narrationAudioSource.selection_sha256;
+  value.batch.batch_sha256 = buildPostCoverSelectionBatchSha256(value.batch);
+  assert.throws(
+    () => validatePostCoverSelectionBatch({...value, gate2ScriptSha256: gate2}),
+    /one complete user response/,
+  );
+});
+
+test('post-cover selections require scope only for the cover-derived style', () => {
+  const value = buildCoverDerivedPostCoverBatch();
+  assert.equal(validatePostCoverSelectionBatch({
+    ...value,
+    gate2ScriptSha256: gate2,
+  }).scope, 'episode_only');
+  assert.throws(
+    () => validatePostCoverSelectionBatch({
+      ...value,
+      gate2ScriptSha256: gate2,
+      coverStyleScope: null,
+    }),
+    /cover style scope selection authority mismatch/,
+  );
+
+  const core = buildCorePostCoverBatch();
+  assert.throws(
+    () => validatePostCoverSelectionBatch({
+      ...core,
+      gate2ScriptSha256: gate2,
+      coverStyleScope: value.coverStyleScope,
+      coverDerivedStyleProfileSha256: value.coverDerivedStyleProfileSha256,
+    }),
+    /only an episode-cover style/,
+  );
+});
 
 test('selection order requires white-cat style, density, approval mode, and exact hashes', () => {
   const {whiteCatStyle, density, mode, policy} = buildSelections();
@@ -200,11 +363,11 @@ test('white-cat style change preserves valid script and audio but restarts post-
     invalidate_visual_density_selection: true,
     invalidate_workflow_approval_mode: true,
     invalidate_narration_audio_source_selection: true,
-    invalidate_from: 'awaiting_visual_density_selection',
+    invalidate_from: 'awaiting_post_cover_selection_batch',
   });
 });
 
-test('publishing-cover change only reopens style when the episode uses its derived profile', () => {
+test('publishing-cover change reopens the selection batch only for a derived profile', () => {
   assert.deepEqual(calculateSelectionInvalidation({change: 'publishing_cover', usesCoverDerivedStyle: true}), {
     keep_locked_script: true,
     keep_audio: true,
@@ -213,7 +376,7 @@ test('publishing-cover change only reopens style when the episode uses its deriv
     invalidate_visual_density_selection: true,
     invalidate_workflow_approval_mode: true,
     invalidate_narration_audio_source_selection: true,
-    invalidate_from: 'awaiting_white_cat_visual_style_selection',
+    invalidate_from: 'awaiting_post_cover_selection_batch',
   });
   assert.deepEqual(calculateSelectionInvalidation({change: 'publishing_cover', usesCoverDerivedStyle: false}), {
     keep_locked_script: true,
@@ -227,7 +390,7 @@ test('publishing-cover change only reopens style when the episode uses its deriv
   });
 });
 
-test('density change preserves valid script and audio but restarts storyboard', () => {
+test('density change preserves valid script and audio but reopens dependent batch choices', () => {
   assert.deepEqual(calculateSelectionInvalidation({change: 'visual_density'}), {
     keep_locked_script: true,
     keep_audio: true,
@@ -235,7 +398,7 @@ test('density change preserves valid script and audio but restarts storyboard', 
     invalidate_visual_density_selection: false,
     invalidate_workflow_approval_mode: true,
     invalidate_narration_audio_source_selection: true,
-    invalidate_from: 'storyboard_construction',
+    invalidate_from: 'awaiting_post_cover_selection_batch',
   });
 });
 
@@ -331,6 +494,107 @@ test('narration audio source requires an explicit locked-script-bound choice', (
   );
 });
 
+const userMediaAudio = () => ({
+  path: '/media/user-selected-video.mp4',
+  checksum_sha256: '3'.repeat(64),
+  audio_stream_index: 0,
+  extraction_mode: 'stream_copy',
+  source_access_authorized: true,
+  fallback_allowed: false,
+});
+
+const buildUserMediaSelection = () => {
+  const selection = {
+    contract_version: 'narration-audio-source-selection-v1',
+    gate2_script_sha256: gate2,
+    workflow_approval_mode_selection_sha256: '2'.repeat(64),
+    source_mode: 'user_media_audio', edge_tts: null,
+    user_media_audio: userMediaAudio(),
+    decision: decision('提取指定视频的音频作为本期旁白'),
+  };
+  selection.selection_sha256 = buildNarrationAudioSourceSelectionSha256(selection);
+  return selection;
+};
+
+const mediaSelectionBindings = {
+  gate2ScriptSha256: gate2, workflowApprovalModeSelectionSha256: '2'.repeat(64),
+};
+
+test('explicit user-media audio binds exact media bytes and a global audio stream index', () => {
+  const selection = buildUserMediaSelection();
+  const original = structuredClone(selection);
+  assert.equal(validateNarrationAudioSourceSelection(selection, mediaSelectionBindings).source_mode, 'user_media_audio');
+  assert.deepEqual(selection, original);
+  for (const [field, value] of [
+    ['path', '/media/another-video.mp4'], ['checksum_sha256', '4'.repeat(64)], ['audio_stream_index', 1],
+  ]) {
+    const changed = structuredClone(selection);
+    changed.user_media_audio[field] = value;
+    assert.throws(() => validateNarrationAudioSourceSelection(changed, mediaSelectionBindings), /checksum is stale/);
+  }
+});
+
+test('user-media audio rejects incomplete, ambiguous, unauthorized, or fallback-enabled sources', () => {
+  for (const [field, value] of [
+    ['path', undefined], ['path', 'relative/video.mp4'], ['path', 'https://example.com/video.mp4'],
+    ['path', '/media/../video.mp4'], ['path', '/media/video\u0000.mp4'],
+    ['checksum_sha256', undefined], ['checksum_sha256', 'not-a-sha256'],
+    ['audio_stream_index', undefined], ['audio_stream_index', -1], ['audio_stream_index', 0.5], ['audio_stream_index', '0'],
+    ['extraction_mode', undefined], ['extraction_mode', 'transcode'],
+    ['source_access_authorized', undefined], ['source_access_authorized', false],
+    ['fallback_allowed', undefined], ['fallback_allowed', true],
+  ]) {
+    const selection = buildUserMediaSelection();
+    selection.user_media_audio[field] = value;
+    selection.selection_sha256 = buildNarrationAudioSourceSelectionSha256(selection);
+    assert.throws(() => validateNarrationAudioSourceSelection(selection, mediaSelectionBindings), /user.media audio/);
+  }
+  const noDecision = buildUserMediaSelection();
+  noDecision.decision.status = 'pending';
+  noDecision.selection_sha256 = buildNarrationAudioSourceSelectionSha256(noDecision);
+  assert.throws(() => validateNarrationAudioSourceSelection(noDecision, mediaSelectionBindings), /explicit user selection/);
+  assert.throws(() => validateNarrationAudioSourceSelection(buildUserMediaSelection(), {
+    ...mediaSelectionBindings, gate2ScriptSha256: '9'.repeat(64),
+  }), /selection is stale/);
+  assert.throws(() => validateNarrationAudioSourceSelection(buildUserMediaSelection(), {
+    ...mediaSelectionBindings, workflowApprovalModeSelectionSha256: '9'.repeat(64),
+  }), /selection is stale/);
+});
+
+test('narration source modes may not carry competing source settings', () => {
+  const media = buildUserMediaSelection();
+  media.edge_tts = {provider: 'edge-tts'};
+  media.selection_sha256 = buildNarrationAudioSourceSelectionSha256(media);
+  assert.throws(() => validateNarrationAudioSourceSelection(media, mediaSelectionBindings), /must not carry edge_tts/);
+  for (const sourceMode of ['colocated_voice', 'edge_tts']) {
+    const {narrationAudioSource: selection, mode} = buildSelections({audioSourceMode: sourceMode});
+    selection.user_media_audio = userMediaAudio();
+    selection.selection_sha256 = buildNarrationAudioSourceSelectionSha256(selection);
+    assert.throws(() => validateNarrationAudioSourceSelection(selection, {
+      gate2ScriptSha256: gate2, workflowApprovalModeSelectionSha256: mode.selection_sha256,
+    }), /must not carry user_media_audio/);
+  }
+});
+
+test('existing narration source hashes stay unchanged and user media works in a complete batch', () => {
+  const expectedHashes = {
+    edge_tts: 'ae90ea86278f11fd3505f2f98f90b0018268462fe3c9397870701cfbac66d4be',
+    colocated_voice: '23d0b00a202f20eb4fb120c7f57569337b3c0665d452a2d8598257b45ab2ebfd',
+  };
+  for (const sourceMode of Object.keys(expectedHashes)) {
+    const {narrationAudioSource: selection} = buildSelections({audioSourceMode: sourceMode});
+    selection.workflow_approval_mode_selection_sha256 = '2'.repeat(64);
+    selection.decision = {status: 'selected', exact_message: '使用指定音源', decided_at: '2026-09-04T12:00:00Z'};
+    assert.equal(buildNarrationAudioSourceSelectionSha256(selection), expectedHashes[sourceMode]);
+  }
+  const value = buildCorePostCoverBatch();
+  Object.assign(value.narrationAudioSource, {source_mode: 'user_media_audio', edge_tts: null, user_media_audio: userMediaAudio()});
+  value.narrationAudioSource.selection_sha256 = buildNarrationAudioSourceSelectionSha256(value.narrationAudioSource);
+  value.batch.narration_audio_source_selection_sha256 = value.narrationAudioSource.selection_sha256;
+  value.batch.batch_sha256 = buildPostCoverSelectionBatchSha256(value.batch);
+  assert.equal(validatePostCoverSelectionBatch({...value, gate2ScriptSha256: gate2}).source_mode, 'user_media_audio');
+});
+
 const buildFinalReview = () => {
   const review = {
     contract_version: 'visual-asset-review-v3',
@@ -386,6 +650,67 @@ test('final approval rejects stale or partial exact hash list', () => {
       presented_map_sha256: review.presented_map_sha256,
     }),
     /map checksum is stale/,
+  );
+});
+
+test('one-click final review preserves and hashes an exact mechanical override disposition', () => {
+  const review = buildFinalReview();
+  review.assets[0] = {
+    ...review.assets[0],
+    qa_status: 'qa_failed_but_waived_once_pending_final_review',
+    mechanical_qa_result: 'failed_but_waived_once',
+    user_mechanical_gate_override_result: 'pass_with_user_override',
+    user_mechanical_gate_override_sha256: '8'.repeat(64),
+  };
+  review.presented_map_sha256 = buildOneClickFinalVisualMapSha256(review);
+  const originalDigest = review.presented_map_sha256;
+
+  assert.equal(validateOneClickFinalVisualReview(review).result, 'pass_with_user_override');
+  const tampered = structuredClone(review);
+  tampered.assets[0].user_mechanical_gate_override_sha256 = '9'.repeat(64);
+  assert.throws(
+    () => validateOneClickFinalVisualReview(tampered),
+    /map checksum is stale/,
+  );
+
+  const approved = approveOneClickFinalVisualReview(review, {
+    status: 'approved',
+    exact_message: '批准含一次机械放行警示的完整精确哈希清单',
+    decided_at: '2026-08-22T11:00:00+08:00',
+    presented_map_sha256: originalDigest,
+  });
+  assert.equal(approved.assets[0].qa_status, 'approved');
+  assert.equal(
+    approved.assets[0].preapproval_qa_status,
+    'qa_failed_but_waived_once_pending_final_review',
+  );
+  assert.equal(approved.assets[0].mechanical_qa_result, 'failed_but_waived_once');
+  assert.equal(
+    approved.assets[0].user_mechanical_gate_override_result,
+    'pass_with_user_override',
+  );
+  assert.equal(approved.presented_map_sha256, originalDigest);
+  assert.equal(
+    validateOneClickFinalVisualReview(approved, {allowApproved: true}).result,
+    'pass_with_user_override',
+  );
+});
+
+test('one-click final review rejects incomplete or disguised mechanical override evidence', () => {
+  const incomplete = buildFinalReview();
+  incomplete.assets[0].qa_status = 'qa_failed_but_waived_once_pending_final_review';
+  incomplete.presented_map_sha256 = buildOneClickFinalVisualMapSha256(incomplete);
+  assert.throws(
+    () => validateOneClickFinalVisualReview(incomplete),
+    /mechanical override evidence is incomplete/,
+  );
+
+  const disguised = buildFinalReview();
+  disguised.assets[0].user_mechanical_gate_override_result = 'pass_with_user_override';
+  disguised.presented_map_sha256 = buildOneClickFinalVisualMapSha256(disguised);
+  assert.throws(
+    () => validateOneClickFinalVisualReview(disguised),
+    /ordinary QA status cannot carry mechanical override evidence/,
   );
 });
 

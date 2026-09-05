@@ -5,6 +5,12 @@ import path from 'node:path';
 import sharp from 'sharp';
 
 import {
+  IAN_BOTTOM_SUBTITLE_SAFE_AREA_POLICY,
+  IAN_BOTTOM_SUBTITLE_SAFE_AREA_PROMPT_MARKER,
+  validateIanBottomSubtitleSafeArea,
+} from './bottom-subtitle-safe-area.mjs';
+
+import {
   IAN_LAYERED_SCENE_PACKAGE_VERSION,
   IAN_LAYERED_SCENE_RENDERER_VERSION,
   IAN_LAYER_ENTRY_DURATION_FRAMES,
@@ -17,12 +23,18 @@ export {
   IAN_LAYER_ENTRY_DURATION_FRAMES,
   IAN_LAYER_ENTRY_TRANSITION_VERSION,
 } from './runtime.mjs';
+export {
+  IAN_BOTTOM_SUBTITLE_SAFE_AREA_POLICY,
+  IAN_BOTTOM_SUBTITLE_SAFE_AREA_PROMPT_MARKER,
+  validateIanBottomSubtitleSafeArea,
+} from './bottom-subtitle-safe-area.mjs';
 
 export const IAN_LAYERED_SCENE_PLAN_VERSION = 'ian-layered-scene-plan-v1';
 export const IAN_LAYERED_SCENE_LEGACY_PACKAGE_VERSION = 'ian-knowledge-video-layered-scene-v1';
 export const IAN_MASTER_GENERATION_VERSION = 'ian-gpt-image-2-text-free-master-v1';
 export const IAN_MODEL_PROVENANCE_VERSION = 'codex-native-imagegen-gpt-image-2-provenance-v1';
 export const IAN_SEMANTIC_SPLIT_VERSION = 'ian-semantic-region-alpha-split-v1';
+export const IAN_PRE_SPLIT_LAYOUT_REPAIR_VERSION = 'ian-pre-split-layout-repair-v1';
 export const IAN_TEXT_OVERLAY_VERSION = 'ian-deterministic-layer-text-overlay-v1';
 export const IAN_CANONICAL_STYLE_ANCHOR_PATH = '.agents/skills/ian-handdrawn-ppt/assets/reference-handdrawn-article-illustration-style.png';
 
@@ -32,6 +44,8 @@ const CANVAS_HEIGHT = 1080;
 const FPS = 30;
 const MINIMUM_TEXT_INSET_PX = 8;
 const OUTSIDE_UNION_MAX_VISIBLE_PIXELS = 1024;
+const REPAIR_SOURCE_OUTSIDE_UNION_MAX_VISIBLE_PIXELS = 1024;
+const REPAIR_SOURCE_MINIMUM_MATTE_GUTTER_PX = 8;
 
 const fail = (message) => {
   throw new Error(message);
@@ -592,8 +606,127 @@ const rectangleDistance = (first, second) => {
   return Math.hypot(horizontal, vertical);
 };
 
-const validateSplitSpec = (value, scenePlan) => {
+const bboxContains = (outer, inner) => inner.x >= outer.x
+  && inner.y >= outer.y
+  && inner.x + inner.width <= outer.x + outer.width
+  && inner.y + inner.height <= outer.y + outer.height;
+
+const validateLayoutRepair = (value, scenePlan, targetLayers) => {
   assertExactKeys(value, [
+    'contract_version',
+    'method',
+    'authorization',
+    'source_failure',
+    'source_outside_union_max_visible_pixels',
+    'source_bbox_minimum_matte_gutter_px',
+    'layers',
+  ], 'Ian split_spec layout_repair');
+  if (value.contract_version !== IAN_PRE_SPLIT_LAYOUT_REPAIR_VERSION
+      || value.method !== 'matte-alpha-rational-downscale-integer-translate-v1') {
+    fail(`Ian layout repair must use ${IAN_PRE_SPLIT_LAYOUT_REPAIR_VERSION}`);
+  }
+  assertExactKeys(
+    value.authorization,
+    ['asset_id', 'exact_user_message'],
+    'Ian layout repair authorization',
+  );
+  const authorization = {
+    asset_id: assertString(value.authorization.asset_id, 'Ian layout repair authorization.asset_id'),
+    exact_user_message: assertString(
+      value.authorization.exact_user_message,
+      'Ian layout repair authorization.exact_user_message',
+    ),
+  };
+  assertExactKeys(
+    value.source_failure,
+    ['attempt_number', 'prompt', 'output', 'failure_reason'],
+    'Ian layout repair source_failure',
+  );
+  const sourceFailure = {
+    attempt_number: assertInteger(
+      value.source_failure.attempt_number,
+      'Ian layout repair source_failure.attempt_number',
+      1,
+    ),
+    prompt: validateFileBinding(
+      value.source_failure.prompt,
+      'Ian layout repair source_failure.prompt',
+    ),
+    output: validateFileBinding(
+      value.source_failure.output,
+      'Ian layout repair source_failure.output',
+    ),
+    failure_reason: assertString(
+      value.source_failure.failure_reason,
+      'Ian layout repair source_failure.failure_reason',
+    ),
+  };
+  if (value.source_outside_union_max_visible_pixels
+      !== REPAIR_SOURCE_OUTSIDE_UNION_MAX_VISIBLE_PIXELS) {
+    fail(`Ian layout repair source outside-union limit must be ${REPAIR_SOURCE_OUTSIDE_UNION_MAX_VISIBLE_PIXELS}`);
+  }
+  if (value.source_bbox_minimum_matte_gutter_px
+      !== REPAIR_SOURCE_MINIMUM_MATTE_GUTTER_PX) {
+    fail(`Ian layout repair source bbox matte gutter must be ${REPAIR_SOURCE_MINIMUM_MATTE_GUTTER_PX} px`);
+  }
+  if (!Array.isArray(value.layers) || value.layers.length !== scenePlan.layers.length) {
+    fail('Ian layout repair layers must match the scene-plan layer count');
+  }
+  const targetById = new Map(targetLayers.map((item) => [item.layer_id, item.bbox]));
+  const layers = value.layers.map((item, index) => {
+    const label = `Ian layout repair layers[${index}]`;
+    assertExactKeys(item, [
+      'layer_id',
+      'source_bbox',
+      'scale_numerator',
+      'scale_denominator',
+      'target_bbox',
+    ], label);
+    if (item.layer_id !== scenePlan.layers[index].layer_id) {
+      fail('Ian layout repair layers must follow the scene-plan layer order');
+    }
+    const sourceBbox = validateBbox(item.source_bbox, `${label}.source_bbox`);
+    const numerator = assertInteger(item.scale_numerator, `${label}.scale_numerator`, 1);
+    const denominator = assertInteger(item.scale_denominator, `${label}.scale_denominator`, 1);
+    if (numerator > denominator) fail(`${label} may not upscale a semantic group`);
+    const targetBbox = validateBbox(item.target_bbox, `${label}.target_bbox`);
+    const expectedWidth = Math.round((sourceBbox.width * numerator) / denominator);
+    const expectedHeight = Math.round((sourceBbox.height * numerator) / denominator);
+    if (targetBbox.width !== expectedWidth || targetBbox.height !== expectedHeight) {
+      fail(`${label}.target_bbox dimensions must equal the bound rational uniform scale`);
+    }
+    if (!bboxContains(targetById.get(item.layer_id), targetBbox)) {
+      fail(`${label}.target_bbox must stay inside its approved semantic region`);
+    }
+    return {
+      layer_id: item.layer_id,
+      source_bbox: sourceBbox,
+      scale_numerator: numerator,
+      scale_denominator: denominator,
+      target_bbox: targetBbox,
+    };
+  });
+  for (let first = 0; first < layers.length; first += 1) {
+    for (let second = first + 1; second < layers.length; second += 1) {
+      if (rectangleDistance(layers[first].source_bbox, layers[second].source_bbox)
+          < REPAIR_SOURCE_MINIMUM_MATTE_GUTTER_PX) {
+        fail(`Ian layout repair source regions ${layers[first].layer_id}/${layers[second].layer_id} overlap or lack the fixed matte gutter`);
+      }
+    }
+  }
+  return {
+    contract_version: IAN_PRE_SPLIT_LAYOUT_REPAIR_VERSION,
+    method: 'matte-alpha-rational-downscale-integer-translate-v1',
+    authorization,
+    source_failure: sourceFailure,
+    source_outside_union_max_visible_pixels: REPAIR_SOURCE_OUTSIDE_UNION_MAX_VISIBLE_PIXELS,
+    source_bbox_minimum_matte_gutter_px: REPAIR_SOURCE_MINIMUM_MATTE_GUTTER_PX,
+    layers,
+  };
+};
+
+const validateSplitSpec = (value, scenePlan) => {
+  const keys = [
     'contract_version',
     'normalization',
     'matte_rgb',
@@ -604,7 +737,10 @@ const validateSplitSpec = (value, scenePlan) => {
     'minimum_inter_layer_gutter_px',
     'outside_union_max_visible_pixels',
     'layers',
-  ], 'Ian split_spec');
+  ];
+  if (Object.hasOwn(value, 'layout_repair')) keys.push('layout_repair');
+  if (Object.hasOwn(value, 'subtitle_safe_area')) keys.push('subtitle_safe_area');
+  assertExactKeys(value, keys, 'Ian split_spec');
   if (value.contract_version !== IAN_SEMANTIC_SPLIT_VERSION) {
     fail(`Ian split_spec must use ${IAN_SEMANTIC_SPLIT_VERSION}`);
   }
@@ -657,6 +793,20 @@ const validateSplitSpec = (value, scenePlan) => {
     }
     return {layer_id: item.layer_id, bbox: validateBbox(item.bbox, `Ian split_spec ${item.layer_id} bbox`)};
   });
+  const subtitleSafeArea = Object.hasOwn(value, 'subtitle_safe_area')
+    ? validateIanBottomSubtitleSafeArea(
+      value.subtitle_safe_area,
+      'Ian split_spec subtitle_safe_area',
+    )
+    : null;
+  if (subtitleSafeArea !== null) {
+    const safeTop = subtitleSafeArea.safe_area.y;
+    for (const layer of layers) {
+      if (layer.bbox.y + layer.bbox.height > safeTop) {
+        fail(`Ian semantic region ${layer.layer_id} intrudes into the 23% bottom subtitle safe area`);
+      }
+    }
+  }
   for (let first = 0; first < layers.length; first += 1) {
     for (let second = first + 1; second < layers.length; second += 1) {
       const distance = rectangleDistance(layers[first].bbox, layers[second].bbox);
@@ -665,6 +815,9 @@ const validateSplitSpec = (value, scenePlan) => {
       }
     }
   }
+  const layoutRepair = Object.hasOwn(value, 'layout_repair')
+    ? validateLayoutRepair(value.layout_repair, scenePlan, layers)
+    : null;
   return {
     contract_version: IAN_SEMANTIC_SPLIT_VERSION,
     normalization,
@@ -675,7 +828,9 @@ const validateSplitSpec = (value, scenePlan) => {
     paper_background_rgba: paper,
     minimum_inter_layer_gutter_px: value.minimum_inter_layer_gutter_px,
     outside_union_max_visible_pixels: OUTSIDE_UNION_MAX_VISIBLE_PIXELS,
+    ...(subtitleSafeArea === null ? {} : {subtitle_safe_area: subtitleSafeArea}),
     layers,
+    ...(layoutRepair === null ? {} : {layout_repair: layoutRepair}),
   };
 };
 
@@ -700,6 +855,17 @@ const validateTextBackground = (value, label) => {
     }
   }
   return structuredClone(value);
+};
+
+const exactVisibleTextSegments = (value) => value.split(/\r\n|\n|｜/u);
+
+const labelsReproduceExactVisibleText = (labels, exactVisibleText) => {
+  if (typeof exactVisibleText !== 'string' || exactVisibleText.length === 0) return false;
+  const texts = labels.map((label) => label.text);
+  if (texts.length === 1 && texts[0] === exactVisibleText) return true;
+  const segments = exactVisibleTextSegments(exactVisibleText);
+  return segments.length === texts.length
+    && segments.every((segment, index) => segment !== '' && segment === texts[index]);
 };
 
 const validateTextOverlay = (value, splitSpec, {exactVisibleText} = {}) => {
@@ -739,7 +905,8 @@ const validateTextOverlay = (value, splitSpec, {exactVisibleText} = {}) => {
     const text = assertString(label.text, `${name}.text`);
     if (!Array.isArray(label.lines) || label.lines.length < 1
         || label.lines.some((line) => typeof line !== 'string' || line.length === 0)
-        || label.lines.join('') !== text) {
+        || (label.lines.join('') !== text && label.lines.join('\n') !== text
+          && label.lines.join('\r\n') !== text)) {
       fail(`${name}.lines must reproduce the exact approved text`);
     }
     const container = validateBbox(label.container_bbox, `${name}.container_bbox`);
@@ -769,10 +936,15 @@ const validateTextOverlay = (value, splitSpec, {exactVisibleText} = {}) => {
       background: validateTextBackground(label.background, `${name}.background`),
     };
   });
-  const joined = labels.map((label) => label.text).join('｜');
-  if (exactVisibleText !== undefined
-      && joined !== (value.mode === 'none' ? '' : exactVisibleText)) {
-    fail('Ian text overlay does not equal the exact approved visible text');
+  if (exactVisibleText !== undefined) {
+    const noneMatches = value.mode === 'none'
+      && [null, ''].includes(exactVisibleText)
+      && labels.length === 0;
+    const requiredMatches = value.mode === 'required'
+      && labelsReproduceExactVisibleText(labels, exactVisibleText);
+    if (!noneMatches && !requiredMatches) {
+      fail('Ian text overlay does not reproduce the exact approved visible text');
+    }
   }
   return {
     contract_version: IAN_TEXT_OVERLAY_VERSION,
@@ -1002,6 +1174,21 @@ export const validateIanLayeredScenePackage = (manifest, {
     {role: 'text-free-complete-master-normalized', alpha: false},
   );
   const splitSpec = validateSplitSpec(manifest.split_spec, resolvedPlan);
+  if (splitSpec.layout_repair) {
+    const repair = splitSpec.layout_repair;
+    const sourceProjection = {
+      path: masterGeneration.source_master.path,
+      checksum_sha256: masterGeneration.source_master.checksum_sha256,
+    };
+    if (repair.authorization.asset_id !== manifest.queue_item_id) {
+      fail('Ian layout repair authorization must bind the package queue item');
+    }
+    if (canonicalJson(repair.source_failure.prompt)
+        !== canonicalJson(masterGeneration.prompt)
+        || canonicalJson(repair.source_failure.output) !== canonicalJson(sourceProjection)) {
+      fail('Ian layout repair must bind the selected failed prompt and raw source master');
+    }
+  }
   const background = validateBinding(
     manifest.background,
     'Ian package background',
@@ -1015,7 +1202,14 @@ export const validateIanLayeredScenePackage = (manifest, {
   if (!['none', 'required'].includes(resolvedVisibleTextMode)) {
     fail('Ian package requires an exact visible-text mode');
   }
-  const textOverlay = validateTextOverlay(manifest.text_overlay, splitSpec, {exactVisibleText});
+  const resolvedExactVisibleText = exactVisibleText !== undefined
+    ? exactVisibleText
+    : (resolvedVisibleTextMode === 'required' && manifest.verified_visible_text?.length === 1
+      ? manifest.verified_visible_text[0]
+      : null);
+  const textOverlay = validateTextOverlay(manifest.text_overlay, splitSpec, {
+    exactVisibleText: resolvedExactVisibleText,
+  });
   if (textOverlay.mode !== resolvedVisibleTextMode) {
     fail('Ian text overlay mode differs from the approved visible-text mode');
   }
@@ -1030,7 +1224,7 @@ export const validateIanLayeredScenePackage = (manifest, {
   );
   const expectedVerifiedText = textOverlay.mode === 'none'
     ? []
-    : [textOverlay.labels.map((label) => label.text).join('｜')];
+    : [resolvedExactVisibleText];
   if (canonicalJson(manifest.verified_visible_text) !== canonicalJson(expectedVerifiedText)) {
     fail('Ian package verified_visible_text differs from its deterministic layer overlay');
   }
@@ -1099,6 +1293,83 @@ const deterministicPng = Object.freeze({
 const smoothstep = (edge0, edge1, value) => {
   const ratio = Math.max(0, Math.min(1, (value - edge0) / (edge1 - edge0)));
   return ratio * ratio * (3 - (2 * ratio));
+};
+
+const matteDistance = (rgb, offset, matte) => Math.hypot(
+  rgb[offset] - matte[0],
+  rgb[offset + 1] - matte[1],
+  rgb[offset + 2] - matte[2],
+);
+
+const makePaperBackground = async (paper) => sharp({
+  create: {
+    width: CANVAS_WIDTH,
+    height: CANVAS_HEIGHT,
+    channels: 4,
+    background: {r: paper[0], g: paper[1], b: paper[2], alpha: paper[3] / 255},
+  },
+}).png(deterministicPng).toBuffer();
+
+const deriveTransparentCrop = async ({
+  rgb,
+  sourceWidth,
+  bbox,
+  matte,
+  low,
+  high,
+  blur,
+  label,
+}) => {
+  const pixelCount = bbox.width * bbox.height;
+  const alphaSeed = Buffer.alloc(pixelCount);
+  for (let localY = 0; localY < bbox.height; localY += 1) {
+    for (let localX = 0; localX < bbox.width; localX += 1) {
+      const localPixel = (localY * bbox.width) + localX;
+      const sourcePixel = ((bbox.y + localY) * sourceWidth) + bbox.x + localX;
+      alphaSeed[localPixel] = Math.round(smoothstep(
+        low,
+        high,
+        matteDistance(rgb, sourcePixel * 3, matte),
+      ) * 255);
+    }
+  }
+  const {data: blurred, info: blurInfo} = await sharp(alphaSeed, {
+    raw: {width: bbox.width, height: bbox.height, channels: 1},
+  }).blur(blur).raw().toBuffer({resolveWithObject: true});
+  const rgba = Buffer.alloc(pixelCount * 4);
+  let visible = 0;
+  let transparent = 0;
+  for (let localPixel = 0; localPixel < pixelCount; localPixel += 1) {
+    const alphaByte = blurred[localPixel * blurInfo.channels] < 1
+      ? 0
+      : (blurred[localPixel * blurInfo.channels] > 254
+        ? 255
+        : blurred[localPixel * blurInfo.channels]);
+    const localY = Math.floor(localPixel / bbox.width);
+    const localX = localPixel % bbox.width;
+    const sourcePixel = ((bbox.y + localY) * sourceWidth) + bbox.x + localX;
+    const sourceOffset = sourcePixel * 3;
+    const rgbaOffset = localPixel * 4;
+    if (alphaByte > 0) {
+      visible += 1;
+      const fraction = alphaByte / 255;
+      for (let channel = 0; channel < 3; channel += 1) {
+        const recovered = (
+          rgb[sourceOffset + channel] - ((1 - fraction) * matte[channel])
+        ) / fraction;
+        rgba[rgbaOffset + channel] = Math.max(0, Math.min(255, Math.round(recovered)));
+      }
+    } else {
+      transparent += 1;
+    }
+    rgba[rgbaOffset + 3] = alphaByte;
+  }
+  if (visible === 0 || transparent === 0) {
+    fail(`${label} lacks visible or transparent pixels`);
+  }
+  return sharp(rgba, {
+    raw: {width: bbox.width, height: bbox.height, channels: 4},
+  }).png(deterministicPng).toBuffer();
 };
 
 const escapeXml = (value) => value
@@ -1524,7 +1795,7 @@ export const deriveIanLayeredSceneV2Bytes = async ({
   const fontFilePath = resolvedText.font === null
     ? null
     : resolveBoundFontFile(resolvedText.font);
-  const normalizedMaster = await sharp(sourceMasterBytes, {failOn: 'error'})
+  const centeredNormalizedMaster = await sharp(sourceMasterBytes, {failOn: 'error'})
     .resize(CANVAS_WIDTH, CANVAS_HEIGHT, {
       fit: 'cover',
       position: 'centre',
@@ -1533,6 +1804,97 @@ export const deriveIanLayeredSceneV2Bytes = async ({
     .removeAlpha()
     .png(deterministicPng)
     .toBuffer();
+  const background = await makePaperBackground(resolvedSplit.paper_background_rgba);
+  let normalizedMaster = centeredNormalizedMaster;
+  let layoutRepairSourceOutsideVisiblePixels = null;
+  let layoutRepairSourceEdgeVisiblePixels = [];
+  if (resolvedSplit.layout_repair) {
+    const {data: sourceRgb, info: sourceInfo} = await sharp(centeredNormalizedMaster)
+      .removeAlpha()
+      .raw()
+      .toBuffer({resolveWithObject: true});
+    if (sourceInfo.width !== CANVAS_WIDTH || sourceInfo.height !== CANVAS_HEIGHT
+        || sourceInfo.channels !== 3) {
+      fail('Ian centered source master did not decode as 1920x1080 RGB');
+    }
+    const sourceRegionIndex = new Int16Array(CANVAS_WIDTH * CANVAS_HEIGHT);
+    sourceRegionIndex.fill(-1);
+    for (let index = 0; index < resolvedSplit.layout_repair.layers.length; index += 1) {
+      const {source_bbox: bbox} = resolvedSplit.layout_repair.layers[index];
+      for (let y = bbox.y; y < bbox.y + bbox.height; y += 1) {
+        for (let x = bbox.x; x < bbox.x + bbox.width; x += 1) {
+          const pixel = (y * CANVAS_WIDTH) + x;
+          if (sourceRegionIndex[pixel] !== -1) fail('Ian layout repair source regions overlap');
+          sourceRegionIndex[pixel] = index;
+        }
+      }
+    }
+    layoutRepairSourceOutsideVisiblePixels = 0;
+    for (let pixel = 0; pixel < sourceRegionIndex.length; pixel += 1) {
+      if (sourceRegionIndex[pixel] !== -1) continue;
+      if (matteDistance(sourceRgb, pixel * 3, resolvedSplit.matte_rgb)
+          > resolvedSplit.alpha_distance_low) {
+        layoutRepairSourceOutsideVisiblePixels += 1;
+      }
+    }
+    if (layoutRepairSourceOutsideVisiblePixels
+        > resolvedSplit.layout_repair.source_outside_union_max_visible_pixels) {
+      fail(`Ian layout repair source has ${layoutRepairSourceOutsideVisiblePixels} visible pixels outside bound source regions`);
+    }
+    const repairComposites = [];
+    for (const layer of resolvedSplit.layout_repair.layers) {
+      const gutter = resolvedSplit.layout_repair.source_bbox_minimum_matte_gutter_px;
+      let edgeVisiblePixels = 0;
+      for (let localY = 0; localY < layer.source_bbox.height; localY += 1) {
+        for (let localX = 0; localX < layer.source_bbox.width; localX += 1) {
+          const insideCore = localX >= gutter
+            && localX < layer.source_bbox.width - gutter
+            && localY >= gutter
+            && localY < layer.source_bbox.height - gutter;
+          if (insideCore) continue;
+          const pixel = ((layer.source_bbox.y + localY) * CANVAS_WIDTH)
+            + layer.source_bbox.x + localX;
+          if (matteDistance(sourceRgb, pixel * 3, resolvedSplit.matte_rgb)
+              > resolvedSplit.alpha_distance_low) edgeVisiblePixels += 1;
+        }
+      }
+      if (edgeVisiblePixels !== 0) {
+        fail(`Ian layout repair source region ${layer.layer_id} lacks the fixed matte edge gutter`);
+      }
+      layoutRepairSourceEdgeVisiblePixels.push({
+        layer_id: layer.layer_id,
+        visible_pixels: edgeVisiblePixels,
+      });
+      const crop = await deriveTransparentCrop({
+        rgb: sourceRgb,
+        sourceWidth: CANVAS_WIDTH,
+        bbox: layer.source_bbox,
+        matte: resolvedSplit.matte_rgb,
+        low: resolvedSplit.alpha_distance_low,
+        high: resolvedSplit.alpha_distance_high,
+        blur: resolvedSplit.blur_sigma_px,
+        label: `Ian layout repair source region ${layer.layer_id}`,
+      });
+      const transformed = await sharp(crop)
+        .resize(layer.target_bbox.width, layer.target_bbox.height, {
+          fit: 'fill',
+          kernel: sharp.kernel.lanczos3,
+        })
+        .png(deterministicPng)
+        .toBuffer();
+      repairComposites.push({
+        input: transformed,
+        left: layer.target_bbox.x,
+        top: layer.target_bbox.y,
+        blend: 'over',
+      });
+    }
+    normalizedMaster = await sharp(background)
+      .composite(repairComposites)
+      .removeAlpha()
+      .png(deterministicPng)
+      .toBuffer();
+  }
   const {data: rgb, info} = await sharp(normalizedMaster)
     .removeAlpha()
     .raw()
@@ -1566,15 +1928,6 @@ export const deriveIanLayeredSceneV2Bytes = async ({
   if (outsideUnionVisiblePixels > resolvedSplit.outside_union_max_visible_pixels) {
     fail(`Ian master has ${outsideUnionVisiblePixels} visible pixels outside approved semantic regions`);
   }
-  const paper = resolvedSplit.paper_background_rgba;
-  const background = await sharp({
-    create: {
-      width: CANVAS_WIDTH,
-      height: CANVAS_HEIGHT,
-      channels: 4,
-      background: {r: paper[0], g: paper[1], b: paper[2], alpha: paper[3] / 255},
-    },
-  }).png(deterministicPng).toBuffer();
   const alphaBuffers = [];
   const preTextLayers = [];
   for (let index = 0; index < resolvedSplit.layers.length; index += 1) {
@@ -1675,6 +2028,9 @@ export const deriveIanLayeredSceneV2Bytes = async ({
     layers,
     finalComposite,
     outsideUnionVisiblePixels,
+    layoutRepairApplied: resolvedSplit.layout_repair !== undefined,
+    layoutRepairSourceOutsideVisiblePixels,
+    layoutRepairSourceEdgeVisiblePixels,
     glyphMeasurements,
   };
 };
@@ -1912,10 +2268,14 @@ export const inspectIanLayeredScenePackage = async (manifest, {
     member_count: 4 + (validated.layers.length * 2),
     model_provenance_observation: modelObservation,
     deterministic_master_normalization_match: true,
+    deterministic_pre_split_layout_repair_match: derived.layoutRepairApplied ? true : null,
     deterministic_semantic_split_match: true,
     deterministic_text_overlay_match: true,
     deterministic_composite_match: true,
     outside_union_visible_pixels: derived.outsideUnionVisiblePixels,
+    layout_repair_source_outside_union_visible_pixels:
+      derived.layoutRepairSourceOutsideVisiblePixels,
+    layout_repair_source_edge_visible_pixels: derived.layoutRepairSourceEdgeVisiblePixels,
     glyph_measurements: derived.glyphMeasurements,
   };
 };

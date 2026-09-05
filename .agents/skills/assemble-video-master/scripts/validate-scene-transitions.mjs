@@ -175,8 +175,16 @@ export const validateSceneTransitions = ({plan, source}) => {
   const expectedTransitionCatalog = transitionContract === 'scene-transition-v3'
     ? 'scene-transition-catalog-v3'
     : 'scene-transition-catalog-v2';
+  const transitionReviewStatusIsValid = transitionSelectionReview?.status === 'approved'
+    || (transitionSelectionReview?.status === 'policy_authorized'
+      && plan?.qa_contract?.workflow_approval?.result === 'pass'
+      && plan.qa_contract.workflow_approval.approval_mode === 'one_click'
+      && plan.scenes.slice(0, -1).every((scene) => (
+        scene.transition?.user_selection?.status === 'policy_authorized'
+        && SHA256.test(scene.transition.user_selection.policy_sha256 ?? '')
+      )));
   if (['scene-transition-v2', 'scene-transition-v3'].includes(transitionContract)
-    && (transitionSelectionReview?.status !== 'approved'
+    && (!transitionReviewStatusIsValid
       || transitionSelectionReview?.catalog_version !== expectedTransitionCatalog
       || typeof transitionSelectionReview?.path !== 'string'
       || transitionSelectionReview.path.trim() === ''
@@ -390,14 +398,45 @@ export const validateSceneTransitions = ({plan, source}) => {
           densityMode: rhythmV2 ? scene.density_mode : null,
           densitySelectionSha256: rhythmV2 ? scene.visual_density_selection_sha256 : null,
         });
+        const occurrenceAssetBindings = scene.action_state_schedule.occurrence_asset_bindings;
+        let assetIdByState = null;
+        if (occurrenceAssetBindings !== undefined) {
+          if (!Array.isArray(occurrenceAssetBindings)
+            || occurrenceAssetBindings.length !== scene.action_state_schedule.occurrences.length) {
+            throw new Error(`occurrence asset bindings are incomplete: ${scene.shot_id}`);
+          }
+          assetIdByState = new Map();
+          const boundAssetIds = new Set();
+          occurrenceAssetBindings.forEach((binding, index) => {
+            const occurrence = scene.action_state_schedule.occurrences[index];
+            if (binding?.state_id !== occurrence.state_id
+              || binding?.state_index !== occurrence.state_index
+              || binding?.at_frame !== occurrence.at_frame
+              || binding?.duration_in_frames !== occurrence.duration_in_frames
+              || typeof binding?.asset_id !== 'string' || binding.asset_id.trim() === ''
+              || assetIdByState.has(binding.state_id)
+              || boundAssetIds.has(binding.asset_id)) {
+              throw new Error(`occurrence asset bindings are stale or ambiguous: ${scene.shot_id}`);
+            }
+            assetIdByState.set(binding.state_id, binding.asset_id);
+            boundAssetIds.add(binding.asset_id);
+          });
+        }
+        const scheduledTransitions = scene.action_state_schedule.intra_shot_transitions
+          .map((transition) => ({
+            ...transition,
+            from_asset_id: assetIdByState?.get(transition.from_asset_id)
+              ?? transition.from_asset_id,
+            to_asset_id: assetIdByState?.get(transition.to_asset_id) ?? transition.to_asset_id,
+          }));
         if (scene.action_state_schedule.occurrences.length !== images.length
           || scene.action_state_schedule.occurrences.some((occurrence, index) => (
-            occurrence.state_id !== images[index].asset_id
+            (assetIdByState?.get(occurrence.state_id) ?? occurrence.state_id)
+              !== images[index].asset_id
             || occurrence.at_frame !== images[index].from
             || occurrence.duration_in_frames !== images[index].duration_in_frames
           ))
-          || JSON.stringify(scene.action_state_schedule.intra_shot_transitions)
-            !== JSON.stringify(transitions)) {
+          || JSON.stringify(scheduledTransitions) !== JSON.stringify(transitions)) {
           throw new Error(`action-state schedule differs from rendered assets or effects: ${scene.shot_id}`);
         }
       }

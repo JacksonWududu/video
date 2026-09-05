@@ -4,6 +4,19 @@ import type {IntraShotWatercolorTransition} from '../watercolor-bloom/contract.m
 import type {IanLayeredEntryEffectsPlan} from '../ian-layered-entry-effects/contract.mjs';
 export type MotionTier = 'layered' | 'stateful' | 'hero_pose';
 
+export type NarrativeSubjectEntrance = {
+  readonly contract_version: 'narrative-subject-entrance-v1';
+  readonly subject_asset_id: string;
+  readonly at_frame: 0;
+  readonly duration_in_frames: number;
+  readonly translate_x_px: number;
+  readonly translate_y_px: number;
+  readonly initial_scale: number;
+  readonly initial_opacity: number;
+  readonly easing: 'ease-out-cubic';
+  readonly settled_state: 'exact-approved-source-pixels-v1';
+};
+
 type IanLayeredSceneLayerBinding = {
   readonly layer_id: string;
   readonly z_index: number;
@@ -220,6 +233,7 @@ export type CurrentKnowledgeVideoScene = {
     readonly checksum_sha256: string;
     readonly visual_generation_route: VisualGenerationRoute;
   };
+  readonly subject_entrance?: NarrativeSubjectEntrance | null;
   readonly intra_shot_transition_contract?:
     | 'intra-shot-transition-v1'
     | 'intra-shot-watercolor-bloom-v1';
@@ -338,6 +352,12 @@ export type KnowledgeVideoSoundEffectTrack = KnowledgeVideoSoundEffectTrackCommo
 
 export type CurrentKnowledgeVideoAssemblyPlan = KnowledgeVideoAssemblyPlanCommon & {
   readonly schema_version: 'knowledge-video-assembly-plan-v3';
+  readonly canvas: {
+    readonly width: number;
+    readonly height: number;
+    readonly fps: number;
+    readonly aspect: string;
+  };
   readonly sound_effects: KnowledgeVideoSoundEffectTrack;
 };
 

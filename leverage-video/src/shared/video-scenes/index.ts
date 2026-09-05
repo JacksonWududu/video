@@ -30,5 +30,6 @@ export type {
   WhiteboardSceneBinding,
   LocalVideoSceneBinding,
   MotionTier,
+  NarrativeSubjectEntrance,
   WhiteboardTimingSegment,
 } from './types';

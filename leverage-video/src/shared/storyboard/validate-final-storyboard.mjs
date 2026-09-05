@@ -48,7 +48,7 @@ const readChecksumBoundJson = (binding, label) => {
 };
 
 const parseSections = (markdown) => {
-  const matches = [...markdown.matchAll(/^## (OPEN-00|S\d+)\n([\s\S]*?)(?=^## |(?![\s\S]))/gm)];
+  const matches = [...markdown.matchAll(/^## (S\d+)\n([\s\S]*?)(?=^## |(?![\s\S]))/gm)];
   const sections = new Map(matches.map((match) => [match[1], match[2]]));
   if (sections.size !== matches.length) throw new Error('storyboard contains duplicate detailed shot sections');
   return sections;
@@ -272,32 +272,19 @@ export const validateFinalStoryboard = (episodeWorkspace, storyboardRelativePath
     throw new Error('direction or transition authorization is missing');
   }
 
-  const flipbookRowCount = review.rows.filter(isFlipbookRow).length;
-  const flipbookPresentation = isFlipbookRow(review);
-  if (flipbookRowCount !== (flipbookPresentation ? review.rows.length : 0)) {
-    throw new Error('storyboard cannot mix flipbook and non-flipbook rows');
-  }
-  const expectedShotIds = flipbookPresentation
-    ? review.rows.map((row) => row.shot_id)
-    : ['OPEN-00', ...review.rows.map((row) => row.shot_id)];
+  const expectedShotIds = review.rows.map((row) => row.shot_id);
   if (!sameCanonical(summary.map((row) => row.shot_id), expectedShotIds)
     || !sameCanonical([...sections.keys()], expectedShotIds)) {
     throw new Error('Summary and detailed shot order differ from the approved active map');
   }
-  if (flipbookPresentation && (
-    expectedShotIds[0] !== 'S01'
+  if (expectedShotIds[0] !== 'S01'
     || /^\| OPEN-00 \||^## OPEN-00$/m.test(markdown)
-    || markdown.includes('固定封面（cover-only-v1）')
-  )) {
-    throw new Error('flipbook storyboard must use direct-first-shot-v1 without an opening row');
+    || markdown.includes('固定封面（cover-only-v1）')) {
+    throw new Error('active storyboard must use direct-first-shot-v1 without an opening row');
   }
 
   const sourceTexts = [];
   const timings = [];
-  const firstSentenceEndFrame = flipbookPresentation ? null
-    : state.opening_first_sentence_boundary?.first_sentence_end_frame
-      ?? state.first_sentence_timing?.first_sentence_end_frame;
-  const detailCutMarker = flipbookPresentation ? null : openingDetailCutMarker(firstSentenceEndFrame);
   for (const [index, summaryRow] of summary.entries()) {
     const shotId = summaryRow.shot_id;
     const section = sections.get(shotId);
@@ -312,16 +299,7 @@ export const validateFinalStoryboard = (episodeWorkspace, storyboardRelativePath
     validateSummaryDurationSeconds(summaryRow, timing);
     timings.push(timing);
 
-    if (!flipbookPresentation && shotId === 'OPEN-00') {
-      if (summaryRow.white_cat !== '不适用'
-        || summaryRow.visual_generation_route !== '固定封面（cover-only-v1）'
-        || summaryRow.visible_text !== '无'
-        || !section.includes(detailCutMarker)) {
-        throw new Error('OPEN-00 fixed contract is invalid');
-      }
-      continue;
-    }
-    const row = review.rows[flipbookPresentation ? index : index - 1];
+    const row = review.rows[index];
     const decision = row?.user_selection;
     if (isFlipbookRow(row)) {
       validateStaticSpread(row.static_spread, {sourceText, shotId});
@@ -350,61 +328,45 @@ export const validateFinalStoryboard = (episodeWorkspace, storyboardRelativePath
     }
   }
 
-  const lockedScript = flipbookPresentation
-    ? state.locked_script ?? {
-      path: state.narration_script_source?.locked_script_path,
-      checksum_sha256: state.narration_script_source?.locked_script_checksum_sha256,
-    }
-    : state.locked_script;
+  const lockedScript = state.locked_script ?? {
+    path: state.narration_script_source?.locked_script_path,
+    checksum_sha256: state.narration_script_source?.locked_script_checksum_sha256,
+  };
   const lockedBytes = fs.readFileSync(resolveRootRelative(lockedScript.path, 'locked narration path'));
-  if (flipbookPresentation) {
-    if (sha256(lockedBytes) !== lockedScript.checksum_sha256) {
-      throw new Error('locked narration checksum is stale');
+  if (sha256(lockedBytes) !== lockedScript.checksum_sha256) {
+    throw new Error('locked narration checksum is stale');
+  }
+  let lockedNarration;
+  try {
+    lockedNarration = new TextDecoder('utf-8', {fatal: true}).decode(lockedBytes);
+  } catch {
+    throw new Error('locked narration is not valid UTF-8');
+  }
+  const timingAuthority = readChecksumBoundJson(state.storyboard_timing, 'storyboard timing');
+  const timingRows = timingAuthority.shots ?? timingAuthority.rows;
+  if (timingAuthority.contract_version !== 'storyboard-shot-timing-v1'
+    || !Array.isArray(timingRows)
+    || timingRows.length !== expectedShotIds.length) {
+    throw new Error('direct-first storyboard timing authority is missing or stale');
+  }
+  let lockedByteCursor = 0;
+  const reconstructedNarration = timingRows.map((row, index) => {
+    const sourceBytes = Buffer.from(sourceTexts[index], 'utf8');
+    if (row.shot_id !== expectedShotIds[index]
+      || row.source_text !== sourceTexts[index]
+      || row.locked_utf8_byte_start !== lockedByteCursor
+      || row.locked_utf8_spoken_end_exclusive !== lockedByteCursor + sourceBytes.length
+      || typeof row.inter_shot_gap_text !== 'string') {
+      throw new Error(`${expectedShotIds[index]} timing narration-byte binding is stale`);
     }
-    let lockedNarration;
-    try {
-      lockedNarration = new TextDecoder('utf-8', {fatal: true}).decode(lockedBytes);
-    } catch {
-      throw new Error('locked narration is not valid UTF-8');
-    }
-    const timingAuthority = readChecksumBoundJson(state.storyboard_timing, 'storyboard timing');
-    const timingRows = timingAuthority.shots ?? timingAuthority.rows;
-    if (timingAuthority.contract_version !== 'storyboard-shot-timing-v1'
-        || !Array.isArray(timingRows)
-        || timingRows.length !== expectedShotIds.length) {
-      throw new Error('flipbook direct-first storyboard timing authority is missing or stale');
-    }
-    let lockedByteCursor = 0;
-    const reconstructedNarration = timingRows.map((row, index) => {
-      const sourceBytes = Buffer.from(sourceTexts[index], 'utf8');
-      if (row.shot_id !== expectedShotIds[index]
-          || row.source_text !== sourceTexts[index]
-          || row.locked_utf8_byte_start !== lockedByteCursor
-          || row.locked_utf8_spoken_end_exclusive !== lockedByteCursor + sourceBytes.length
-          || typeof row.inter_shot_gap_text !== 'string') {
-        throw new Error(`${expectedShotIds[index]} timing narration-byte binding is stale`);
-      }
-      lockedByteCursor += sourceBytes.length + Buffer.byteLength(row.inter_shot_gap_text);
-      return `${row.source_text}${row.inter_shot_gap_text}`;
-    }).join('');
-    if (lockedByteCursor !== lockedBytes.length || reconstructedNarration !== lockedNarration) {
-      throw new Error('flipbook storyboard narration does not cover the locked script exactly once in order');
-    }
-  } else {
-    validateOpeningFirstSentenceRecord({
-      lockedBytes,
-      lockedChecksum: lockedScript.checksum_sha256,
-      evidence: state.opening_narration_evidence,
-      openSourceText: sourceTexts[0],
-    });
-    const lockedBody = extractLockedNarrationBody({
-      lockedBytes,
-      openingByteStart: state.opening_narration_evidence.byte_start,
-    });
-    const reconstructedBody = `${sourceTexts.join('\n')}${lockedBody.endsWith('\n') ? '\n' : ''}`;
-    if (reconstructedBody !== lockedBody) {
-      throw new Error('storyboard narration does not cover the locked body exactly once in order');
-    }
+    lockedByteCursor += sourceBytes.length + Buffer.byteLength(row.inter_shot_gap_text);
+    return `${row.source_text}${row.inter_shot_gap_text}`;
+  }).join('');
+  if (lockedByteCursor !== lockedBytes.length) {
+    throw new Error('storyboard timing narration-byte coverage is incomplete');
+  }
+  if (reconstructedNarration !== lockedNarration) {
+    throw new Error('storyboard narration does not cover the locked script exactly once in order');
   }
 
   const fps = 30;
@@ -417,23 +379,13 @@ export const validateFinalStoryboard = (episodeWorkspace, storyboardRelativePath
       throw new Error(`${timing.shotId} timing is not monotonic and contiguous`);
     }
   }
-  if (flipbookPresentation) {
-    if (timings[0].startFrame !== 0 || timings.at(-1).endFrame !== masterFrames) {
-      throw new Error('flipbook direct-first or final master frame coverage is invalid');
-    }
-    if (!markdown.includes('画布：16:9，1920×1080，30 fps')
-        || !markdown.includes(directFirstShotWorkcardMarker())
-        || state.storyboard_draft?.direct_first_shot_contract !== DIRECT_FIRST_SHOT_VERSION) {
-      throw new Error('flipbook canvas or direct-first workcard binding is missing');
-    }
-  } else {
-    if (timings.at(-1).endFrame !== masterFrames || timings[0].endFrame !== firstSentenceEndFrame) {
-      throw new Error('opening or final master frame coverage is invalid');
-    }
-    if (!markdown.includes('画布：16:9，1920×1080，30 fps')
-        || !markdown.includes(openingWorkcardScheduleMarker(firstSentenceEndFrame))) {
-      throw new Error('canvas or opening schedule workcard binding is missing');
-    }
+  if (timings[0].startFrame !== 0 || timings.at(-1).endFrame !== masterFrames) {
+    throw new Error('direct-first or final master frame coverage is invalid');
+  }
+  if (!markdown.includes('画布：16:9，1920×1080，30 fps')
+    || !markdown.includes(directFirstShotWorkcardMarker())
+    || state.storyboard_draft?.direct_first_shot_contract !== DIRECT_FIRST_SHOT_VERSION) {
+    throw new Error('canvas or direct-first workcard binding is missing');
   }
 
   const audioPath = resolveRootRelative(state.narration_audio.archive_path, 'narration audio path');
@@ -471,8 +423,7 @@ export const validateFinalStoryboard = (episodeWorkspace, storyboardRelativePath
     const section = sections.get(row.source_shot_id);
     const exactBinding = `映射键 \`${row.source_shot_id}→${row.next_shot_id}\`，\`${row.kind}\` / ${row.duration_in_frames} 帧`;
     if (!section.includes(exactBinding)) throw new Error(`${row.source_shot_id} outgoing transition binding is missing`);
-    const timing = timings[flipbookPresentation ? index : index + 1];
-    if (row.duration_in_frames > timing.endFrame - timing.startFrame) {
+    if (row.duration_in_frames > timings[index].endFrame - timings[index].startFrame) {
       throw new Error(`${row.source_shot_id} transition is longer than the source shot`);
     }
   });
@@ -580,12 +531,7 @@ export const validateFinalStoryboard = (episodeWorkspace, storyboardRelativePath
       summary_duration_seconds: 'pass_exact_frames_divided_by_30_three_decimals',
       transition_selection_binding: 'pass',
       narration_coverage: 'pass_exact_body_bytes_once_in_order',
-      ...(flipbookPresentation ? {
-        direct_first_shot: 'pass_s01_and_narration_start_at_frame_zero_without_timeline_cover',
-      } : {
-        opening_first_sentence_record: 'pass_checksum_utf8_byte_range_and_open_source_text',
-        opening_schedule: 'pass',
-      }),
+      direct_first_shot: 'pass_s01_and_narration_start_at_frame_zero_without_timeline_cover',
       timing_source: 'pass_validated_master_and_dual_offline_word_timestamps',
       canvas: 'pass_1920x1080_30fps',
       subtitle_normalization: 'pass_source_text_spans_preserved',

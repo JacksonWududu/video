@@ -19,7 +19,7 @@
 
 ## Task routing
 
-- Before writing, classify work as `project_maintenance`, `new_video`, `resume`, or `standalone_phase`. Skills, shared infrastructure, dependencies, tooling, and repository docs are maintenance and stay in place.
+- Classify work before writing. Skills, shared code/tests, dependencies, tooling, `AGENTS.md`, and repository docs are maintenance; none may read, copy, or require a concrete episode workspace.
 - Use `$run-knowledge-video` for complete/resumed workflows; route standalone topic, narration, storyboard, visual, and assembly work to their corresponding listed Skills.
 - Route a completed episode needing a different voice while preserving locked words and visuals through `$run-knowledge-video` with `resume_mode: revoice_variant`.
 - New or modified visual decisions require v3; v1/v2 are completed unchanged history only. `comic-imagegen` is historical read-only and rejected from revoice/output.
@@ -28,11 +28,13 @@
 
 ## Cross-cutting gates
 
+- Knowledge-video gates run first. A user-named failure release advances once under `one-time-explicit-user-mechanical-gate-override-v1`. Preserve failure, bind scope/hashes/transition, consume once. Safety and permissions are excluded.
+
 - Every ordinary boundary must carry one registered, approved, verified semantic transition decision. `scene-transition-v3` may use zero-duration `cut`; visible transitions remain 0.3–0.6 seconds. Missing, `none`, unsupported, misconfigured, renderer fallback, or unapproved decisions fail. Only the terminal clean hold is exempt.
 - Before still, Studio, preview, render, or composition lock, validate transition coverage, catalog support, selection evidence, and renderer use. Otherwise provide an equivalent catalog, contract, renderer, and fail-closed validator.
-- After Gate 2, `$imagegen-calligraphy-cover` generates open-style 16:9/9:16/4:3 publishing covers under delegated QA; then choose the cover-derived or any registered style before density/mode. Bind its episode-snapshot SHA/cohesion to every v3 row and visual QA. Cat work is ImageGen-only; Ian keeps its sole medium and inherits only palette, luminance, and whitespace. Manual keeps checkpoints. One-click reapproves current full-visual HTML after image changes, then chooses captions before Remotion.
+- After Gate 2 choose cover-cat mode, generate 16:9/9:16/4:3 covers, then choose style before density/mode. Bind its snapshot/cohesion to v3 rows/QA. Cat work is ImageGen-only; Ian inherits palette/luminance/whitespace. Manual keeps checkpoints; one-click reapproves changed visual HTML before captions/Remotion.
 - After visual lock, pass v2 automatic sound design with mandatory opening/boundary/intra-transition coverage; then before episode scripts pass shared-reuse pre-script validation, and before Remotion pass consumption validation. Legacy migration needs exact authorization and unchanged script bytes.
-- Approved narration, audio, storyboard, selections, images, timing, caption mode, and delivery roles are immutable contract inputs. Publishing covers remain separate artifacts except the approved `illustrated-flipbook` opening adapter. Missing, ambiguous, stale, unsupported, unapproved, or substituted inputs block work.
+- Approved narration, audio, storyboard, selections, visuals, timing, captions, and delivery roles are immutable inputs. Covers are publishing-only except the approved `illustrated-flipbook` opening adapter. Missing, ambiguous, stale, unsupported, unapproved, or substituted inputs block.
 - After three QA-rejected outputs for one logical storyboard image, pause its queue and require explicit user takeover; prompt/model/route/version changes never reset the count.
 - After each new standard/revoice delivery transaction, call `$short-video-bgm`; final completion requires its validated recommendation. It is advisory and cannot download, mix, alter, or rerender the delivered video.
 - No brand/topic opening Gate. `direct-first-shot-v1` starts S01/audio at frame 0, except the flipbook cover adapter. `OPEN-00` remains historical.
@@ -40,7 +42,7 @@
 
 ## Verification and completion
 
-- Follow the active Skill's references, schemas, commands, and approval evidence. Any nonzero validator blocks downstream work and completion.
+- Follow active Skill authorities and evidence. Nonzero validation blocks unless every project-mechanical violation has one current, exact, hash-bound release recognized as `pass_with_user_override`; raw or unrecognized nonzero results block.
 - Before claiming success, verify authorities exist, required tests/validators passed, checksums match disk, and no approval or ambiguity remains. Visual inspection never replaces structured validation.
 
 ## AGENTS maintenance rule

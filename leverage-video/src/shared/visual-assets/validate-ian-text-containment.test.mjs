@@ -16,6 +16,7 @@ import {
   assertContained,
   assertLayerRepairBindings,
   assertV2OverlayBindings,
+  measureLabelGlyphBounds,
   validateIanTextContainment,
 } from './validate-ian-text-containment.mjs';
 
@@ -40,6 +41,19 @@ assert.doesNotThrow(() => assertContained(
   12,
   '一次结果≠无法改变',
 ));
+
+await assert.doesNotReject(() => measureLabelGlyphBounds({
+  text: '个人理性\n集体收缩',
+  lines: ['个人理性', '集体收缩'],
+  x: 700,
+  y: 470,
+  width: 520,
+  height: 180,
+  font_size: 40,
+  font_weight: 500,
+  letter_spacing: 0,
+  font_family: 'STHeiti',
+}));
 
 const layer = {layer_id: 'L02', path: 'episode/L02.png', checksum_sha256: 'b'.repeat(64)};
 const finalComposite = {path: 'episode/final.png', checksum_sha256: 'c'.repeat(64)};

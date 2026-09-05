@@ -20,7 +20,7 @@ const effectFor = (elementClass) => {
       reveal_kind: elementClass === 'closed_outline' ? 'contour-draw' : 'path-grow',
       duration_frames: 12,
       easing: 'ease-in-out',
-      vector_asset: {asset: 'topic7/assets/vector/S17-L02.svg', checksum_sha256: sha('a')},
+      vector_asset: {asset: 'episode-test/assets/vector/S17-L02.svg', checksum_sha256: sha('a')},
       path_spec: {view_box: [0, 0, 1920, 1080], paths},
       path_spec_sha256: buildIanLayeredEntryEffectsMapSha256(paths),
     };
@@ -51,7 +51,7 @@ const soundFor = (assetId, entryFrame) => {
       trim_end_sample_exclusive: 8820,
     },
     derived_asset: {
-      asset: `topic7/assets/audio/sfx/${assetId}.wav`,
+      asset: `episode-test/assets/audio/sfx/${assetId}.wav`,
       checksum_sha256: sha('b'),
       sample_rate_hz: 44100,
       channels: 2,
@@ -84,7 +84,7 @@ const makePlan = () => {
     contract_version: 'ian-layered-entry-effects-v2',
     shot_id: 'S17',
     scene_plan_sha256: sha('c'),
-    package_manifest: {path: 'leverage-video/src/topic7/schema/S17.json', checksum_sha256: sha('d')},
+    package_manifest: {path: 'leverage-video/src/episode-test/schema/S17.json', checksum_sha256: sha('d')},
     fps: 30,
     duration_frames: 355,
     policy_authorization: {

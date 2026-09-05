@@ -48,22 +48,30 @@ export const finalizeStoryboardMarkdown = ({
   if (!draftTitle || draftTitle[1] !== draftTitle[1].trim()) {
     throw new Error('active storyboard draft title is unexpected');
   }
+  if (/^\| OPEN-00 \||^## OPEN-00$/m.test(draftMarkdown)
+    || draftMarkdown.includes('固定封面（cover-only-v1）')) {
+    throw new Error('active storyboard draft must use direct-first-shot-v1 without OPEN-00');
+  }
   const statusLines = [...draftMarkdown.matchAll(/^- 当前状态：.*$/gm)];
-  if (statusLines.length !== 1) throw new Error('active storyboard draft must contain exactly one current-status line');
+  if (statusLines.length > 1) throw new Error('active storyboard draft must contain at most one current-status line');
   let transitionIndex = 0;
   const finalTitle = topic === null
     ? `# 《${draftTitle[1]}》知识视频分镜 v1\n`
     : buildFinalStoryboardTitle(topic);
-  let markdown = draftMarkdown
-    .replace(draftTitle[0], finalTitle)
-    .replace(
-      statusLines[0][0],
-      authorizationMode === 'one_click'
-        ? `- 当前状态：视觉方向与 ${transitionRows.length} 条普通 \`scene-transition-v3\` 边界均已按一键策略授权；不表示用户已查看具体映射，等待本文件绑定同一策略。`
-        : `- 当前状态：视觉方向与 ${transitionRows.length} 条普通 \`scene-transition-v3\` 边界均已明确批准；等待本文件的 Storyboard Review。`,
-    )
+  const finalStatusLine = authorizationMode === 'one_click'
+    ? `- 当前状态：视觉方向与 ${transitionRows.length} 条普通 \`scene-transition-v3\` 边界均已按一键策略授权；不表示用户已查看具体映射，等待本文件绑定同一策略。`
+    : `- 当前状态：视觉方向与 ${transitionRows.length} 条普通 \`scene-transition-v3\` 边界均已明确批准；等待本文件的 Storyboard Review。`;
+  let markdown = draftMarkdown.replace(draftTitle[0], finalTitle);
+  markdown = statusLines.length === 1
+    ? markdown.replace(statusLines[0][0], finalStatusLine)
+    : markdown.replace(finalTitle, `${finalTitle}\n${finalStatusLine}\n`);
+  markdown = markdown
     .replaceAll('- 动态：候选 Ian 全幅遮罩扫入', '- 动态：锁定 Ian 全幅遮罩扫入')
-    .replace(/^- 出场转场：待逐边界审核。$/gm, () => {
+    .replaceAll(
+      '- 出场边界：待 scene-transition-v3 整批提案；终端干净保持，无出场转场。',
+      '- 出场转场：终端干净保持，无出场转场。',
+    )
+    .replace(/^(?:- 出场转场：(?:待逐边界审核。|待可见文字整批确认后生成逐边界确定性推荐。)|- 出场边界：待 scene-transition-v3 整批提案；不得以 none 或渲染器回退代替。)$/gm, () => {
       const row = transitionRows[transitionIndex];
       if (!row) throw new Error('storyboard has more pending transition lines than approved rows');
       transitionIndex += 1;
@@ -72,7 +80,10 @@ export const finalizeStoryboardMarkdown = ({
   if (transitionIndex !== transitionRows.length) {
     throw new Error('storyboard pending transition line count differs from approved row count');
   }
-  if (markdown.includes('待逐边界审核') || markdown.includes('知识视频分镜草案')) {
+  if (markdown.includes('待逐边界审核')
+    || markdown.includes('待可见文字整批确认后生成逐边界确定性推荐')
+    || markdown.includes('待 scene-transition-v3 整批提案')
+    || markdown.includes('知识视频分镜草案')) {
     throw new Error('storyboard still contains draft transition or title markers');
   }
   markdown = `${markdown.trimEnd()}\n\n## 锁定 scene-transition-v3 映射\n\n\`\`\`json\n${JSON.stringify(transitionRows, null, 2)}\n\`\`\`\n`;
@@ -86,7 +97,7 @@ const buildArtifacts = ({episodeWorkspace, presentedAt}) => {
   const statePath = path.join(workspacePath, 'schema/episode-state.json');
   const state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
   const oneClick = state.workflow_approval_mode?.approval_mode === 'one_click';
-  const freshOneClickReview = state.storyboard_review === null
+  const freshOneClickReview = state.storyboard_review == null
     || (state.storyboard_review?.status === 'not_started'
       && state.storyboard_review.presented_path == null
       && state.storyboard_review.approved_path == null);
@@ -99,8 +110,9 @@ const buildArtifacts = ({episodeWorkspace, presentedAt}) => {
       || state.one_click_approval_policy?.user_has_reviewed_specific_maps !== false
       || state.transition_review.policy_sha256 !== policySha256
       || state.transition_review.user_has_reviewed_specific_map !== false
+      || state.storyboard_draft?.direct_first_shot_contract !== 'direct-first-shot-v1'
       || !freshOneClickReview
-      || state.storyboard_qa !== null
+      || state.storyboard_qa != null
       || state.active_storyboard?.prior_approved_storyboard != null) {
       throw new Error('episode lacks fresh one-click storyboard policy authorization');
     }
@@ -108,11 +120,13 @@ const buildArtifacts = ({episodeWorkspace, presentedAt}) => {
     || state.storyboard_review?.status !== 'changes_requested') {
     throw new Error('episode is not ready to finalize a revised storyboard');
   }
-  const sourceRelative = state.active_storyboard.path;
+  const sourceBinding = state.storyboard_draft ?? state.active_storyboard;
+  const sourceRelative = sourceBinding?.path;
   const sourcePath = resolveRootRelative(sourceRelative, 'active storyboard draft path');
   const sourceBytes = fs.readFileSync(sourcePath);
-  if (sha256(sourceBytes) !== state.active_storyboard.checksum_sha256
-    || sha256(sourceBytes) !== state.storyboard_construction.draft_checksum_sha256) {
+  if (sha256(sourceBytes) !== sourceBinding.checksum_sha256
+    || (state.storyboard_construction.draft_checksum_sha256 !== undefined
+      && sha256(sourceBytes) !== state.storyboard_construction.draft_checksum_sha256)) {
     throw new Error('active storyboard draft checksum is stale');
   }
   const transitionPath = resolveRootRelative(state.transition_review.path, 'approved transition review path');
@@ -151,8 +165,8 @@ const buildArtifacts = ({episodeWorkspace, presentedAt}) => {
     source_draft_path: sourceRelative,
     source_draft_checksum_sha256: sha256(sourceBytes),
     prior_approved_storyboard: oneClick
-      ? state.active_storyboard.prior_approved_storyboard ?? null
-      : state.active_storyboard.prior_approved_storyboard,
+      ? state.active_storyboard?.prior_approved_storyboard ?? null
+      : state.active_storyboard?.prior_approved_storyboard ?? null,
   };
   nextState.storyboard_construction = {
     ...nextState.storyboard_construction,
@@ -201,10 +215,11 @@ const applyArtifacts = (artifacts, episodeWorkspace) => {
     path: artifacts.final.relative,
     checksum_sha256: artifacts.final.checksum,
     source_draft_path: artifacts.sourceRelative,
-    source_draft_checksum_sha256: artifacts.state.active_storyboard.checksum_sha256,
+    source_draft_checksum_sha256: artifacts.state.storyboard_draft?.checksum_sha256
+      ?? artifacts.state.active_storyboard.checksum_sha256,
     prior_approved_storyboard: artifacts.oneClick
-      ? artifacts.state.active_storyboard.prior_approved_storyboard ?? null
-      : artifacts.state.active_storyboard.prior_approved_storyboard,
+      ? artifacts.state.active_storyboard?.prior_approved_storyboard ?? null
+      : artifacts.state.active_storyboard?.prior_approved_storyboard ?? null,
   };
   finalState.storyboard_construction = {
     ...finalState.storyboard_construction,
@@ -254,7 +269,8 @@ const applyArtifacts = (artifacts, episodeWorkspace) => {
           : 'visual_route_and_affected_transition_revision_completed'),
       superseded_at: artifacts.presentedAt,
       prior_artifact_path: artifacts.sourceRelative,
-      prior_artifact_checksum_sha256: artifacts.state.active_storyboard.checksum_sha256,
+      prior_artifact_checksum_sha256: artifacts.state.storyboard_draft?.checksum_sha256
+        ?? artifacts.state.active_storyboard.checksum_sha256,
       replacement_artifact_path: artifacts.final.relative,
       replacement_artifact_checksum_sha256: artifacts.final.checksum,
     },

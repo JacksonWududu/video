@@ -14,6 +14,7 @@ import {
   CATALOG as VISUAL_ROUTE_CATALOG,
   CATALOG_CHECKSUM_SHA256,
   LEGACY_CATALOG_CHECKSUM_SHA256,
+  authorizeVisualDirectionRecommendationsOneClick,
   buildPresentedMapSha256,
   validateVisualDirectionArtifactPolicy,
   validateVisualDirectionReview,
@@ -27,6 +28,7 @@ import {
 import {buildDefaultIntraShotTransitions} from '../intra-shot-transitions/contract.mjs';
 import {
   WHITE_CAT_VISUAL_STYLE_OPTIONS,
+  buildOneClickApprovalPolicySha256,
   buildWhiteCatVisualStyleSelectionSha256,
   buildVisualDensitySelectionSha256,
   buildWorkflowApprovalModeSha256,
@@ -1604,6 +1606,176 @@ test('new assembly binds explicit workflow selection, v2 rhythm, and v4 schedule
   assert.equal(plan.qa_contract.workflow_approval.result, 'pass');
 });
 
+test('v3 one-click assembly accepts only policy-bound transition authorization', () => {
+  const input = buildV3Input({characterSchedule: true});
+  const gate2ScriptSha256 = '4'.repeat(64);
+  const whiteCatStyle = {
+    contract_version: 'white-cat-visual-style-selection-v1',
+    gate2_script_sha256: gate2ScriptSha256,
+    style_id: 'loose-line-vivid-watercolor',
+    ...WHITE_CAT_VISUAL_STYLE_OPTIONS['loose-line-vivid-watercolor'],
+    decision: {
+      status: 'selected',
+      exact_message: '选择松线明彩水彩',
+      decided_at: '2026-08-22T09:59:00+08:00',
+    },
+  };
+  whiteCatStyle.selection_sha256 = buildWhiteCatVisualStyleSelectionSha256(whiteCatStyle);
+  input.visualDirectionReview.white_cat_visual_style_binding.selection_sha256 =
+    whiteCatStyle.selection_sha256;
+  input.visualDirectionReview.rows.forEach((row) => {
+    row.white_cat_visual_style_selection_sha256 = whiteCatStyle.selection_sha256;
+    row.user_selection.white_cat_visual_style_selection_sha256 = whiteCatStyle.selection_sha256;
+  });
+  input.visualDirectionReview.presented_map_sha256 =
+    buildPresentedMapSha256(input.visualDirectionReview);
+  input.visualDirectionReview.rows.forEach((row) => {
+    row.user_selection.presented_map_sha256 = input.visualDirectionReview.presented_map_sha256;
+  });
+  const density = {
+    contract_version: 'visual-density-selection-v1',
+    gate2_script_sha256: gate2ScriptSha256,
+    white_cat_visual_style_selection_sha256: whiteCatStyle.selection_sha256,
+    density_mode: 'standard',
+    decision: {
+      status: 'selected',
+      exact_message: '选择普通密度',
+      decided_at: '2026-08-22T10:00:00+08:00',
+    },
+  };
+  density.selection_sha256 = buildVisualDensitySelectionSha256(density);
+  const mode = {
+    contract_version: 'workflow-approval-mode-v1',
+    gate2_script_sha256: gate2ScriptSha256,
+    visual_density_selection_sha256: density.selection_sha256,
+    approval_mode: 'one_click',
+    decision: {
+      status: 'selected',
+      exact_message: '选择一键审批',
+      decided_at: '2026-08-22T10:01:00+08:00',
+    },
+  };
+  mode.selection_sha256 = buildWorkflowApprovalModeSha256(mode);
+  const policy = {
+    contract_version: 'one-click-approval-policy-v1',
+    gate2_script_sha256: gate2ScriptSha256,
+    white_cat_visual_style_selection_sha256: whiteCatStyle.selection_sha256,
+    visual_density_selection_sha256: density.selection_sha256,
+    workflow_approval_mode_selection_sha256: mode.selection_sha256,
+    preauthorizations: {
+      audio_lookup: true,
+      deterministic_visual_direction_recommendations: true,
+      deterministic_transition_recommendations: true,
+      storyboard_review: true,
+      continue_during_visual_production: true,
+    },
+    user_has_reviewed_specific_maps: false,
+    final_visual_review_required: true,
+    qa_bypass_forbidden: true,
+  };
+  policy.policy_sha256 = buildOneClickApprovalPolicySha256(policy);
+  input.workflowApproval = {
+    gate2ScriptSha256,
+    whiteCatStyle,
+    density,
+    mode,
+    policy,
+    phase: 'sound_effect_design',
+    captionDelivery: {status: 'selected'},
+    visualReview: {status: 'approved', visual_assets_locked: true},
+  };
+  input.visualDirectionReview = authorizeVisualDirectionRecommendationsOneClick(
+    input.visualDirectionReview,
+    {policySha256: policy.policy_sha256, authorizedAt: '2026-08-22T10:02:00+08:00'},
+  );
+  input.transitionSelectionReview.status = 'policy_authorized';
+  input.shots[0].transition.user_selection = {
+    status: 'policy_authorized',
+    policy_sha256: policy.policy_sha256,
+    deterministic_recommendation_selected: true,
+    user_has_reviewed_specific_map: false,
+    exact_message: null,
+    decided_at: null,
+    authorized_at: '2026-08-22T10:02:00+08:00',
+    presented_map_sha256: input.transitionSelectionReview.presented_map_sha256,
+  };
+  input.shots.forEach((shot) => {
+    shot.density_mode = density.density_mode;
+    shot.visual_density_selection_sha256 = density.selection_sha256;
+  });
+  const characterShot = input.shots[0];
+  characterShot.action_state_schedule = buildActionStateScheduleV4({
+    totalFrames: 120,
+    fps: 30,
+    sourceText: '甲乙丙',
+    motionTier: 'stateful',
+    densityMode: density.density_mode,
+    visualDensitySelectionSha256: density.selection_sha256,
+    states: characterShot.assets.map((asset, index) => ({
+      state_id: asset.asset_id,
+      semantic_state: ['预备', '接触', '结果'][index],
+      narration_byte_start: index * 3,
+      narration_byte_end: (index + 1) * 3,
+      narration_text: ['甲', '乙', '丙'][index],
+      at_frame: asset.from,
+      semantic_hold_reason: null,
+    })),
+    intraShotTransitions: characterShot.intra_shot_transitions,
+  });
+  const plan = buildKnowledgeVideoAssemblyPlan(input, {
+    verifySharedReuseEvidence: passingVerifier,
+    verifyStoryboardVisualRhythmEvidence: passingV2StoryboardVisualRhythmVerifier,
+  });
+  assert.equal(plan.qa_contract.transition_selection_review.status, 'policy_authorized');
+
+  const unbound = structuredClone(input);
+  unbound.workflowApproval.mode.approval_mode = 'manual';
+  assert.throws(() => buildKnowledgeVideoAssemblyPlan(unbound, {
+    verifySharedReuseEvidence: passingVerifier,
+    verifyStoryboardVisualRhythmEvidence: passingV2StoryboardVisualRhythmVerifier,
+  }));
+});
+
+test('current assembly preserves state IDs while consuming explicit occurrence asset bindings', () => {
+  const input = buildV3Input({characterSchedule: true});
+  const shot = input.shots[0];
+  const logicalAssetIds = shot.assets.map((_, index) => `S01-production-${index + 1}`);
+  shot.action_state_schedule.occurrence_asset_bindings =
+    shot.action_state_schedule.occurrences.map((occurrence, index) => ({
+      ...structuredClone(occurrence),
+      asset_id: logicalAssetIds[index],
+    }));
+  shot.assets.forEach((asset, index) => {
+    asset.asset_id = logicalAssetIds[index];
+  });
+  shot.intra_shot_transitions.forEach((transition, index) => {
+    transition.from_asset_id = logicalAssetIds[index];
+    transition.to_asset_id = logicalAssetIds[index + 1];
+  });
+  const plan = buildKnowledgeVideoAssemblyPlan(input, {
+    verifySharedReuseEvidence: passingVerifier,
+    verifyStoryboardVisualRhythmEvidence: (value) => {
+      const evidence = passingStoryboardVisualRhythmVerifier(value);
+      evidence.artifact.shots[0].intra_shot_transition_plan =
+        value.shots[0].action_state_schedule.intra_shot_transitions.map((transition) => ({
+          from_asset_id: transition.from_asset_id,
+          to_asset_id: transition.to_asset_id,
+          kind: transition.kind,
+          user_selection: transition.user_selection,
+        }));
+      return evidence;
+    },
+  });
+  assert.deepEqual(
+    plan.scenes[0].image_sequence.map(({asset_id: assetId}) => assetId),
+    logicalAssetIds,
+  );
+  assert.deepEqual(
+    plan.scenes[0].action_state_schedule.occurrences.map(({state_id: stateId}) => stateId),
+    ['S01-a', 'S01-b', 'S01-c'],
+  );
+});
+
 test('hero_pose carries one locked background behind four transparent pose occurrences', () => {
   const input = buildV3Input();
   const template = input.shots[0].assets[0];
@@ -1643,6 +1815,28 @@ test('hero_pose carries one locked background behind four transparent pose occur
   const plan = buildKnowledgeVideoAssemblyPlan(input, {verifySharedReuseEvidence: passingVerifier});
   assert.equal(plan.scenes[0].hero_pose_background.asset_id, 'S01-bg');
   assert.equal(plan.scenes[0].image_sequence.length, 4);
+
+  input.shots[0].subject_entrance = {
+    contract_version: 'narrative-subject-entrance-v1',
+    subject_asset_id: 'pose-1',
+    at_frame: 0,
+    duration_in_frames: 12,
+    translate_x_px: -160,
+    translate_y_px: 18,
+    initial_scale: 0.97,
+    initial_opacity: 0,
+    easing: 'ease-out-cubic',
+    settled_state: 'exact-approved-source-pixels-v1',
+  };
+  const entrancePlan = buildKnowledgeVideoAssemblyPlan(input, {verifySharedReuseEvidence: passingVerifier});
+  assert.deepEqual(entrancePlan.scenes[0].subject_entrance, input.shots[0].subject_entrance);
+
+  input.shots[0].subject_entrance.subject_asset_id = 'pose-2';
+  assert.throws(
+    () => buildKnowledgeVideoAssemblyPlan(input, {verifySharedReuseEvidence: passingVerifier}),
+    /first approved hero-pose subject/i,
+  );
+  delete input.shots[0].subject_entrance;
 
   delete input.shots[0].hero_pose_background;
   assert.throws(

@@ -1,4 +1,4 @@
 interface:
   display_name: "Run Knowledge Video"
   short_description: "Run density-aware workflows with v3 visual and semantic transitions"
-  default_prompt: "Use $run-knowledge-video to require explicit density then approval mode after Gate 2, preserve all manual gates, or apply one-click preauthorization without fabricating review; require concise visible-text candidates and one whole-map visible-text approval in both modes, use v2 rhythm/v4 schedules with exact density hashes and rich bounds, stop for final exact visual-list approval, require the final caption-delivery choice before protected Remotion actions, and preserve parent density/count/order/hashes in revoice."
+  default_prompt: "Use $run-knowledge-video to collect style, conditional scope, density, approval mode, and narration source in one atomic post-cover selection batch; preserve every later human gate, exact hash binding, final visual-list approval, caption-delivery choice, and revoice visual lock."

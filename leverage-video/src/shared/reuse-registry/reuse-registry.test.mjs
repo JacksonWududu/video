@@ -92,6 +92,9 @@ test('registers v3 action, visual rhythm, generic intra-shot transitions, routin
   assert.equal(ianEntryEffects?.required_for_new_episode_script, true);
   const visibleTextReview = registry.modules.find((module) => module.module_id === 'visible-text-review');
   assert.equal(visibleTextReview?.path, 'leverage-video/src/shared/visible-text-review');
+  const userGateOverride = registry.modules.find((module) => module.module_id === 'user-gate-override');
+  assert.equal(userGateOverride?.path, 'leverage-video/src/shared/user-gate-override');
+  assert.match(userGateOverride?.use_when ?? '', /one-time.*mechanical gate override/i);
 });
 
 test('requires one explicit decision for every registered shared module', () => {
